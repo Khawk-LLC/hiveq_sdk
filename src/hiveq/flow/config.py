@@ -10,7 +10,7 @@ from enum import Enum
 # there once and every run finds it, from any working directory.
 #
 #   HIVEQ_API_KEY=...
-#   HIVEQ_BASE_URL=http://localhost:5010     # optional (platform task API)
+#   HIVEQ_BASE_URL=http://localhost:5010     # optional (orchestrator)
 #   HIVEQ_DATA_URL=http://localhost:80        # optional (runs gateway)
 #
 # We load HIVEQ_* keys from that file WITHOUT overriding the environment (env
@@ -487,15 +487,15 @@ class BacktestConfig:
     # Export orders CSV to ~/.tmp/<run_id>_orders.csv after backtest
     export_orders_csv: bool = False
 
-    # Futures auto-rollover: auto-roll positions when continuous contracts roll.
-    # When True, the platform fetches the continuous-contract definitions, builds
-    # the roll schedule, and rolls open positions on each roll (firing on_rollover).
+    # Futures auto-rollover: auto-roll positions when continuous contracts roll
+    # When True, injects filter_mode='continuous' into futures data_configs
+    # and sets enableFuturesRollover=True in strategy params automatically
     enable_auto_rollover: bool = False
 
     # Transaction Cost Analysis
     enable_tca: bool = False  # Run TCA analysis on fills/orders after backtest
 
-    # Payload ID for tracking code versions (set by the platform executor)
+    # Payload ID for tracking code versions (set by orchestrator executor)
     payload_id: Optional[str] = None
 
     # Run ID for correlating all published data (Python + C++) under one key

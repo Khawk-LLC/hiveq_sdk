@@ -39,7 +39,6 @@ DEFAULT_SDK_ROOT = os.path.normpath(os.path.join(HERE, ".."))
 
 # 1. Copied verbatim (engine-free; lazy/in-method engine imports never fire here).
 VERBATIM_FILES = [
-    "jobs.py",          # orchestrator deploy/observe wrapper (re-exports)
     "runs.py",          # Run handle / observe (REST) + live progress bar
     "config.py",        # StrategyConfig/BacktestConfig/EngineConfig + enums (DTOs)
     "context.py",       # Context (authoring placeholder, raises on construct)
@@ -85,6 +84,7 @@ STUB_FILES = [
 # 3. Hand-authored thin files — never overwritten.
 PROTECTED = {
     "__init__.py",                  # thin deploy/observe API + authoring re-exports
+    "jobs.py",                      # thin REST deploy/observe wrapper over _client
     "uploads.py",                   # hiveq-data CLI / upload_files — SDK-only (the
                                     # full hiveq-flow package no longer ships it)
     "deploy_task.py",               # thin capture+submit (run() stubbed)
