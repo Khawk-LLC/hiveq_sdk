@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hiveq-sdk"
+version = "0.3.4"
+description = "Thin HiveQ Flow client SDK — author strategies and deploy backtests to the HiveQ platform. Ships type stubs + the deploy/observe client only (no engine)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "HiveQ" }]
+
+# Thin client deps only — no engine, no polars/quantstats/hiveq_data.
+dependencies = [
+    "pandas==2.3.3",
+    "colorlog==6.9.0",
+    "requests>=2.25.0",
+    "cloudpickle>=2.0.0",
+    "tqdm>=4.0.0",
+    # Deploy/observe transport (capture -> cloudpickle -> REST submit). Brings
+    # requests/cloudpickle/otel; no sigma/engine.
+    "hiveq-orchestrator>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "mypy", "build", "twine"]
+
+# Console entry points. `hiveq-data` uploads/lists files on the platform data
+# store over REST (same code as hf.upload_files / hf.list_files); -u to upload
+# (incremental, with a live progress bar), -l to list.
+[project.scripts]
+hiveq-data = "hiveq.flow.uploads:main"
+
+# This distribution (`hiveq-sdk`) PROVIDES the `hiveq.flow` import namespace. It
+# must NOT be co-installed with the full `hiveq-flow` package (same namespace) —
+# use separate environments. Clients install this; the platform executor installs
+# the full engine package.
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
+"hiveq" = ["py.typed"]
+"hiveq.flow" = ["**/*.pyi"]
+
+[tool.setuptools]
+include-package-data = true
