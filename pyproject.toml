@@ -12,15 +12,14 @@ license = { text = "Proprietary" }
 authors = [{ name = "HiveQ" }]
 
 # Thin client deps only — no engine, no polars/quantstats/hiveq_data.
+# Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
+# built on requests + cloudpickle below; no platform-internal client package.
 dependencies = [
     "pandas==2.3.3",
     "colorlog==6.9.0",
     "requests>=2.25.0",
     "cloudpickle>=2.0.0",
     "tqdm>=4.0.0",
-    # Deploy/observe transport (capture -> cloudpickle -> REST submit). Brings
-    # requests/cloudpickle/otel; no sigma/engine.
-    "hiveq-orchestrator>=0.1.0",
 ]
 
 [project.optional-dependencies]

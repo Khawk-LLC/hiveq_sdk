@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
-"""Thin SDK end-to-end example: author a strategy, deploy it, get results back.
+"""End-to-end example: author a strategy, deploy it, get results back.
 
-Flow:
-    this script (thin hiveq-flow-sdk)  -->  capture + cloudpickle strategy
-        -->  submit to local orchestrator (:5010)
-            -->  executor runs it on the FULL hiveq-flow engine
-                -->  results returned over REST (:80)
+Flow: this script captures your strategy (cloudpickle) and submits it to the
+HiveQ platform; the platform runs it and returns results over REST. You get a
+``Run`` handle back — read results with ``run.report()`` / ``run.status()``.
 
 Prerequisites
 -------------
-1. Local platform up:  orchestrator :5010, data gateway :80, auth :3001.
-2. Thin SDK installed:  pip install hiveq-flow-sdk
-3. API key on file:     echo 'HIVEQ_API_KEY=...' > ~/.hiveq/.env   (or export HIVEQ_API_KEY)
+1. Install the SDK:   pip install hiveq-sdk
+2. Set your API key:  export HIVEQ_API_KEY=...   (the only required credential)
 
 Run:
     python deploy_buy_and_hold.py
 """
-import os
 
-# Credentials are picked up automatically from ~/.hiveq/.env (HIVEQ_API_KEY=...),
-# or the environment. Nothing to set here.
+# Credentials are read from the HIVEQ_API_KEY environment variable. Nothing else
+# to set here — the platform resolves your user/org from the key.
 
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
@@ -72,3 +68,4 @@ if __name__ == "__main__":
     rs = getattr(report, "return_stats", None)
     if rs is not None and not rs.empty:
         print("\nreturn stats:\n", rs.to_string())
+

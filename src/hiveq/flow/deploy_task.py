@@ -1,8 +1,9 @@
-"""Deploy: capture the user's strategy code and push it to the orchestrator.
+"""Deploy: capture the user's strategy code and submit it to the HiveQ platform.
 
 This is the *client* half of deployment. It captures the user-defined strategy
 classes/functions (cloudpickle) plus any local module sources, packs them into a
-``HiveQFlowBackTestTask``, and submits that to the HiveQ orchestrator's REST API.
+``HiveQFlowBackTestTask``, and submits that to the HiveQ platform's task REST API
+(see :mod:`hiveq.flow._client`).
 
 The task is cloudpickled **by reference** (``hiveq.flow.deploy_task.
 HiveQFlowBackTestTask``), so the executor — which has the full ``hiveq-flow`` and
@@ -23,19 +24,10 @@ from abc import ABC
 from typing import Optional, Dict, Any, List
 
 import cloudpickle
-
+from hiveq.flow import _client
 from hiveq.flow.logger import logger
-logger = logger(show_logo=False)
 
-# Optional import for orchestrator client
-try:
-    import hiveq_orchestrator as orchestrator
-    from hiveq_orchestrator import TaskType
-    ORCHESTRATOR_AVAILABLE = True
-except ImportError:
-    ORCHESTRATOR_AVAILABLE = False
-    orchestrator = None
-    TaskType = None
+logger = logger(show_logo=False)
 
 
 def _runs_on_executor(self) -> Dict[str, Any]:
@@ -115,7 +107,7 @@ class HiveQFlowBackTestTask(HiveQDeployTask):
 
 
 class DeploymentHelper:
-    """Capture user code and submit tasks to the orchestrator (REST)."""
+    """Capture user code and submit tasks to the HiveQ platform (REST)."""
 
     @staticmethod
     def _sanitize_for_pickle(obj):
@@ -169,7 +161,6 @@ class DeploymentHelper:
 
         Returns ``(local_modules, pickled_objects)``.
         """
-        from hiveq.flow.config import StrategyConfig
         strategy_types = {cfg.type for cfg in strategy_configs}
         local_modules = {}
         pickled_objects = {}
@@ -265,7 +256,7 @@ class DeploymentHelper:
         return local_modules
 
     @staticmethod
-    def submit_to_orchestrator(
+    def submit(
             task,
             task_type,
             task_name: str,
@@ -276,18 +267,10 @@ class DeploymentHelper:
             duplicate_action: str = 'override',
             run_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Submit a captured task to the orchestrator REST API.
+        """Submit a captured task to the HiveQ platform task REST API.
 
         Returns a dict with status / message / task_id / payload_id.
         """
-        if not ORCHESTRATOR_AVAILABLE:
-            return {
-                'status': 'error',
-                'message': 'hiveq_orchestrator package is not installed. Install it with: pip install hiveq-orchestrator',
-                'task_id': None,
-                'payload_id': None
-            }
-
         try:
             # The thin client sends ONLY the API key. The REST server authorizes
             # the key and derives identity (user_id / org_id / user_name) from it,
@@ -295,9 +278,9 @@ class DeploymentHelper:
             # dev's local env from overriding the server-resolved identity.
             from hiveq.flow import config as flow_config
             cfg = flow_config()
-            orchestrator.configure(api_key=cfg.hiveq_api_key)
+            _client.configure(api_key=cfg.hiveq_api_key)
 
-            result = orchestrator.submit(
+            result = _client.submit(
                 task_type=task_type,
                 task_name=task_name,
                 task=task,
@@ -311,7 +294,6 @@ class DeploymentHelper:
 
             task_id = result.get('task_id')
             payload_id = result.get('payload_id')
-
 
             logger.info(f"Task deployed successfully: task_id={task_id}, payload_id={payload_id}, name={task_name}")
 

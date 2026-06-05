@@ -8,7 +8,8 @@ REST endpoints so the SDK "feels like" the API:
     run.report()                      # GET /runs/{id}/report  -> PerformanceReport
     run.positions(); run.orders(); run.trades()
     run.daily_returns(); run.equity_curve(); run.metrics(); run.summary()
-    run.status(); run.event_logs(); run.wait()
+    run.stat
+    us(); run.event_logs(); run.wait()
 
 Tabular resources come back as pandas DataFrames; scalar ones as dicts.
 """
@@ -86,7 +87,8 @@ class _ProgressPrinter:
         self._t0 = time.monotonic()
 
     def _desc(self) -> str:
-        # bold-cyan label, then dim run/task ids + the backtest window
+        # bold-cyan label, then dim run/task ids + the backtest window, each
+        # separated by a dim "│" (same separator used between line groups).
         parts = [self._c("backtest", "1;36")]
         if self.run_id:
             parts.append(self._c(f"run {self.run_id}", "2"))
@@ -94,7 +96,7 @@ class _ProgressPrinter:
             parts.append(self._c(f"task {self.task_id}", "2"))
         if self.start_date or self.end_date:
             parts.append(self._c(f"{self.start_date or '?'}→{self.end_date or '?'}", "2"))
-        return " ".join(parts)
+        return self._c(" │ ", "2").join(parts)
 
     @staticmethod
     def _fmt_elapsed(seconds: float) -> str:
@@ -228,7 +230,7 @@ class Run:
         """Return the run's ``PerformanceReport``.
 
         Local runs return the in-process report. Remote runs prefer the runs
-        REST API and fall back to the orchestrator task-result snapshot when the
+        REST API and fall back to the platform task-result snapshot when the
         REST API has no rows yet (a deployed run whose sandbox hiveq-flow
         predates the run_id->payload_id unification).
         """
@@ -241,7 +243,7 @@ class Run:
         try:
             payload = self._reader.report(self.run_id, include=include) or {}
         except Exception as e:
-            logger.debug(f"runs REST report failed, will try orchestrator: {e}")
+            logger.debug(f"runs REST report failed, will try platform task result: {e}")
 
         has_rest_data = bool(
             payload.get("summary")
@@ -254,7 +256,7 @@ class Run:
 
                 return PerformanceReport.from_task_result(jobs.get_result(self.task_id))
             except Exception as e:
-                logger.debug(f"orchestrator result fallback failed: {e}")
+                logger.debug(f"platform task-result fallback failed: {e}")
 
         return PerformanceReport.from_rest(payload)
 
@@ -294,13 +296,43 @@ class Run:
             return pd.DataFrame()
         return pd.DataFrame(self._reader.event_logs(self.run_id, **kw) or [])
 
+    def logs(self) -> List[str]:
+        """The COMPLETE remote executor log for this run, as a list of lines.
+
+        These are the executor's stdout / strategy-callback output — including
+        crashes like ``STRATEGY_CALLBACK_ERROR`` — which are NOT in the runs REST
+        API's ``event-logs``. They live only on the platform ``GET /logs`` endpoint
+        (keyed by ``task_id``; run_id != task_id). Fetched as the full gzipped log
+        (``format=gz``) over direct REST and decompressed — the whole log, not a
+        tail, so errors anywhere in the run are captured. Use :meth:`download_logs`
+        to stream a very large log straight to a file instead.
+        """
+        if not self.task_id:
+            return []
+        from hiveq.flow import jobs
+
+        text = jobs.get_logs_gz(task_id=self.task_id)
+        return text.splitlines() if text else []
+
+    def download_logs(self, path: str) -> str:
+        """Stream the full gzipped executor log to ``path`` (a ``.gz`` file).
+
+        For huge logs — never decompresses in memory. Returns ``path``. Keyed by
+        ``task_id`` via ``GET /logs?format=gz`` (direct REST).
+        """
+        if not self.task_id:
+            raise ValueError("this run has no task_id; cannot fetch logs")
+        from hiveq.flow import jobs
+
+        return jobs.get_logs_gz(task_id=self.task_id, dest=path)
+
     # --- lifecycle ----------------------------------------------------------
     def check_credentials(self) -> "Run":
         """Fail fast if the platform rejects our credentials for this run.
 
         The runs ``/status`` endpoint swallows auth errors (returns PENDING), so
-        a bad key would otherwise hang ``wait()`` until timeout. The orchestrator
-        read returns a real 401/403, so we probe it once and raise immediately
+        a bad key would otherwise hang ``wait()`` until timeout. The platform
+        task read returns a real 401/403, so we probe it once and raise immediately
         on an auth error. Transient/other errors are ignored (wait() handles
         them). No-op for local runs or when there's no task to read.
         """
@@ -352,7 +384,7 @@ class Run:
         # Throttle the runs-gateway /status polling: the progress line only
         # refreshes every few seconds, and hammering it every poll_interval trips
         # the gateway's per-user rate limiter (429). Terminal detection stays
-        # responsive via the cheap orchestrator check below.
+        # responsive via the cheap platform task check below.
         status_every = max(poll_interval, 5.0)
         last_status_poll = 0.0
         # Don't poll forever if the platform becomes unreachable: once every
@@ -379,7 +411,7 @@ class Run:
             if printer:
                 printer.update(last)
 
-            # Completion is authoritative from the orchestrator task lifecycle,
+            # Completion is authoritative from the platform task lifecycle,
             # which works regardless of the runs REST data being present yet.
             orch_status = None
             if self.task_id:
@@ -392,7 +424,7 @@ class Run:
                     orch_status = (jobs.get_result(self.task_id) or {}).get("status")
                     succeeded = True
                 except Exception as e:
-                    logger.debug(f"orchestrator status poll failed: {e}")
+                    logger.debug(f"platform task status poll failed: {e}")
 
             if (
                 last.get("is_final")

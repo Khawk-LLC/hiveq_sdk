@@ -229,11 +229,11 @@ class PerformanceReport:
 
     @classmethod
     def from_task_result(cls, payload: dict) -> "PerformanceReport":
-        """Build a report from the orchestrator task result snapshot.
+        """Build a report from the platform task result snapshot.
 
         Fallback for deployed runs when the runs REST API has no per-resource
         rows yet (e.g. the executor sandbox runs a hiveq-flow without the
-        run_id->payload_id unification). The orchestrator's task result still
+        run_id->payload_id unification). The platform's task result still
         carries the computed summary/return/pnl stats and scalar PnLs.
         """
         payload = payload or {}

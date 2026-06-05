@@ -132,17 +132,22 @@ def logger(show_logo: bool = True) -> logging.Logger:
             for line in logo_lines:
                 hiveq_logger.info(line)
 
-            # Add version information after the logo. The package may be installed
-            # as the full "hiveq-flow" or the thin "hiveq-flow-sdk" — try both.
+            # Version of whichever distribution provides this package. Name only
+            # the engine ("hiveq-flow"); any thin client that reuses this logger is
+            # resolved generically via the shared `hiveq` namespace, so no client
+            # package name is hard-coded here.
             flow_version = None
             try:
-                from importlib.metadata import version, PackageNotFoundError
-                for _dist in ("hiveq-flow", "hiveq-flow-sdk"):
-                    try:
-                        flow_version = version(_dist)
-                        break
-                    except PackageNotFoundError:
-                        continue
+                from importlib.metadata import version, PackageNotFoundError, packages_distributions
+                try:
+                    flow_version = version("hiveq-flow")
+                except PackageNotFoundError:
+                    for _dist in packages_distributions().get("hiveq", []):
+                        try:
+                            flow_version = version(_dist)
+                            break
+                        except PackageNotFoundError:
+                            continue
             except Exception:
                 pass
             hiveq_logger.info(f"         HiveQ Flow v{flow_version or '0.1.0'}               ")

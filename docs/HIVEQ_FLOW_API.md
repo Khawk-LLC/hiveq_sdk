@@ -1,0 +1,842 @@
+<!--
+CANONICAL MACHINE-READABLE API SPEC FOR HIVEQ FLOW.
+This file supersedes docs/prompts/hiveq_flow_api_prompt.md and docs/context7/llms-full.txt.
+Audience: code-generation agents AND human developers.
+Every signature, type, enum value, and dict key below is verified against source.
+If you are unsure of a value, use the documented dataset/schema codes in §9 rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
+-->
+
+# HiveQ Flow — Canonical API Specification
+
+- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.2`
+- **python**: `>=3.11`
+- **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
+- **how to read this**: this is a reference spec, not a tutorial. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped.
+
+---
+
+## 0. Hard rules / invariants (read first)
+
+```
+R1  A strategy is a Python class with PER-EVENT CALLBACK methods — on_start, on_bar, on_order,
+    on_position, on_timer, ... (full list §4). This is the canonical/DEFAULT contract; prefer it.
+    There is NO on_order_filled callback — fills arrive in on_order (see §4/§7.0).
+    (A single global on_hiveq_event(self, ctx, event) dispatch is also supported but is NOT the
+    default — use it only when you specifically want one method that branches on event.type. §4.)
+R2  StrategyConfig.type is the STRATEGY CLASS NAME AS A STRING. It must exactly match the class name.
+R3  ctx.subscribe_*() only RECORDS a subscription request; the engine applies it. Put subscription
+    calls in the START handler so they are registered before data flows (and so day-by-day
+    execution can discover your symbol universe). They are not bound to START by the
+    engine, but START is the correct, supported place.  [Older docs over-stated this as "or no data" — that is wrong.]
+R4  event.data() returns a DIFFERENT type per event.type. See the EventType→payload map in §7.0.
+R5  Timestamps on payloads: ts_event / ts_init are int NANOSECONDS. Use .time (configured tz) or
+    .time_utc (UTC) for datetime. ctx.now() is configured-tz datetime; ctx.now_utc() is UTC.
+R6  session_start / session_end are ET (America/New_York) wall-clock "HH:MM" strings, always.
+R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, open short with short_order.
+R8  Credentials come from environment variables (§3). Never hard-code them.
+R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
+    across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
+```
+
+---
+
+## 1. Minimal working example (canonical)
+
+```python
+import hiveq.flow as hf
+from hiveq.flow import StrategyConfig
+from hiveq.flow.config import AssetType
+
+class BuyAndHold:
+    def __init__(self):
+        self.bought = False
+
+    # PER-EVENT CALLBACKS (default contract). One focused method per event type.
+    def on_start(self, ctx: hf.Context, event):
+        ctx.subscribe_bars(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY, interval='1m')
+
+    def on_bar(self, ctx, event):
+        bar = event.data()                           # -> SigmaBar (§7.1)
+        if not self.bought and ctx.is_flat(bar.symbol):
+            ctx.buy_order(bar.symbol, quantity=100)
+            self.bought = True
+
+    def on_order(self, ctx, event):                  # NOT on_order_filled — fills come here
+        order = event.data()                         # -> SigmaOrder (§7.3)
+        if order.is_filled:
+            fill = order.last_fill                   # -> SigmaFill (§7.4)
+
+# run_backtest returns a Run HANDLE (§10.0), not a PerformanceReport directly.
+run = hf.run_backtest(
+    strategy_configs=[StrategyConfig(name='BuyAndHold', type='BuyAndHold')],
+    symbols=['AAPL'],
+    start_date='2025-08-01',
+    end_date='2025-08-02',
+    data_configs=[{'type': 'hiveq_historical', 'dataset': 'HIVEQ_US_EQ', 'schema': ['bars_1m']}],
+)
+report = run.report()                                # -> PerformanceReport (§10.1)
+print(report.return_stats.to_string())
+```
+
+---
+
+## 2. Entry points  (module: `hiveq.flow`)
+
+```python
+run_backtest(
+    strategy_configs: list[StrategyConfig],
+    symbols: Optional[list[str]] = None,
+    start_date: Optional[str] = None,          # 'YYYY-MM-DD'
+    end_date: Optional[str] = None,            # 'YYYY-MM-DD'
+    data_configs: Optional[list[dict]] = None, # §9
+    backtest_config: Optional[BacktestConfig] = None,
+    *,                                          # keyword-only below
+    silent: bool = False,                       # True -> deploy + return Run immediately (no blocking)
+    task_name: Optional[str] = None,
+    allow_duplicate: bool = True,
+    duplicate_action: str = 'override',
+    timeout: Optional[float] = None,
+    poll_interval: float = 1.0,
+    **kwargs,                                   # e.g. config={'hiveq_log_level':'DEBUG'}, engine_config=EngineConfig(...) (§13)
+) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
+#   silent=False (default): deploy to platform, block w/ live progress, return the finished Run.
+#   silent=True           : deploy and return the Run immediately (run.run_id / run.task_id).
+#   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
+#   DEBUG: pass config={'hiveq_log_level': 'DEBUG'} for verbose executor logs, then read the full
+#         executor log (incl. tracebacks) with run.logs() (§10.0). Levels: DEBUG/INFO/WARNING/ERROR.
+
+get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
+
+event_logs() -> pandas.DataFrame                # logs of the LAST run_backtest, fetched over REST (§10.2)
+config() -> EngineConfig                        # the module EngineConfig (timezone + params)
+```
+
+**Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
+
+---
+
+## 3. Environment / credentials
+
+Auto-initialized on first API call. **`HIVEQ_API_KEY` is the only required variable** — user id, org id, and user name are resolved from the auth service using the key. The rest are optional overrides:
+
+| Var | Required | Meaning |
+|---|---|---|
+| `HIVEQ_API_KEY` | **yes** | API key — the only credential you must set |
+| `HIVEQ_BASE_URL` | no | Platform/orchestrator base URL override (also read by the data + jobs clients); defaults to the canonical host |
+| `HIVEQ_USER_ID` | no | User id — auto-resolved from the API key if unset |
+| `HIVEQ_ORG_ID` | no | Org id — auto-resolved from the API key if unset |
+| `HIVEQ_USER_NAME` | no | User name — auto-resolved from the API key if unset |
+
+---
+
+## 4. Strategy contract
+
+**Canonical / default: per-event callback methods.** Define only the handlers you need; each has the signature `(self, ctx, event)`. Branch-free, one focused method per event type.
+
+```python
+class MyStrategy:
+    def __init__(self): ...                       # per-strategy state lives here
+    def on_start(self, ctx, event): ...           # subscribe here (R3)
+    def on_bar(self, ctx, event): ...             # event.data() -> SigmaBar (§7.1)
+    def on_order(self, ctx, event): ...           # fills/rejects/cancels -> SigmaOrder (§7.3)
+    def on_position(self, ctx, event): ...        # event.data() -> SigmaPosition (§7.2)
+    def on_stop(self, ctx, event): ...            # see note — NO orders here
+```
+
+- Register with `StrategyConfig(name='X', type='MyStrategy')` (R2).
+- **Full set of recognized callbacks** (define any subset; unknown names are ignored):
+
+| callback | fires on EventType(s) | event.data() |
+|---|---|---|
+| `on_start` | `START` | — |
+| `on_stop` | `STOP` | — |
+| `on_bar` | `BAR` | `SigmaBar` (§7.1) |
+| `on_trade` | `TRADE` | `SigmaTradeTick` (§7.5) |
+| `on_quote` | `QUOTE` | `SigmaQuoteTick` (§7.6) |
+| `on_snap` | `SNAP` | `SigmaSnapData` (§7.7) |
+| `on_order` | `ORDER`, `ORDER_SUBMITTED/ACCEPTED/REJECTED/FILLED/CANCELED` | `SigmaOrder` (§7.3) |
+| `on_position` | `POSITION`, `POSITION_OPENED/CHANGED/CLOSED` | `SigmaPosition` (§7.2) |
+| `on_timer` | `TIMER` | `TimerEventData` (§7.8) |
+| `on_custom_data` | `CUSTOM_DATA` | `SigmaCustomData` (§7.9) |
+| `on_index_price` (alias `on_index`) | `INDEX_PRICE` | `IndexPrice` (§7.11) |
+| `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
+| `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
+| `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
+
+- **There is NO `on_order_filled`.** Fills are delivered to **`on_order`**; check `order.is_filled` / `order.status` / `order.last_fill`.
+- **`on_stop` / `EventType.STOP`**: fires after the engine has STOPPED. Do **not** place orders in STOP — they are rejected.
+- **Global single-dispatch (opt-in, NOT default):** if you specifically want one method, branch on `event.type` (EventType → payload map in §7.0) in a single `on_hiveq_event`. Two equivalent forms: (a) a **class** with `on_hiveq_event(self, ctx, event)` deployed via `StrategyConfig(name=..., type='YourClass')`; or (b) a **module-level** `def on_hiveq_event(ctx, event):` deployed with `run_backtest(strategy_configs=[], ...)` — the engine auto-discovers the captured function. (Empty `strategy_configs` is accepted *only* for this global form; otherwise it errors.) Use this only on explicit request — per-event callbacks are the default.
+
+---
+
+## 5. Context API — `ctx` (runtime type: `SigmaContext`)
+
+`hf.Context` is a public type-alias for hints; the engine passes a `SigmaContext`.
+
+### 5.1 Subscriptions  (call in START; return `None`)
+```python
+ctx.subscribe_bars(symbols: List[str], asset_type: AssetType = None, interval: str = "1m")
+ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = None)
+ctx.subscribe_trade_ticks(symbols: List[str], asset_type: AssetType)      # trades; with the `tbbo` schema, quotes arrive too (on_quote)
+ctx.subscribe_data(data_id: str, signals: List[str] = None)               # custom / signal data
+ctx.subscribe_index(symbols: List[str])                                   # spot index value
+ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
+ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C'|'P'|'CALL'|'PUT'
+                           strike: Optional[float] = None,
+                           expiration_type: Optional[str] = None,         # '0dte' | 'YYYY-MM-DD'
+                           underlying: Optional[str] = None, interval: str = "1s")
+# Futures: subscribe by SYMBOL STRING in `symbols=` (the clear, single way):
+ctx.subscribe_futures_bars(symbols=["ES.c.0"], interval="1m")
+ctx.subscribe_futures_trade_ticks(symbols=["ES.c.0"])
+#   The futures symbol string encodes the contract:
+#     "ES.c.0" — continuous, calendar/front-month roll, front (rank 0)
+#     "ES.v.0" — continuous, volume roll, front
+#     "ES.H25" — a specific dated contract (root + month code)
+#   For continuous-contract ROLLOVER, set BacktestConfig(enable_auto_rollover=True)
+#   and handle on_rollover (§7.12) — nothing extra in data_configs.
+```
+
+### 5.2 Order placement  (return `Optional[SigmaOrder]`; §7.3)
+```python
+ctx.buy_order(symbol: str, quantity: float, order_type: OrderType = None,
+              limit_price: float = None, stop_price: float = None, time_in_force: str = None,
+              market_center: str = None)
+ctx.sell_order(symbol, quantity, order_type=None, limit_price=None, stop_price=None,
+               time_in_force=None, market_center=None)
+ctx.short_order(symbol, quantity, order_type=None, limit_price=None, stop_price=None,
+                time_in_force=None, market_center=None)
+ctx.place_order(symbol: str, side: OrderSide, quantity: float, order_type: OrderType,
+                limit_price: Optional[float] = None, stop_price: Optional[float] = None,
+                market_center: str = None)
+
+# Convenience helpers (size/flatten off the current net position):
+ctx.close_position(symbol: str, order_type: OrderType = None) -> Optional[SigmaOrder]
+ctx.order_to_target(symbol: str, target_quantity: float,
+                    order_type: OrderType = None, limit_price: float = None) -> Optional[SigmaOrder]
+ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
+```
+- `order_type` default = `OrderType.MARKET`.
+- **Auto time-in-force** when `time_in_force=None`: `MOO/LOO → "OPG"`; `MOC/LOC → "DAY"`; `MARKET → "DAY"`; else (LIMIT/STOP) → `"GTC"`.
+- **`LOO` and `LOC` require `limit_price`** (the engine rejects them otherwise). `MOO`/`MOC` ignore price. `STOP` needs `stop_price`; `STOP_LIMIT` needs both.
+- **`market_center`** (opt): venue routing — `"NYSE"`/`"NASDAQ"`/`"ARCA"`/… or a MIC alias (`"XNYS"`/`"XNAS"`/…). Mainly for auction orders (§5.2.1); auction orders default to `"NASDAQ"` when omitted.
+- **`close_position`** flattens the net position in one offsetting order (no-op if flat); **`order_to_target`** trades the delta to reach a signed target; **`flatten_all`** closes every open position in the strategy. These wrap `net_position` + `buy_order`/`sell_order` — see §16.1.
+- **Transactional / idempotent:** all three **skip (return `None`) if a working order already exists for the symbol** (`has_open_order`). `net_position` reflects only *filled* quantity, so re-issuing while an order is in flight would double-trade — the guard prevents that. Safe to call every bar: they converge one fill at a time. To replace a resting order, `cancel_all_orders(symbol)` first.
+
+> **⚠️ Tick-size rounding — round your OWN `limit_price`/`stop_price` to the instrument tick.** Exchanges reject prices that aren't on the instrument's tick grid (e.g. a computed `123.4567` on a `0.01` grid). When you place orders yourself with an explicit price, round it with `adjust_tick_size`:
+> ```python
+> from hiveq.flow.trading.price_utils import adjust_tick_size
+> px = adjust_tick_size(symbol, raw_price)        # rounds to the instrument's minTick
+> ctx.buy_order(symbol, qty, order_type=OrderType.LIMIT, limit_price=px)
+> ```
+> **Executors (§5.10) round to the tick internally — do NOT call this for executor-worked orders.** `adjust_tick_size(symbol, price)` returns the price unchanged if the tick can't be resolved; `get_min_tick(symbol)` returns the tick (or `None`). Both are in `hiveq.flow.trading.price_utils`.
+
+### 5.2.1 Auction order types & exchange cutoff rules (MOO / MOC / LOO / LOC)
+
+Auction orders participate in an exchange's opening or closing cross/auction, not the continuous book. Pass them via `order_type=OrderType.MOO|MOC|LOO|LOC` (LOO/LOC also need `limit_price`). Each exchange enforces its own **entry cutoff** (latest time an order is accepted) and **cancel/modify cutoff** (after which the order is locked). These differ by venue.
+
+> ⚠️ **Two requirements for auction orders to fill in a backtest:**
+> 1. **Trade-print data.** Auction orders cross against the official open/close prints (`MCOfficialOpen` / `MCOfficialClose`), which live only in tick-level **trade** data. Subscribe with `ctx.subscribe_trade_ticks(...)` and use schema **`eq_trades`** (equities) or **`fut_trades`** (futures). Minute/second **bars** (`bars_*`) and **quotes** (`tbbo`) carry **no auction print** — auction orders on those never fill (§9.1).
+> 2. **Primary listing exchange.** The cross happens at the symbol's primary venue. When `market_center` is **omitted, auction orders default to NASDAQ** — correct for NASDAQ-listed names (e.g. AAPL), so omitting it is the portable choice. Pass `market_center=` (e.g. `'NYSE'`) only to override routing. ⚠️ Explicit `market_center` on a *direct* `buy_order`/`sell_order` requires a recent engine — older deployed executors raise `TypeError: ... unexpected keyword argument 'market_center'`; if you hit that, omit it (or route via the `AUCTION` executor, which has always accepted `market_center`).
+
+**Two ways to send an auction order:**
+
+1. **Direct order** — `ctx.buy_order(sym, qty, order_type=OrderType.MOC, market_center='NYSE')` (or `MOO`/`LOO`/`LOC`; `LOO`/`LOC` need `limit_price`). Pass `market_center` to route to a venue; when omitted, auction orders default to **NASDAQ**. The backtest applies a single global cutoff pair — **open `09:28` ET / close `15:55` ET** (`MarketSessionDefaults`), which match Nasdaq's MOO/MOC entry cutoffs. ⚠️ Per-venue cutoff enforcement (NYSE's earlier `15:50` vs Nasdaq) is not yet keyed off `market_center` in the backtest fill model — routing is honored but model to the Nasdaq close (`15:55`) / be conservative (submit before `15:50`) until that lands (`docs/ENGINE_GAPS_PLAN.md` G9 #3).
+
+2. **Auction executor** — the institutional path; build an `AUCTION` executor and let the OMS work it:
+```python
+def on_timer(self, ctx, event):                      # fire before the venue cutoff (§16.5)
+    params = ctx.build_executor_params(
+        symbol='AAPL', quantity=100, side='SELL',
+        executor_type='AUCTION', order_type='MOC',   # 'MOC' | 'MOO' | 'LOC' | 'LOO'
+        market_center='NYSE',                        # NYSE | NASDAQ | ARCA | … (+ MIC aliases: XNYS/XNAS/…)
+    )
+    ctx.add_executor(params)
+```
+The executor `market_center` map is comprehensive (full venue enum + MIC aliases) and the order-type map covers `MOC`/`MOO`/`LOC`/`LOO`/`LIMIT`/`MARKET`.
+
+**Official exchange cutoff reference (all times ET):**
+
+_Nasdaq — Opening Cross (9:30) / Closing Cross (16:00):_
+| order | entry cutoff | cancel/modify cutoff |
+|---|---|---|
+| MOO | **9:28** (rejected after) | 9:25 (locked for the cross after) |
+| LOO | **9:29:30** (after: IOC rejected; non-IOC re-typed to Imbalance-Only) | 9:25 |
+| MOC | **15:55** (rejected after) | 15:50 (locked after) |
+| LOC | **15:58** (rejected after) | 15:50 |
+
+_NYSE — Opening Auction (9:30) / Closing Auction (16:00):_
+| order | entry cutoff | cancel/modify cutoff |
+|---|---|---|
+| MOO | accepted until the DMM opens the security | **9:29** (cancel/replace rejected after) |
+| LOO | until the DMM opens the security | 9:29 |
+| MOC | **15:50** (after: only contra-side of a published Significant Imbalance, until 16:00) | **15:50** (no modify/cancel after; documented-error exception 15:50–15:58 per Rule 7.35B) |
+| LOC | **15:50** (same contra-side-only rule after) | 15:50 |
+
+Key takeaways for strategy code: submit MOC/LOC **before 15:50** to be venue-agnostic (NYSE's cutoff is earlier than Nasdaq's); submit MOO **before 09:28**; never rely on canceling an auction order in the final minutes — past the cancel cutoff it is locked. Use a timer + `ctx.now()` (§16.5) to place these ahead of the cutoff.
+
+### 5.3 Order management
+```python
+ctx.cancel_order(order_id: str) -> bool
+ctx.modify_order(order_id: str, quantity: float = None, limit_price: float = None, stop_price: float = None) -> bool
+ctx.cancel_all_orders(symbol: str = None) -> bool
+ctx.clear_pending_order(symbol: str) -> None
+ctx.get_order_state(order_id: str) -> Optional[OrderState]
+```
+
+### 5.4 Position / order queries
+```python
+ctx.net_position(symbol: str) -> float          # signed; + long, - short, 0 flat
+ctx.quantity(symbol: str) -> float              # alias of net_position
+ctx.is_flat(symbol: str = None) -> bool
+ctx.is_net_long(symbol: str) -> bool
+ctx.is_net_short(symbol: str) -> bool
+ctx.has_open_order(symbol: str = None) -> bool
+ctx.open_order_qty(symbol: str) -> float
+```
+
+### 5.5 Portfolio accessors
+```python
+ctx.portfolio() -> SigmaPortfolio               # strategy-scoped (§8)
+ctx.global_portfolio() -> SigmaGlobalPortfolio  # account-wide aggregate (§8)
+```
+
+### 5.6 Instrument
+```python
+ctx.instrument(symbol: str) -> SigmaInstrument  # §7.10
+```
+
+### 5.7 Time
+```python
+ctx.now() -> Optional[datetime]                 # configured tz
+ctx.now_utc() -> Optional[datetime]             # UTC
+ctx.trading_day -> Optional[str]                # 'YYYY-MM-DD' (property; tz-safe, prefer over deriving from ts_event)
+```
+
+### 5.8 Timers
+```python
+ctx.set_timer(timer_id: str, timer_interval)    # timer_interval: pandas.Timedelta or datetime.timedelta
+ctx.cancel_timer(timer_id: str)
+# Fires EventType.TIMER; event.data() -> TimerEventData (§7.8)
+```
+
+### 5.9 Event logging
+```python
+ctx.add_event_log(message: str, sub_event_type: Optional[str] = None,
+                  symbol: Optional[str] = None, state_variable: Optional[Dict[str, Any]] = None)
+#   logged with event_log_type = EventLogType.USER_LOG
+ctx.log_parameter_change(param_name: str, old_value, new_value, symbol: Optional[str] = None)
+```
+
+### 5.10 Executors — managed order working  (POV / TWAP / VWAP / AUCTION …)
+
+An executor is a server-side execution algo that owns the *entire* order lifecycle for a target — it slices the parent quantity into child orders, places them, **modifies/replaces and cancels** as the market moves, aggregates fills, and guarantees order-state consistency even when a downstream provider misbehaves (chasing/re-pricing, repeated replaces). It is well-tested and shared across strategies. You hand it a target (qty/side/type/limits) and it works toward it, keeping **one executor handle per target** instead of you re-sending orders every bar.
+
+**Use an executor when it fits the strategy — not always.** Reach for one when execution quality/reliability matters:
+- working a **sizeable order** that should be sliced (POV/TWAP/VWAP),
+- **live/livesim** trading where downstream fills are async and orders must be chased/replaced reliably,
+- routing to an **auction** with venue handling (§5.2.1),
+- any case where you'd otherwise hand-write replace/cancel/retry logic.
+
+For **simple cases — a single immediate market order, or a signal-style backtest** that just needs a position — plain `buy_order`/`sell_order` (or the §5.2 sizing helpers) are simpler and sufficient; an executor adds no value there. Don't wrap a one-shot market order in an executor.
+
+> ⚠️ **Executors require a tick-by-tick data stream — they do NOT work on bars.** POV/TWAP/VWAP/PASSIVE/AUCTION etc. slice and reprice against the live tick stream, so the strategy must subscribe to ticks — **prefer trades: `ctx.subscribe_trade_ticks(...)` with schema `eq_trades` (equities) / `fut_trades` (futures)**. (`ctx.subscribe_quotes(...)` with the `tbbo` schema also drives executors, but tbbo tick coverage is limited — default to `eq_trades`/`fut_trades`.) **Not** `bars_1m`/`bars_*` (§9.1) — subscribing only to bars and starting an executor will not work.
+
+```python
+ctx.build_executor_params(symbol: str, quantity: int, side: str, executor_type: str,
+    start_time=None, end_time=None, min_order_size: int = 1, max_order_size: int = 100,
+    refresh_millis: int = 100, participate_pct: float = None, aggressive_mult: float = None,
+    min_notional: float = None, max_notional: float = None, market_center: str = None,
+    order_type: str = None, time_in_force: str = None, nbbo_size_pct: float = None,
+    account: str = None, custom_fix_params: dict = None) -> ExecutorParams
+ctx.add_executor(executor_params) -> Executor | None       # start it; returns the handle (executor.executorID)
+ctx.stop_executor(executor) -> bool
+ctx.stop_executor_by_id(executor_id: str) -> bool
+ctx.replace_executor_params_by_id(executor_id: str, executor_params) -> bool   # re-target IN PLACE (don't stack a new one)
+ctx.get_executor_params_by_id(executor_id: str) -> ExecutorParams | None
+ctx.executor_state(executor) -> str   # "STARTED"|"NEW"|"PARTIALLY_FILLED"|"FILLED"|"STOPPING"|"STOPPED"|"UNDEFINED"|"INVALID"
+```
+
+**Canned executor types** (pass as `executor_type=`; resolved server-side):
+| `executor_type` | what it does | key params |
+|---|---|---|
+| `POV` | Percentage-of-volume — participates at a target % of traded volume | `participate_pct` (required), `aggressive_mult` |
+| `POV_PASSIVE` | POV that rests passively (posts liquidity, less aggressive) | `participate_pct`, `nbbo_size_pct` |
+| `PASSIVE` | Posts passively at/near the bid/ask, repricing as the book moves | `nbbo_size_pct`, `aggressive_mult` |
+| `TWAP` / `ALGO_TWAP` | Time-weighted — even slices across `[start_time, end_time]` | `start_time`, `end_time`, `min/max_order_size` |
+| `ALGO_VWAP` | Volume-weighted — slices along a volume curve over the window | `start_time`, `end_time` |
+| `AUCTION` | Routes to the opening/closing auction (`order_type='MOC'/'MOO'/'LOC'/'LOO'`) | `order_type`, `market_center` (§5.2.1) |
+| `ALGO_COBRA` | Adaptive liquidity-seeking algo | type-specific |
+
+> These are the executor-type strings referenced in the engine (`build_executor_params` docstring + the `algo_instruction` slot map). The authoritative registry is server-side (PySigma); if you need one not listed, confirm the exact string with the engine rather than guessing. `executor_type` is a **string**, not an enum.
+
+Common params: `quantity` is unsigned (direction is `side='BUY'|'SELL'`); `min_order_size`/`max_order_size` bound child clip size; `refresh_millis` is the work cadence; `min_notional`/`max_notional` bound child notionals; `market_center` routes the venue (§5.2.1); `account`/`custom_fix_params` for live/FIX.
+
+**Lifecycle:** `build_executor_params(...)` → `add_executor(params)` (returns the handle) → the executor works the order over time, emitting `EXECUTOR_EVENT` to your `on_executor` callback → check progress with `ctx.executor_state(executor)` → adjust with `replace_executor_params_by_id(id, new_params)` (**re-target in place — never `add_executor` a second one for the same target**) → `stop_executor(executor)` when done/cancelling. See the executor-driven strategy pattern in §16.6.
+
+---
+
+## 6. The Event object
+
+```
+event.type        -> EventType          # branch on this
+event.data()      -> payload object     # type depends on event.type (§7.0)
+event.ts_event    -> int                # nanoseconds
+event.time        -> Optional[datetime] # configured tz
+event.time_utc    -> Optional[datetime] # UTC
+```
+
+---
+
+## 7. Event payloads — what `event.data()` returns
+
+### 7.0 EventType → payload map
+| event.type | event.data() returns | section |
+|---|---|---|
+| `BAR` (and `BAR_1_MIN`…`BAR_1_DAY`) | `SigmaBar` | 7.1 |
+| `TRADE` | `SigmaTradeTick` | 7.5 |
+| `QUOTE` | `SigmaQuoteTick` | 7.6 |
+| `SNAP` | `SigmaSnapData` (options) | 7.7 |
+| `ORDER_FILLED`, `ORDER_*` | `SigmaOrder` | 7.3 |
+| `POSITION_*` | `SigmaPosition` | 7.2 |
+| `CUSTOM_DATA` | `SigmaCustomData` | 7.9 |
+| `TIMER` | `TimerEventData` | 7.8 |
+| `INDEX_PRICE` | `IndexPrice` | 7.11 |
+| `ROLLOVER` | `Rollover` | 7.12 |
+| `EXECUTOR_EVENT` | executor lifecycle payload (opaque) | 7.13 |
+| `SECURITY_EVENT` | security/reference payload (opaque) | 7.13 |
+
+### 7.1 SigmaBar
+`symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str` · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
+
+### 7.2 SigmaPosition
+`symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
+
+### 7.3 SigmaOrder
+`symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
+
+### 7.4 SigmaFill  (via `order.last_fill`)
+`trade_id:str` · `execution_id:str` · `last_qty:float`(alias `filled_qty`) · `last_px:float`(alias `avg_px`) · `commission:float` · `liquidity_side:str`("MAKER"|"TAKER") · `symbol:str` · `side:str`("BUY"|"SELL") · `ts_event:int`
+
+### 7.5 SigmaTradeTick
+`symbol:str` · `price:float` · `size:float` · `aggressor_side:str`("BUY"|"SELL"|"NO_AGGRESSOR") · `trade_id:str` · `exchange:str` · `ts_event:int` · `time/time_utc:datetime?`
+
+### 7.6 SigmaQuoteTick
+`symbol:str` · `bid_price:float` · `ask_price:float` · `bid_size:float` · `ask_size:float` · `mid_price:float` · `spread:float` · `exchange:str` · `ts_event:int` · `time/time_utc:datetime?`
+
+### 7.7 SigmaSnapData (options snapshot)
+`symbol:str`(root) · `chain:str`(OCC) · `underlying:str` · `option_type:str`("C"|"P") · `expiration_date:str` · `strike:float` · `bid_px:float` · `ask_px:float` · `price:float` · `bid_sz:int` · `ask_sz:int` · `size:int` · `mid_price:float` · `spread:float` · `date:str`('YYYY-MM-DD') · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
+
+### 7.8 TimerEventData
+`timer_id:str` · `ts_event:int` · `ts_init:int` · `time/time_utc:datetime?`
+
+### 7.9 SigmaCustomData
+`symbol:str` · `event_id:str`(data source id) · `data:Dict[str,str]`(column→value) · `header:str` · `row:str` · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
+
+### 7.10 SigmaInstrument  (`ctx.instrument(symbol)`)
+`symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume`)
+
+### 7.11 IndexPrice
+`symbol:str` · `price:float` · `ts_event:int` · `ts_init:int`
+
+### 7.12 Rollover
+`continuous_symbol:str`("ES.c.0") · `prev_contract:str`("ESZ5") · `current_contract:str`("ESH6") · `ts_event:int`
+
+### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
+These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
+
+---
+
+## 8. Portfolio API  (`SigmaPortfolio` and `SigmaGlobalPortfolio` share this surface)
+
+```python
+.position(symbol: str) -> Optional[SigmaPosition]
+.net_position(symbol: str) -> float
+.is_flat(symbol: str = None) -> bool
+.is_net_long(symbol: str) -> bool
+.is_net_short(symbol: str) -> bool
+.positions() -> List[SigmaPosition]
+.realized_pnl(symbol: str = None) -> float       # total when symbol omitted
+.unrealized_pnl(symbol: str = None) -> float
+.total_pnl(symbol: str = None) -> float          # realized + unrealized
+.day_pnl(symbol: str = None) -> float
+.net_exposure() -> float                          # signed
+.gross_exposure() -> float                        # sum of |values|
+.max_drawdown -> float       (property)
+.fees -> float               (property)
+.initial_capital -> float    (property)           # capital the run started with (fixed base)
+.equity -> float             (property)           # account value / NAV = initial_capital + realized + unrealized − fees
+.cash -> float               (property)           # uninvested cash (equity − market value of fully-funded holdings)
+```
+- `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies.
+- **Account view** (`initial_capital` / `equity` / `cash`): tracked by the engine's cash ledger, not derived in Python. `equity` is asset-agnostic (correct for equities and futures). `cash` reflects that **futures encumber margin, not cash** — buying a future moves only fees out of `cash` (not notional), so `cash ≈ equity` for futures positions while equities reduce `cash` by the full notional. Identity: `equity == initial_capital + realized_pnl + unrealized_pnl` (minus fees). Use `equity` for percent-of-account sizing; there is no built-in `order_target_percent` — size yourself (e.g. `qty = int(pct * ctx.portfolio().equity / (price * ctx.instrument(sym).multiplier))`).
+
+---
+
+## 9. `data_configs` schema  (list of dicts)
+
+### 9.1 `type='hiveq_historical'`
+| key | type | notes |
+|---|---|---|
+| `type` | str | `'hiveq_historical'` |
+| `dataset` | str | dataset code: `HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_US_OPT`, `HIVEQ_US_IND`, `HIVEQ_US_ETF`, `HIVEQ_QUANT_SIGNALS`, `HIVEQ_ECON`. (`HIVEQ_STRAT` holds published run *results* — an output you read after a run, not a strategy input.) |
+| `schema` | list[str] \| str | one or more exact schema codes, e.g. `bars_1m`, `bars_1s`, `bars_1d`, `tbbo`, `eq_trades`, `fut_trades`, `snaps_1s`, `signals`. Bar data exists only at `bars_1s` / `bars_1m` / `bars_1d` per asset class — there is **no** `bars_5m` / `bars_1h`. **Trade prints** (incl. the opening/closing **auction** prints that MOO/MOC fill against, §5.2.1) come from `eq_trades` (equities) / `fut_trades` (futures); `tbbo` is **quotes** (bid/ask) and `bars_*` are aggregated — neither carries trade/auction prints. **Executors** (POV/TWAP/VWAP…, §5.10) also need a tick stream — **prefer `eq_trades`/`fut_trades`** (`tbbo` quotes work too but have limited coverage); never `bars_*`. |
+| `id` | str (opt) | identifier referenced by `ctx.subscribe_data(data_id=...)` for signal/custom sources |
+| `enabled` | bool (opt) | default `True` |
+
+```python
+# equities 1-minute bars
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}
+# futures (subscribe to a continuous symbol like 'ES.c.0'); for rollover set
+# BacktestConfig(enable_auto_rollover=True) — no data_configs flag needed.
+{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT','schema':['bars_1m']}
+# quant signals (subscribe via ctx.subscribe_data(data_id=...))
+{'type':'hiveq_historical','dataset':'HIVEQ_QUANT_SIGNALS','schema':['signals'],'id':'mysignals'}
+```
+
+### 9.2 `type='csv'`
+| key | type | notes |
+|---|---|---|
+| `type` | str | `'csv'` |
+| `data_type` | str | fill-mode hint for your own file: a `bars_*` value (OHLCV → bar fills), `'tbbo'`/`'trades'` (tick fills), or `'custom'` (user/signal data). For CSV the granularity is whatever your file contains. |
+| `path` | str | path to CSV (relative or absolute) |
+| `id` | str | identifier referenced in strategy subscriptions |
+| `enabled` | bool (opt) | default `True` |
+
+```python
+{'type':'csv','data_type':'bars_1m','id':'1_MIN_BAR','path':'bars/AAPL_bars.csv'}
+{'type':'csv','data_type':'custom','id':'UserData','path':'userdata/signals.csv'}
+```
+CSV bar columns: `timestamp,symbol,open,high,low,close,volume`.
+
+### 9.3 Behavior derived from schema/dataset
+- schema containing `bar` → bar-based fills; schema with `trade`/`tbbo` → tick-based fills.
+- `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
+- `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
+
+---
+
+## 10. Results
+
+### 10.0 `Run` handle (returned by `run_backtest` / `get_run`)
+`run_backtest(...)` and `get_run(...)` return a `Run` (module `hiveq.flow.runs`). It is the single accessor for a run's status and results, local or remote.
+
+```python
+run.run_id -> str
+run.task_id -> Optional[str]
+run.is_local -> bool
+run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until terminal; returns self (chainable)
+run.status() -> dict                       # {'status': 'PENDING'|'RUNNING'|'DONE'|'FAILED'|..., ...}
+run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
+run.positions() / run.orders() / run.trades() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
+run.summary() -> dict
+run.overview() -> dict
+run.logs() -> list[str]                    # the COMPLETE remote executor log (stdout/strategy errors), by task_id
+run.download_logs(path: str) -> str        # stream the full gzipped executor log to `path` (.gz); returns path
+```
+- Default `run_backtest()` already blocked until done, so `run.report()` is ready immediately.
+- For `silent=True`, call `run.wait().report()` (or poll `run.status()`), e.g. `hf.get_run(run_id).wait().report()`.
+- **`event_logs()` vs `logs()`**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing; `download_logs(path)` for very large logs.
+
+### 10.1 `PerformanceReport` (obtained via `run.report()`)
+| attribute | type |
+|---|---|
+| `return_stats` | DataFrame (Sharpe, Sortino, vol, drawdown, win rate, …) |
+| `returns_series` | Series (datetime-indexed equity returns; used for tearsheet) |
+| `positions` | DataFrame |
+| `fills` | DataFrame |
+| `orders` | DataFrame |
+| `trades` | DataFrame |
+| `pnl_stats` | DataFrame |
+| `daily_returns` | DataFrame (ascending by date) |
+| `strategy_stats` | DataFrame (per-strategy) |
+| `run_info` | DataFrame (dates, capital, counts, params) |
+| `tca_report` | TCAReport (only if `BacktestConfig.enable_tca=True`) |
+| `total_realized_pnl` / `total_unrealized_pnl` / `net_pnl` / `total_fees` | float |
+| `create_tearsheet()` | `-> str` (HTML; for Jupyter/Marimo) |
+
+DataFrame attrs may be `None`/empty — always guard (`if report.fills is not None and not report.fills.empty`).
+
+### 10.2 `event_logs()` DataFrame columns (remote runs)
+`time(datetime, tz-aware)` · `ts_event(str, ISO-8601 UTC)` · `strategy_id` · `trader_id` · `nav(float)` · `realized_pnl(float)` · `total_pnl(float)` · `symbol` · `event_log_type(str)` · `sub_event_type(str)` · `message(str)` · `state_variables(str, JSON)` · `trade_id(str?)`
+> `event_logs()` returns rows for **remote** runs (fetched over REST). A **local** run returns an empty DataFrame (`runs.py` short-circuits when `run.is_local`). You can also pull logs for any job via §11.3.
+
+---
+
+## 11. Remote deploy + observability  (`hiveq.flow.jobs`)
+
+One surface to deploy a job and pull its status/logs/results. Thin wrapper over `hiveq_orchestrator` (no second install). Reads the same env vars (§3).
+
+```python
+from hiveq.flow.jobs import (
+    TaskType,
+    submit,                                     # deploy
+    poll_result, get_status, get_result, get_logs, get_logs_gz, get_client,  # observe
+)
+```
+
+### 11.1 Deploy a backtest (high-level)
+Prefer **`hf.run_backtest(..., silent=True)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`). Observe via the Run (`run.wait()`, `run.status()`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
+
+```python
+run = hf.run_backtest(strategy_configs=[...], symbols=['AAPL'],
+                      start_date='2025-08-01', end_date='2025-08-02',
+                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}],
+                      silent=True)
+report = run.wait().report()                    # block to completion, then read results
+```
+For the common backtest case use `run_backtest(..., silent=True)` above; the `jobs` API below remains valid for any job type and for low-level control.
+
+### 11.2 Generic submit
+```python
+submit(task_type: TaskType|str, task_name: str, task,
+       entry_method: str = 'run', job_type=None,
+       metadata=None, requirements=None,
+       allow_duplicate: bool = False, duplicate_action=None) -> dict   # -> {'task_id', 'payload_id', ...}
+#   duplicate_action ∈ {'override', 'terminate', 'duplicate'} (only consulted when allow_duplicate=True)
+```
+
+### 11.3 Observe (works for any job type)
+```python
+get_status(task_id: str) -> dict                # {'status': 'PENDING'|'RUNNING'|'DONE'|'FAILED'|..., 'created_at', 'started_at', 'completed_at'}
+get_logs(task_id: str = None, task_name: str = None, limit: int = 1000) -> dict   # remote executor logs, JSON tail/paginate
+get_logs_gz(task_id=None, run_id=None, task_name=None, dest: str = None) -> str    # FULL log via GET /logs?format=gz (streamed)
+get_result(task_id: str) -> dict                # result/output (non-blocking; for completed task)
+poll_result(task_id: str, timeout: Optional[int] = None, poll_interval: float = 1.0) -> dict  # BLOCK until terminal state
+get_client() -> _Client                         # low-level transport handle (advanced)
+```
+- The platform `GET /logs` accepts `task_id` | `run_id` | `task_name` (one required), plus `limit` / `offset` / `tail` / `format` (`json` default, or `gz` for the whole gzipped log). `get_logs(...)` returns the JSON tail; `get_logs_gz(...)` returns the **complete** log text (or, with `dest`, streams the `.gz` to that path). Prefer the `Run` handle — `run.logs()` / `run.download_logs(path)` (§10.0) — which key off the run's `task_id` for you.
+
+### 11.4 Recommended observe loop (poll status + pull logs)
+```python
+from hiveq.flow.jobs import get_logs
+
+# Preferred: deploy and observe via the Run handle (§10.0).
+run = hf.run_backtest(strategy_configs=[...], symbols=['ES.c.0'],
+                      start_date='2024-01-01', end_date='2024-03-01',
+                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT',
+                                     'schema':['bars_1m']}],
+                      silent=True)
+run.wait()                                       # blocks w/ live progress until terminal
+print('status:', run.status()['status'])
+logs = get_logs(task_id=run.task_id, limit=500)  # for debugging / course-correction
+report = run.report()                            # PerformanceReport on success (§10.1)
+```
+> Incremental mid-run P&L is not streamed today; status transitions are PENDING→RUNNING→DONE, with the report available on completion. Use `get_logs` for in-flight diagnostics.
+
+---
+
+## 12. Enums (exact members and `.value`)
+
+```python
+from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMSType
+from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter
+```
+
+**EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER EXECUTOR_EVENT SECURITY_EVENT`
+
+**AssetType**: `EQUITY OPTIONS FUTURES CRYPTO INDEX`
+
+**OrderType**: `MARKET LIMIT STOP STOP_LIMIT MOO MOC LOO LOC` — `MOO/MOC/LOO/LOC` are auction orders with exchange-specific entry/cancel cutoffs (§5.2.1); `LOO/LOC` require `limit_price`.
+
+**OrderSide**: `BUY SELL`
+
+**OrderStatus**: `PENDING SUBMITTED ACCEPTED REJECTED CANCELED FILLED PARTIALLY_FILLED`
+
+**OrderState** (from `ctx.get_order_state`): `INITIALIZED SUBMITTED ACCEPTED REJECTED FILLED CANCELED DENIED EXPIRED PENDING_CANCEL PENDING_REPLACE`
+
+**DataType**: `BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK QUOTE`
+
+**EventLogType**: `POSITION ORDER FILL CUSTOM_DATA USER_LOG ENTRY_TRADE EXIT_TRADE PARAM_CHANGE`
+
+**OMSType**: `SIGMA` (`.value == "SIGMA"`)
+
+**MarketCenter**: `NYSE NASDAQ ARCA BATS AMEX CME CBOE NYMEX CBOT`
+
+**time_in_force** (valid strings): `"DAY" "GTC" "IOC" "FOK" "GTX" "GTD" "OPG" "ATC"`
+
+---
+
+## 13. Config dataclasses
+
+```python
+from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig
+```
+
+**StrategyConfig**
+| field | type | default |
+|---|---|---|
+| `name` | str | (required) |
+| `type` | str | (required — class name, R2) |
+| `symbols` | Optional[List[str]] | None |
+| `params` | Dict[str, Any] | {} |
+
+**BacktestConfig** (key fields)
+| field | type | default |
+|---|---|---|
+| `id` | Optional[str] | None |
+| `symbols` | list | None |
+| `start_date` / `end_date` | Optional[str] | None |
+| `initial_capital` | float | 1_000_000.0 |
+| `commission` | float | 0.001 |
+| `slippage` | float | 0.0 |
+| `venue` | str | "SIM" |
+| `deploy` | bool | False |
+| `benchmark` | Optional[str] | None |
+| `risk_free_rate` | float | 0.02 |
+| `equity_fee` | float | 0.0011 (per share) |
+| `futures_fee` | float | 0.5 (per contract) |
+| `crypto_fee` | float | 0.00005 |
+| `session_start` / `session_end` | Optional[str] | None (ET "HH:MM", R6) |
+| `enable_auto_rollover` | bool | False |
+| `enable_tca` | bool | False |
+| `export_orders_csv` | bool | False |
+| `extra_config` | Dict[str, Any] | {} |
+
+**EngineConfig**
+| field | type | default |
+|---|---|---|
+| `oms` | str | "SIGMA" (use `OMSType.SIGMA.value`) |
+| `timezone` | Optional[str] | None (IANA name; auto-detected if None) |
+| `params` | Dict[str, Any] | {} |
+
+---
+
+## 14. Imports cheat-sheet
+
+```python
+import hiveq.flow as hf
+from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig, Context, get_run
+from hiveq.flow.runs import Run
+from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMSType
+from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter
+from hiveq.flow.trading.price_utils import adjust_tick_size, get_min_tick   # round your own limit/stop prices (§5.2)
+from hiveq.flow.utils.date_calendar import TradingCalendar   # trading-day / session helpers (US-only today)
+from hiveq.flow.jobs import submit, poll_result, get_status, get_logs, get_logs_gz, get_result, get_client, TaskType
+```
+
+---
+
+## 15. Common pitfalls (accurate)
+
+- **Use per-event callbacks** (`on_start`/`on_bar`/`on_order`/…), not a single `on_hiveq_event` — that global form is opt-in only (§4).
+- **There is no `on_order_filled` callback** — handle fills in `on_order` and check `order.is_filled`.
+- **`run_backtest(...)` returns a `Run`, not a `PerformanceReport`** — call `run.report()` (§10.0). For non-blocking deploy use `run_backtest(..., silent=True)`.
+- **No built-in indicators or rolling-history accessor** — maintain your own `collections.deque` windows and compute with `numpy`/`pandas` (§16). `ctx.instrument(symbol).last_bar` is the only built-in "latest price" accessor.
+- **Sizing helpers exist** (`ctx.close_position`/`order_to_target`/`flatten_all`, §5.2/§16.1) but **percent-of-equity sizing and native brackets do not** — build stop-loss/take-profit as explicit child orders (§16.4).
+- **Match the order mechanism to the need:** a single immediate market order or a signal backtest → direct `buy_order`/`sell_order` (§5.2). Sizeable/sliced orders, live order-chasing/replaces, or auction routing → an **executor** (§5.10/§16.6), which owns slicing/replaces/cancels/fill-aggregation. Don't wrap a one-shot order in an executor; don't hand-roll replace/retry logic when one fits. With executors, hold one handle per target and `replace_executor_params_by_id` to re-target — never `add_executor` a duplicate.
+- `event.data()` is untyped — use §7.0 to know the concrete type for the branch you are in.
+- `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
+- Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
+- `report.*` DataFrames can be `None`/empty — guard before use.
+- For futures, subscribe by the continuous symbol string in `symbols=`, e.g. `subscribe_futures_bars(symbols=['ES.c.0'])` (or `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES)`). For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it.
+- Set `symbols`/`start_date`/`end_date` in one place (top-level args OR `BacktestConfig`), not both.
+
+---
+
+## 16. Authoring patterns (idioms for capabilities without a built-in helper)
+
+HiveQ Flow is deliberately lean on *authoring conveniences* (target-percent sizing, rolling-history windows, indicator libraries, bracket/OCO orders, calendar scheduling) — implement those with the idioms below. **Execution quality, however, is a first-class engine feature: when the strategy calls for it (sliced/large orders, live order-chasing, auctions), use the canned executors (§5.10, §16.6) — but keep simple one-shot orders direct.** Follow these patterns exactly for consistency.
+
+### 16.1 Flatten / reverse / target a position
+Use the built-in helpers (§5.2) — `ctx.close_position`, `ctx.order_to_target`, `ctx.flatten_all`:
+```python
+ctx.close_position(symbol)                # flatten one symbol (no-op if flat)
+ctx.order_to_target(symbol, 100)          # signed target: +long / -short / 0 flat; trades the delta
+ctx.order_to_target(symbol, -50)
+ctx.flatten_all()                         # close every open position in this strategy
+```
+These wrap `net_position` + `buy_order`/`sell_order`; the manual equivalent is `delta = target - ctx.net_position(symbol)` then a buy/sell for `abs(delta)`. **They are transactional** — each skips (returns `None`) when a working order already exists for that symbol, so calling them on every bar will not stack duplicate orders (it converges one fill at a time). If you need to re-price a resting order, `ctx.cancel_all_orders(symbol)` first.
+> Percent-of-equity sizing (`order_target_percent`) is **not available yet** — the portfolio API exposes P&L/exposure but not cash/equity/buying-power (planned; see `docs/ENGINE_GAPS_PLAN.md` G2). Size in fixed quantity, or off `initial_capital` and a price you track yourself.
+
+### 16.2 Rolling history / lookback (no `ctx.history()`)
+Maintain your own window in strategy state; there is no engine-side history buffer.
+```python
+from collections import deque
+class MA:
+    def __init__(self): self.win = {}
+    def on_start(self, ctx, event): ...
+    def on_bar(self, ctx, event):
+        bar = event.data()
+        w = self.win.setdefault(bar.symbol, deque(maxlen=20))
+        w.append(bar.close)
+        if len(w) == w.maxlen:
+            sma20 = sum(w) / len(w)
+```
+`ctx.instrument(symbol).last_bar` returns the most recent bar if you only need the latest price.
+
+### 16.3 Indicators (no built-in TA library)
+Compute with `numpy`/`pandas` (both are dependencies). Examples over a `deque`/`np.array` of closes:
+```python
+import numpy as np
+closes = np.array(w)
+sma = closes.mean()
+ema = pd.Series(closes).ewm(span=12, adjust=False).mean().iloc[-1]
+delta = np.diff(closes); up = delta.clip(min=0).mean(); dn = -delta.clip(max=0).mean()
+rsi = 100 - 100/(1 + up/dn) if dn else 100.0
+```
+
+### 16.4 Bracket / stop-loss + take-profit (no native bracket/OCO)
+Place the entry, then on its fill (`on_order`) submit protective child orders, and cancel the siblings yourself when one fills or the position flattens.
+```python
+def on_order(self, ctx, event):
+    o = event.data()
+    if o.is_filled and o.symbol == self.entry_symbol and not self.protected:
+        entry = o.avg_px
+        ctx.sell_order(o.symbol, quantity=o.filled_qty, order_type=OrderType.STOP,  stop_price=entry*0.98)
+        ctx.sell_order(o.symbol, quantity=o.filled_qty, order_type=OrderType.LIMIT, limit_price=entry*1.04)
+        self.protected = True
+    # when one leg fills, flatten remainder & cancel_all_orders(symbol) to emulate OCO
+```
+There is no trailing-stop order type — emulate it in `on_bar` by tracking the high-water mark and `modify_order` on the stop.
+
+### 16.5 Scheduling at wall-clock times (no `schedule.on(...)`)
+Use `ctx.set_timer` (relative `timedelta`) plus `ctx.now()` checks, and `TradingCalendar` for session/day math.
+```python
+from datetime import timedelta
+from hiveq.flow.utils.date_calendar import TradingCalendar
+def on_start(self, ctx, event):
+    ctx.set_timer('poll', timedelta(minutes=1))
+def on_timer(self, ctx, event):
+    now = ctx.now()                       # configured-tz datetime (ET sessions per R6)
+    if now.hour == 15 and now.minute >= 55:
+        # e.g. submit MOC near the close
+        ...
+```
+`TradingCalendar.get_trading_days(start, end)` and `TradingCalendar.get_session_boundaries(...)` are public design-time helpers for trading-day/session windows.
+
+### 16.6 Executor-driven strategies (when execution quality matters)
+When the strategy needs managed execution — sizeable orders to slice, live trading with order-chasing/replaces, or auction routing (see "when to use" in §5.10) — let an **executor** work the order instead of hand-managing `buy_order`/`sell_order` + replaces + cancels. The executor handles child-order slicing, repricing, cancel/replace, and fill aggregation. For a simple one-shot market entry this is overkill — use a direct order. The idiom: **hold one executor handle per (symbol, role); check its state before starting another; re-target in place.**
+
+⚠️ **Executors need a tick stream, not bars** (§5.10/§9.1): subscribe with `ctx.subscribe_trade_ticks(...)` — **prefer schema `eq_trades`/`fut_trades`** (`tbbo` quotes work but have limited coverage) — and drive them from `on_trade`. They will not work on a `bars_*` subscription.
+
+```python
+class ExecAlgo:
+    def __init__(self):
+        self.entry = {}                                  # symbol -> Executor handle
+
+    def on_start(self, ctx, event):
+        # Executors work the TICK stream — subscribe to trades (eq_trades/fut_trades), not bars.
+        ctx.subscribe_trade_ticks(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY)
+
+    def on_trade(self, ctx, event):
+        tick = event.data()                              # -> SigmaTradeTick (§7.5)
+        sym = tick.symbol
+        ex = self.entry.get(sym)
+        # Only START a new executor when none is working this target.
+        if ex is None or ctx.executor_state(ex) in ('FILLED', 'STOPPED', 'INVALID'):
+            if self._want_long(tick) and ctx.is_flat(sym):
+                params = ctx.build_executor_params(
+                    symbol=sym, quantity=1000, side='BUY',
+                    executor_type='POV', participate_pct=10,   # work at 10% of volume
+                )
+                self.entry[sym] = ctx.add_executor(params)
+        else:
+            # Already working — adjust IN PLACE, never add a second executor.
+            # eid = str(ex.executorID); ctx.replace_executor_params_by_id(eid, new_params)
+            pass
+
+    def on_executor(self, ctx, event):                   # EXECUTOR_EVENT lifecycle updates
+        ...                                              # state transitions, partials, completion
+```
+
+**Reference implementation:** `hiveq.flow.strategies.algo_instruction.AlgoInstructionStrategy` is the canonical executor-driven strategy. It keeps **one executor per (symbol, slot)** where slots are **`entry` / `exit` / `risk`**, is parameterized entirely by algo instructions (e.g. `entry=POV;exit=MOC;risk=TWAP`), checks `executor_state` before (re)starting a slot, and replaces params rather than stacking. Study it when building executor-based strategies. Auction exits (`exit=MOC`/`MOO`) map to the `AUCTION` executor with venue routing (§5.2.1).

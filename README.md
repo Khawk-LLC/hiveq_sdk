@@ -10,6 +10,10 @@ It provides the **same `hiveq.flow` import namespace** as the full package, so
 strategy code is identical whether it runs on your machine (deploy) or on the
 executor (run).
 
+> **For LLMs / code-gen agents:** the canonical API spec is
+> [`docs/HIVEQ_FLOW_API.md`](docs/HIVEQ_FLOW_API.md) and runnable strategies are in
+> [`examples/`](examples/). See [`AGENTS.md`](AGENTS.md) for the short version.
+
 ```python
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig, BacktestConfig
@@ -21,13 +25,14 @@ run = hf.run_backtest(
 run.report(); run.positions(); run.daily_returns()
 ```
 
-Credentials come from the environment: `HIVEQ_API_KEY`, `HIVEQ_USER_NAME`,
-`HIVEQ_USER_ID`, `HIVEQ_ORG_ID`.
+Credentials come from the environment: **`HIVEQ_API_KEY` is the only required
+variable** — user id, org id, and user name are resolved from the key. (Optional
+overrides: `HIVEQ_USER_NAME`, `HIVEQ_USER_ID`, `HIVEQ_ORG_ID`, `HIVEQ_BASE_URL`.)
 
 ## What's in here
 
 **Real (runs on the client):**
-- `__init__.py` — `run_backtest` / `deploy_backtest` / `get_run` / `config`
+- `__init__.py` — `run_backtest` / `get_run` / `config`
 - `deploy_task.py` — capture your strategy (cloudpickle) → submit to the
   orchestrator REST API. `run()` is a client stub: the task is pickled *by
   reference*, so the executor runs its own full `run()`.

@@ -92,20 +92,8 @@ class PrefetchContext:
         self._subscribed_symbols.extend(symbols)
         self._subscribed_bars.append((symbols, asset_type, interval))
 
-    def subscribe_trades(self, symbols: List[str], asset_type=None, **kwargs):
-        """Capture trade subscription request without executing."""
-        if isinstance(symbols, str):
-            symbols = [symbols]
-        self._subscribed_symbols.extend(symbols)
-
     def subscribe_quotes(self, symbols: List[str], asset_type=None, **kwargs):
         """Capture quote subscription request without executing."""
-        if isinstance(symbols, str):
-            symbols = [symbols]
-        self._subscribed_symbols.extend(symbols)
-
-    def subscribe_tbbo(self, symbols: List[str], asset_type=None, **kwargs):
-        """Capture TBBO subscription request without executing."""
         if isinstance(symbols, str):
             symbols = [symbols]
         self._subscribed_symbols.extend(symbols)
@@ -225,7 +213,7 @@ class PrefetchContext:
             self._subscribed_symbols.append(root)
             self._subscribed_bars.append(([root], AssetType.FUTURES, interval))
 
-    def subscribe_futures_trade_ticks(self,
+    def subscribe_futures_trades(self,
                                       symbols: Optional[List[str]] = None,
                                       root: Optional[str] = None,
                                       contract: Optional[str] = None,
@@ -254,36 +242,7 @@ class PrefetchContext:
         elif root:
             self._subscribed_symbols.append(root)
 
-    def subscribe_futures_tbbo(self,
-                               symbols: Optional[List[str]] = None,
-                               root: Optional[str] = None,
-                               contract: Optional[str] = None,
-                               continuous: Optional[str] = None):
-        """Capture futures TBBO subscription request without executing.
-
-        Parameters
-        ----------
-        symbols : list[str], optional
-            List of specific futures symbols to subscribe to.
-        root : str, optional
-            Futures root symbol (e.g., "ES", "NQ", "CL").
-        contract : str, optional
-            Specific contract month code (e.g., "H25" for March 2025).
-        continuous : str, optional
-            Continuous contract notation (e.g., "ES.c.0", "ES.v.0").
-        """
-        if symbols:
-            if isinstance(symbols, str):
-                symbols = [symbols]
-            self._subscribed_symbols.extend(symbols)
-        elif continuous:
-            self._subscribed_symbols.append(continuous)
-        elif root and contract:
-            self._subscribed_symbols.append(f"{root}.{contract}")
-        elif root:
-            self._subscribed_symbols.append(root)
-
-    def subscribe_trade_ticks(self, symbols: List[str], asset_type=None, **kwargs):
+    def subscribe_trades(self, symbols: List[str], asset_type=None, **kwargs):
         """Capture trade tick subscription request without executing.
 
         Parameters

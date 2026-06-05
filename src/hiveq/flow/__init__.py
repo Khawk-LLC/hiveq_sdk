@@ -200,7 +200,6 @@ def run_backtest(
     *,
     silent: bool = False,
     task_name: Optional[str] = None,
-    priority: int = 5,
     allow_duplicate: bool = True,
     duplicate_action: str = 'override',
     timeout: Optional[float] = None,
@@ -209,7 +208,7 @@ def run_backtest(
 ):
     """Submit a backtest to the HiveQ platform and return a :class:`Run`.
 
-    Captures your strategy code, ships it to the orchestrator, and (unless
+    Captures your strategy code, ships it to the HiveQ platform, and (unless
     ``silent=True``) blocks with a live progress line until the run finishes,
     then returns the completed ``Run``. Results via ``run.report()`` etc.
     """
@@ -221,7 +220,6 @@ def run_backtest(
         data_configs=data_configs,
         backtest_config=backtest_config,
         task_name=task_name,
-        priority=priority,
         allow_duplicate=allow_duplicate,
         duplicate_action=duplicate_action,
         **kwargs,
@@ -252,27 +250,26 @@ def _deploy(
     data_configs=None,
     backtest_config=None,
     task_name=None,
-    priority=5,
     allow_duplicate=True,
     duplicate_action='override',
     publish=True,
     **kwargs,
 ) -> dict:
-    """Capture the caller's strategy code and submit it to the orchestrator.
+    """Capture the caller's strategy code and submit it to the HiveQ platform.
 
     Mirrors the full package's ``BacktestApp.deploy_backtest`` but uses module
     credentials (from env) and the existing ``DeploymentHelper`` — no engine.
     """
-    from hiveq.flow.deploy_task import (
-        HiveQFlowBackTestTask, DeploymentHelper, ORCHESTRATOR_AVAILABLE, TaskType,
-    )
+    from hiveq.flow.deploy_task import HiveQFlowBackTestTask, DeploymentHelper
+    from hiveq.flow._client import TaskType
 
     _ensure_initialized()
 
-    if not ORCHESTRATOR_AVAILABLE:
-        return {'status': 'error', 'message': 'hiveq_orchestrator is not installed', 'task_id': None}
-    if not strategy_configs:
-        return {'status': 'error', 'message': 'strategy_configs is required', 'task_id': None}
+    # NOTE: empty strategy_configs is allowed for the GLOBAL-DISPATCH form — a
+    # module-level on_hiveq_event(ctx, event) the engine auto-discovers from the
+    # captured frame. We validate that below (after capture). For the normal
+    # per-strategy form, strategy_configs must name the strategy classes.
+    strategy_configs = strategy_configs or []
 
     if backtest_config is None:
         backtest_config = BacktestConfig()
@@ -290,7 +287,10 @@ def _deploy(
         return {'status': 'error', 'message': 'end_date is required', 'task_id': None}
 
     if task_name is None:
-        names = '-'.join([s.name for s in strategy_configs[:3]])
+        if strategy_configs:
+            names = '-'.join([s.name for s in strategy_configs[:3]])
+        else:  # global on_hiveq_event form — name off the symbol universe
+            names = 'on_hiveq_event-' + ('-'.join((backtest_config.symbols or [])[:3]) or 'global')
         task_name = f"bt-{names}-{backtest_config.start_date}-{backtest_config.end_date}"
         task_name = task_name.replace(' ', '_').replace('/', '-')[:100]
 
@@ -301,6 +301,14 @@ def _deploy(
 
     # Capture user strategy classes/functions + local modules (cloudpickle).
     local_modules, pickled_objects = DeploymentHelper.capture_calling_module(strategy_configs)
+
+    # Empty strategy_configs is valid ONLY for the global-dispatch form: a captured
+    # on_hiveq_event the engine auto-discovers. Otherwise there's nothing to run.
+    if not strategy_configs and 'on_hiveq_event' not in pickled_objects:
+        return {'status': 'error',
+                'message': "strategy_configs is required, or define a module-level "
+                           "on_hiveq_event(ctx, event) for global dispatch",
+                'task_id': None}
 
     task = HiveQFlowBackTestTask(
         trader_id=_trader_id,
@@ -326,7 +334,7 @@ def _deploy(
         'task_name': task_name,
     }
 
-    return DeploymentHelper.submit_to_orchestrator(
+    return DeploymentHelper.submit(
         task=task,
         task_type=TaskType.HIVEQ_FLOW_BT,
         task_name=task_name,

@@ -1,36 +1,18 @@
 """
-hiveq.flow.jobs — deploy jobs to the HiveQ orchestrator and pull their logs,
-status, and results, with one standard surface for every job type.
-
-This is a thin wrapper over the ``hiveq_orchestrator`` client so hiveq-flow
-users get deploy + observability without installing or importing a second
-package directly.
+hiveq.flow.jobs — deploy jobs to the HiveQ platform and pull their status,
+results, and logs through one standard surface.
 
 Deploy
 ------
-Quant script (arbitrary callable / object with ``run()``)::
+Submit a task (any callable, or an object with a ``run()`` method)::
 
     from hiveq.flow.jobs import submit, TaskType
     res = submit(
         task_type=TaskType.QUANT_SCRIPTS,
         task_name="my-quant-script",
-        task=my_callable, args=(...), kwargs={...},
+        task=my_callable,
         requirements=["pandas"], metadata={"owner": "rm"},
     )
-
-Backtest::
-
-    from hiveq.flow.jobs import deploy, FlowBacktestTask, TaskType
-    res = deploy(FlowBacktestTask(strategy_code="...", config={...}),
-                 TaskType.HIVEQ_FLOW_BT)
-
-Alpha AI (GPU training)::
-
-    from hiveq.flow.jobs import submit_gpu, GPUTask
-    res = submit_gpu(GPUTask(training_module=run_training,
-                             training_config={...}, gpu_type="gpu_1x_a10",
-                             code_folder="./my_code"),
-                     task_name="my-training")
 
 Observe (any job type, same calls)
 ----------------------------------
@@ -42,44 +24,30 @@ Observe (any job type, same calls)
 
 Configuration (env)
 -------------------
-HIVEQ_BASE_URL, HIVEQ_API_KEY, HIVEQ_USER_ID, HIVEQ_ORG_ID, HIVEQ_USER_NAME
-(read by the underlying client; same vars hiveq-flow already uses).
+``HIVEQ_BASE_URL`` (platform endpoint) and ``HIVEQ_API_KEY`` (auth). Only the
+API key is sent on the wire — the platform resolves identity from it.
 """
 
-from hiveq_orchestrator import (  # noqa: F401 — re-exported public surface
-    FlowBacktestTask,
-    GPUTask,
-    Schedule,
-    ScheduleFrequency,
+from hiveq.flow._client import (  # noqa: F401 — re-exported public surface
     TaskType,
-    deploy,
-    get_artifact_metadata,
     get_client,
     get_logs,
+    get_logs_gz,
     get_result,
     get_status,
     poll_result,
     submit,
-    submit_gpu,
 )
 
 __all__ = [
-    # task types / config
     "TaskType",
-    "Schedule",
-    "ScheduleFrequency",
-    # payload wrappers
-    "FlowBacktestTask",
-    "GPUTask",
     # deploy
     "submit",
-    "submit_gpu",
-    "deploy",
     # observe / pull
     "poll_result",
     "get_status",
     "get_result",
     "get_logs",
-    "get_artifact_metadata",
+    "get_logs_gz",
     "get_client",
 ]

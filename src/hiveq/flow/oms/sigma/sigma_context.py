@@ -23,7 +23,7 @@ class _EngineOnly:
         raise RuntimeError(
             "SigmaContext is engine-backed and only runs on the HiveQ platform "
             "executor. The thin hiveq-flow client SDK ships it as a type stub "
-            "only — deploy your strategy (hf.deploy_backtest / hf.run_backtest) "
+            "only — deploy your strategy (hf.run_backtest) "
             "to run it. Install the full hiveq-flow package for local execution."
         )
 

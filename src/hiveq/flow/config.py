@@ -10,7 +10,7 @@ from enum import Enum
 # there once and every run finds it, from any working directory.
 #
 #   HIVEQ_API_KEY=...
-#   HIVEQ_BASE_URL=http://localhost:5010     # optional (orchestrator)
+#   HIVEQ_BASE_URL=http://localhost:5010     # optional (platform task API)
 #   HIVEQ_DATA_URL=http://localhost:80        # optional (runs gateway)
 #
 # We load HIVEQ_* keys from that file WITHOUT overriding the environment (env
@@ -98,13 +98,11 @@ def _fetch_user_info_from_api_key():
         pass
 
 
-# Client identity (org / user) is resolved by the PLATFORM from the API key at
-# submit time — NOT on the client. We deliberately do not auto-resolve or send
-# org/user here: the old multi-URL fallback could pick up the key's identity from
-# the WRONG environment (e.g. staging) and send it to a different target platform,
-# causing 403s. Opt back into the legacy behavior with HIVEQ_RESOLVE_IDENTITY=1.
-if os.environ.get('HIVEQ_RESOLVE_IDENTITY') == '1':
-    _fetch_user_info_from_api_key()
+# Identity (org / user) is NOT auto-resolved at import. On deploy, the platform
+# resolves it from the API key at submit time. For an in-process engine run, the
+# engine resolves it from the key on demand (see
+# SigmaConfigBuilder.validate_hiveq_api_access). Auto-resolving at import would
+# risk picking up the key's identity from the wrong environment.
 
 
 class AssetType(Enum):
@@ -479,15 +477,6 @@ class BacktestConfig:
     enable_realtime_metrics: bool = True  # Enable realtime metrics calculation
     publish_only_changed_metrics: bool = True  # Only publish metrics if they changed
 
-    # Strategy type for backtest execution mode
-    strategy_type: str = 'intraday'  # 'intraday' (day-by-day) or 'overnight' (single continuous run)
-
-    # Data fetch mode for intraday strategy_type
-    # 'daily' (default): Fetch data for each day separately (supports dynamic symbols)
-    # 'prefetch': Fetch all data upfront once (faster for known symbol lists)
-    # Note: overnight strategy_type always uses prefetch implicitly
-    fetch_mode: str = 'daily'
-
     # Session configuration for day-by-day execution
     # If None, uses calendar day boundaries (midnight to midnight)
     # Times are in US/Eastern (EST/EDT). Converted to UTC internally.
@@ -498,15 +487,15 @@ class BacktestConfig:
     # Export orders CSV to ~/.tmp/<run_id>_orders.csv after backtest
     export_orders_csv: bool = False
 
-    # Futures auto-rollover: auto-roll positions when continuous contracts roll
-    # When True, injects filter_mode='continuous' into futures data_configs
-    # and sets enableFuturesRollover=True in strategy params automatically
+    # Futures auto-rollover: auto-roll positions when continuous contracts roll.
+    # When True, the platform fetches the continuous-contract definitions, builds
+    # the roll schedule, and rolls open positions on each roll (firing on_rollover).
     enable_auto_rollover: bool = False
 
     # Transaction Cost Analysis
     enable_tca: bool = False  # Run TCA analysis on fills/orders after backtest
 
-    # Payload ID for tracking code versions (set by orchestrator executor)
+    # Payload ID for tracking code versions (set by the platform executor)
     payload_id: Optional[str] = None
 
     # Run ID for correlating all published data (Python + C++) under one key
@@ -542,8 +531,6 @@ class BacktestConfig:
             'async_queue_max_size': self.async_queue_max_size,
             'enable_realtime_metrics': self.enable_realtime_metrics,
             'publish_only_changed_metrics': self.publish_only_changed_metrics,
-            'strategy_type': self.strategy_type,
-            'fetch_mode': self.fetch_mode,
             'session_start': self.session_start,
             'session_end': self.session_end,
             'enable_auto_rollover': self.enable_auto_rollover,
