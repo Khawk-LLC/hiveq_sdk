@@ -122,7 +122,7 @@ Auto-initialized on first API call. **`HIVEQ_API_KEY` is the only required varia
 | Var | Required | Meaning |
 |---|---|---|
 | `HIVEQ_API_KEY` | **yes** | API key — the only credential you must set |
-| `HIVEQ_BASE_URL` | no | Platform/orchestrator base URL override (also read by the data + jobs clients); defaults to the canonical host |
+| `HIVEQ_BASE_URL` | no | Platform base URL override (also read by the data + jobs clients); defaults to the canonical host |
 | `HIVEQ_USER_ID` | no | User id — auto-resolved from the API key if unset |
 | `HIVEQ_ORG_ID` | no | Org id — auto-resolved from the API key if unset |
 | `HIVEQ_USER_NAME` | no | User name — auto-resolved from the API key if unset |
@@ -552,9 +552,29 @@ run.download_logs(path: str) -> str        # stream the full gzipped executor lo
 | `run_info` | DataFrame (dates, capital, counts, params) |
 | `tca_report` | TCAReport (only if `BacktestConfig.enable_tca=True`) |
 | `total_realized_pnl` / `total_unrealized_pnl` / `net_pnl` / `total_fees` | float |
-| `create_tearsheet()` | `-> str` (HTML; for Jupyter/Marimo) |
+| `create_tearsheet()` | `-> str` (quantstats HTML tearsheet; for Jupyter/Marimo) |
+| `summary_stats()` | `-> dict \| None` (quantstats metric → value, e.g. Sharpe/CAGR/max drawdown) |
 
 DataFrame attrs may be `None`/empty — always guard (`if report.fills is not None and not report.fills.empty`).
+
+**Tearsheet / metrics (quantstats).** `create_tearsheet()` and `summary_stats()` are powered by **quantstats**, which ships with the SDK (no extra install). Both read `report.returns_series`, so they need a run that produced returns; on missing/empty returns `create_tearsheet()` returns a small "no data" HTML page and `summary_stats()` returns `None`.
+
+```python
+report = run.report()                 # or hf.get_run(run_id).wait().report()
+
+# Visual HTML tearsheet (equity curve, drawdowns, monthly returns, risk metrics)
+html = report.create_tearsheet()
+# In a Marimo notebook:
+import marimo as mo; mo.md(html)
+# In a Jupyter notebook:
+from IPython.display import display, HTML; display(HTML(html))
+# In a plain script create_tearsheet() returns a basic text report instead.
+
+# Metrics as a dict (Sharpe, CAGR, max drawdown, …)
+stats = report.summary_stats()        # None if the run has no returns_series
+if stats:
+    print(stats["Sharpe"], stats["Max Drawdown"])
+```
 
 ### 10.2 `event_logs()` DataFrame columns (remote runs)
 `time(datetime, tz-aware)` · `ts_event(str, ISO-8601 UTC)` · `strategy_id` · `trader_id` · `nav(float)` · `realized_pnl(float)` · `total_pnl(float)` · `symbol` · `event_log_type(str)` · `sub_event_type(str)` · `message(str)` · `state_variables(str, JSON)` · `trade_id(str?)`
@@ -564,7 +584,7 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 
 ## 11. Remote deploy + observability  (`hiveq.flow.jobs`)
 
-One surface to deploy a job and pull its status/logs/results. Thin wrapper over `hiveq_orchestrator` (no second install). Reads the same env vars (§3).
+One surface to deploy a job and pull its status/logs/results. A thin **direct-REST** client (built on `requests`) against the platform API — there is no `hiveq_orchestrator` package or any second install. Reads the same env vars (§3).
 
 ```python
 from hiveq.flow.jobs import (

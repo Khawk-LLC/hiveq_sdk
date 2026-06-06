@@ -8,7 +8,7 @@ REST endpoints so the SDK "feels like" the API:
     run.report()                      # GET /runs/{id}/report  -> PerformanceReport
     run.positions(); run.orders(); run.trades()
     run.daily_returns(); run.equity_curve(); run.metrics(); run.summary()
-    run.status(); run.event_logs(); run.wait()
+    run.status(); run.event_logs(); run.logs(); run.wait()
 
 Tabular resources come back as pandas DataFrames; scalar ones as dicts.
 """
@@ -64,15 +64,18 @@ def _fmt_pct(v: Optional[float]) -> str:
 
 
 class _ProgressPrinter:
-    """In-place, single-line progress for a running backtest.
+    """Live progress for a running backtest.
 
-    Writes to the terminal with a carriage return so the line refreshes *in place*
-    (run_id, date window, day progress, pnl/return, current date, elapsed) — one
-    live line, not a new log line per poll. Honored by real terminals and IDE
-    consoles (PyCharm, etc.). The final state is left on screen with a newline.
+    Prints a one-time header (run id, task id, backtest window), then a compact
+    live status line below it — progress bar, day count, pnl/return, current
+    date, elapsed — kept short so it fits a normal terminal width.
 
-    (A progress bar needs raw ``\\r`` to the terminal — a stdlib ``Logger`` emits a
-    newline per record, so it can't update in place; hence direct stdout here.)
+    On a real terminal the status line refreshes *in place* via a carriage
+    return. When stdout is NOT a tty (piped, captured, some IDE run consoles),
+    ``\\r``/``\\033[K`` are not honored — so every refresh would concatenate into
+    one giant run-on line. There we fall back to newline-terminated lines,
+    emitted only when the displayed values change (ignoring the elapsed clock),
+    and drop ANSI color so the codes don't garble the output.
     """
 
     _BAR_WIDTH = 20
@@ -84,9 +87,29 @@ class _ProgressPrinter:
         self.end_date = end_date
         self.stream = stream or sys.stdout
         self._t0 = time.monotonic()
+        # In-place \r redraw only works on a real terminal; detect it once.
+        try:
+            self._tty = bool(self.stream.isatty())
+        except Exception:
+            self._tty = False
+        # Color only when enabled (NO_COLOR unset) AND we're on a tty — otherwise
+        # the escape codes show up as literal garbage in captured output.
+        self._use_color = (os.environ.get("NO_COLOR") in (None, "")) and self._tty
+        self._header_printed = False
+        self._last_key = None
+        # Monotonic display state. The runs gateway occasionally returns a
+        # partial/stale /status (current_day missing -> 0, or total_days/pnl
+        # absent) — without this the bar would snap back to 0/lose the total
+        # for one refresh. Backtest progress only moves forward, so the day
+        # count and total never regress; pnl/return/date carry their last
+        # known value across a poll that omits them.
+        self._best_day = 0
+        self._best_total = None
+        self._shown: Dict[str, Any] = {}
 
-    def _desc(self) -> str:
-        # bold-cyan label, then dim run/task ids + the backtest window
+    def _header(self) -> str:
+        # bold-cyan label, then dim run/task ids + the backtest window, printed
+        # once on its own line above the live status line.
         parts = [self._c("backtest", "1;36")]
         if self.run_id:
             parts.append(self._c(f"run {self.run_id}", "2"))
@@ -94,7 +117,7 @@ class _ProgressPrinter:
             parts.append(self._c(f"task {self.task_id}", "2"))
         if self.start_date or self.end_date:
             parts.append(self._c(f"{self.start_date or '?'}→{self.end_date or '?'}", "2"))
-        return " ".join(parts)
+        return self._c(" │ ", "2").join(parts)
 
     @staticmethod
     def _fmt_elapsed(seconds: float) -> str:
@@ -103,13 +126,9 @@ class _ProgressPrinter:
         m, sec = divmod(rem, 60)
         return f"{h:d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
-    # ANSI colors for the live line (opt out with NO_COLOR=1). Codes: 2=dim,
-    # 31=red, 32=green, 36=cyan, 1=bold.
-    _COLOR = os.environ.get("NO_COLOR") in (None, "")
-
-    @classmethod
-    def _c(cls, text: str, code: str) -> str:
-        return f"\033[{code}m{text}\033[0m" if cls._COLOR else text
+    def _c(self, text: str, code: str) -> str:
+        # ANSI colors (codes: 2=dim, 31=red, 32=green, 36=cyan, 1=bold).
+        return f"\033[{code}m{text}\033[0m" if self._use_color else text
 
     def _signed(self, value, text: str) -> str:
         # green for ≥0, red for <0, dim for unknown
@@ -125,34 +144,81 @@ class _ProgressPrinter:
         bar = self._c("█" * filled, "32") + self._c("░" * (self._BAR_WIDTH - filled), "2")
         return " |" + bar + "|"
 
-    def _line(self, status: Dict[str, Any]) -> str:
+    def _absorb(self, status: Dict[str, Any]) -> None:
+        # Fold a poll into the monotonic display state (see __init__).
         cur = status.get("current_day") or 0
-        total = status.get("total_days")
+        if cur > self._best_day:
+            self._best_day = cur
+        if status.get("total_days"):
+            self._best_total = status.get("total_days")
+        for k in ("net_pnl", "return", "current_date"):
+            v = status.get(k)
+            if v is not None:
+                self._shown[k] = v
+
+    def _line(self, status: Dict[str, Any]) -> str:
+        # Compact status line (no run/task ids — those live in the header).
+        self._absorb(status)
+        cur, total = self._best_day, self._best_total
         days = f"{min(cur, total)}/{total}" if total else f"{cur}/?"
-        pnl = status.get("net_pnl")
-        ret = status.get("return")
+        pnl = self._shown.get("net_pnl")
+        ret = self._shown.get("return")
         sep = self._c(" │ ", "2")  # dim separator between groups
         groups = [
-            self._desc(),
             f"{self._bar(cur, total).lstrip()} {self._c(days, '1')} days".strip(),
             f"pnl {self._signed(pnl, _fmt_money(pnl))}  "
             f"ret {self._signed(ret, _fmt_pct(ret))}  "
-            f"{self._c(status.get('current_date') or '—', '2')}",
+            f"{self._c(self._shown.get('current_date') or '—', '2')}",
             self._c("[" + self._fmt_elapsed(time.monotonic() - self._t0) + "]", "36"),
         ]
         return sep.join(g for g in groups if g)
 
-    def update(self, status: Dict[str, Any]) -> None:
-        # Refresh the single line in place (\r + clear-to-EOL).
+    def _key(self):
+        # Identity of the displayed state, excluding the elapsed clock — so
+        # non-tty output emits a new line only on real progress, not every poll.
+        # Read AFTER _line so it reflects the absorbed (monotonic) values.
+        return (
+            self._best_day,
+            self._best_total,
+            self._shown.get("current_date"),
+            self._shown.get("net_pnl"),
+            self._shown.get("return"),
+        )
+
+    def _emit_header(self) -> None:
+        if self._header_printed:
+            return
+        self._header_printed = True
         try:
-            self.stream.write("\r\033[K" + self._line(status))
+            self.stream.write(self._header() + "\n")
+            self.stream.flush()
+        except Exception:
+            pass
+
+    def update(self, status: Dict[str, Any]) -> None:
+        self._emit_header()
+        try:
+            line = self._line(status)  # absorbs the poll into monotonic state
+            if self._tty:
+                # Refresh the single line in place (\r + clear-to-EOL).
+                self.stream.write("\r\033[K" + line)
+            else:
+                key = self._key()
+                if key == self._last_key:
+                    return  # nothing changed but the clock — don't spam lines
+                self._last_key = key
+                self.stream.write(line + "\n")
             self.stream.flush()
         except Exception:
             pass
 
     def finish(self, status: Dict[str, Any]) -> None:
+        self._emit_header()
         try:
-            self.stream.write("\r\033[K" + self._line(status) + "\n")
+            if self._tty:
+                self.stream.write("\r\033[K" + self._line(status) + "\n")
+            else:
+                self.stream.write(self._line(status) + "\n")
             self.stream.flush()
         except Exception:
             pass
@@ -228,7 +294,7 @@ class Run:
         """Return the run's ``PerformanceReport``.
 
         Local runs return the in-process report. Remote runs prefer the runs
-        REST API and fall back to the orchestrator task-result snapshot when the
+        REST API and fall back to the platform task-result snapshot when the
         REST API has no rows yet (a deployed run whose sandbox hiveq-flow
         predates the run_id->payload_id unification).
         """
@@ -241,7 +307,7 @@ class Run:
         try:
             payload = self._reader.report(self.run_id, include=include) or {}
         except Exception as e:
-            logger.debug(f"runs REST report failed, will try orchestrator: {e}")
+            logger.debug(f"runs REST report failed, will try platform: {e}")
 
         has_rest_data = bool(
             payload.get("summary")
@@ -254,7 +320,7 @@ class Run:
 
                 return PerformanceReport.from_task_result(jobs.get_result(self.task_id))
             except Exception as e:
-                logger.debug(f"orchestrator result fallback failed: {e}")
+                logger.debug(f"platform result fallback failed: {e}")
 
         return PerformanceReport.from_rest(payload)
 
@@ -294,12 +360,42 @@ class Run:
             return pd.DataFrame()
         return pd.DataFrame(self._reader.event_logs(self.run_id, **kw) or [])
 
+    def logs(self) -> List[str]:
+        """The COMPLETE remote executor log for this run, as a list of lines.
+
+        These are the executor's stdout / strategy-callback output — including
+        crashes like ``STRATEGY_CALLBACK_ERROR`` — which are NOT in the runs REST
+        API's ``event-logs``. They live only on the platform ``GET /logs`` endpoint
+        (keyed by ``task_id``; run_id != task_id). Fetched as the full gzipped log
+        (``format=gz``) over direct REST and decompressed — the whole log, not a
+        tail, so errors anywhere in the run are captured. Use :meth:`download_logs`
+        to stream a very large log straight to a file instead.
+        """
+        if not self.task_id:
+            return []
+        from hiveq.flow import jobs
+
+        text = jobs.get_logs_gz(task_id=self.task_id)
+        return text.splitlines() if text else []
+
+    def download_logs(self, path: str) -> str:
+        """Stream the full gzipped executor log to ``path`` (a ``.gz`` file).
+
+        For huge logs — never decompresses in memory. Returns ``path``. Keyed by
+        ``task_id`` via ``GET /logs?format=gz`` (direct REST).
+        """
+        if not self.task_id:
+            raise ValueError("this run has no task_id; cannot fetch logs")
+        from hiveq.flow import jobs
+
+        return jobs.get_logs_gz(task_id=self.task_id, dest=path)
+
     # --- lifecycle ----------------------------------------------------------
     def check_credentials(self) -> "Run":
         """Fail fast if the platform rejects our credentials for this run.
 
         The runs ``/status`` endpoint swallows auth errors (returns PENDING), so
-        a bad key would otherwise hang ``wait()`` until timeout. The orchestrator
+        a bad key would otherwise hang ``wait()`` until timeout. The platform
         read returns a real 401/403, so we probe it once and raise immediately
         on an auth error. Transient/other errors are ignored (wait() handles
         them). No-op for local runs or when there's no task to read.
@@ -352,7 +448,7 @@ class Run:
         # Throttle the runs-gateway /status polling: the progress line only
         # refreshes every few seconds, and hammering it every poll_interval trips
         # the gateway's per-user rate limiter (429). Terminal detection stays
-        # responsive via the cheap orchestrator check below.
+        # responsive via the cheap platform check below.
         status_every = max(poll_interval, 5.0)
         last_status_poll = 0.0
         # Don't poll forever if the platform becomes unreachable: once every
@@ -379,7 +475,7 @@ class Run:
             if printer:
                 printer.update(last)
 
-            # Completion is authoritative from the orchestrator task lifecycle,
+            # Completion is authoritative from the platform task lifecycle,
             # which works regardless of the runs REST data being present yet.
             orch_status = None
             if self.task_id:
@@ -392,7 +488,7 @@ class Run:
                     orch_status = (jobs.get_result(self.task_id) or {}).get("status")
                     succeeded = True
                 except Exception as e:
-                    logger.debug(f"orchestrator status poll failed: {e}")
+                    logger.debug(f"platform status poll failed: {e}")
 
             if (
                 last.get("is_final")

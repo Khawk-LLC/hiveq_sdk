@@ -58,12 +58,9 @@ fi
 
 echo ">> installing ${WHEEL}"
 # Two-step install so we always refresh the SDK's own code without forcing a
-# full dependency re-resolution. The private `hiveq-orchestrator` dep is not on
-# PyPI (installed separately from the platform index), so a plain
-# --force-reinstall would try to re-fetch it and fail.
+# full dependency re-resolution of the already-satisfied public deps.
 #   1) force-reinstall ONLY hiveq-sdk itself (--no-deps) -> always fresh code.
-#   2) plain install -> pull any *missing* public deps; satisfied ones (incl.
-#      the private orchestrator) are left untouched.
+#   2) plain install -> pull any *missing* public deps; satisfied ones left as-is.
 "${PY}" -m pip install --force-reinstall --no-deps "${WHEEL}"
 "${PY}" -m pip install "${WHEEL}"
 

@@ -11,15 +11,17 @@ requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "HiveQ" }]
 
-# Thin client deps only — no engine, no polars/quantstats/hiveq_data.
+# Thin client deps only — no engine, no polars/hiveq_data.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
 # built on requests + cloudpickle below; no platform-internal client package.
+# quantstats powers the visual tearsheet / summary_stats() only (pulls matplotlib).
 dependencies = [
-    "pandas==2.3.3",
+    "pandas>=2.3.2",
     "colorlog==6.9.0",
     "requests>=2.25.0",
     "cloudpickle>=2.0.0",
     "tqdm>=4.0.0",
+    "quantstats>=0.0.62",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +43,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
 "hiveq" = ["py.typed"]
-"hiveq.flow" = ["**/*.pyi"]
+"hiveq.flow" = ["py.typed", "**/*.pyi"]
 
 [tool.setuptools]
 include-package-data = true

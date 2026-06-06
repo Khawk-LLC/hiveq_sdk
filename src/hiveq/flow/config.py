@@ -10,7 +10,7 @@ from enum import Enum
 # there once and every run finds it, from any working directory.
 #
 #   HIVEQ_API_KEY=...
-#   HIVEQ_BASE_URL=http://localhost:5010     # optional (orchestrator)
+#   HIVEQ_BASE_URL=http://localhost:5010     # optional (platform)
 #   HIVEQ_DATA_URL=http://localhost:80        # optional (runs gateway)
 #
 # We load HIVEQ_* keys from that file WITHOUT overriding the environment (env
@@ -495,7 +495,7 @@ class BacktestConfig:
     # Transaction Cost Analysis
     enable_tca: bool = False  # Run TCA analysis on fills/orders after backtest
 
-    # Payload ID for tracking code versions (set by orchestrator executor)
+    # Payload ID for tracking code versions (set by platform executor)
     payload_id: Optional[str] = None
 
     # Run ID for correlating all published data (Python + C++) under one key

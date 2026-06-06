@@ -229,11 +229,11 @@ class PerformanceReport:
 
     @classmethod
     def from_task_result(cls, payload: dict) -> "PerformanceReport":
-        """Build a report from the orchestrator task result snapshot.
+        """Build a report from the platform task result snapshot.
 
         Fallback for deployed runs when the runs REST API has no per-resource
         rows yet (e.g. the executor sandbox runs a hiveq-flow without the
-        run_id->payload_id unification). The orchestrator's task result still
+        run_id->payload_id unification). The platform's task result still
         carries the computed summary/return/pnl stats and scalar PnLs.
         """
         payload = payload or {}
@@ -440,8 +440,16 @@ class PerformanceReport:
             return _create_no_data_html(message=f"Error generating tearsheet: {str(e)}")
 
     def summary_stats(self):
-        # Lazy import quantstats only when needed
-        import quantstats as qs
+        # Lazy import quantstats only when needed. quantstats is a declared
+        # dependency, but guard anyway so a broken/absent install degrades to
+        # None + a clear message instead of an unhandled ImportError.
+        try:
+            import quantstats as qs
+        except ImportError:
+            logging.warning(
+                "quantstats is not installed. Please install it with: pip install quantstats"
+            )
+            return None
 
         # Configure quantstats for better display in Jupyter
         qs.extend_pandas()

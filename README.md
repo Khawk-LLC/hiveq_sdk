@@ -54,7 +54,10 @@ co-installed with the full `hiveq-flow` package (they collide). Clients install
 
 ## Maintenance
 
-The engine-free modules are synced from the full repo by
-`hiveq-flow/scripts/build_sdk.py` (single source of truth). Hand-authored thin
-files (`__init__.py`, `deploy_task.py`, the `oms/sigma` package init, the
-`sigma_context` stub) are never overwritten by the sync.
+This repo's `src/hiveq/flow/` tree is the canonical source — it is **no longer
+auto-synced** from the full `hiveq-flow` repo. The thin client was assembled
+from `hiveq-flow` once at the split; from here it is maintained directly. When
+an engine-free module (config, report, runs, type stubs, …) needs a change that
+also lives in `hiveq-flow`, port it over by hand.
+
+Build/install with `scripts/install.sh` (`--dev` for an editable install).
