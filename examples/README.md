@@ -36,6 +36,13 @@ stubs; the canonical reference is the version-matched spec at `docs/<version>/ap
 | `pairs_stat_arb.py` | 2-symbol pairs | rolling z-score spread with per-symbol state, `short_order` |
 | `timers_scheduling.py` | wall-clock scheduling | `ctx.set_timer`/`on_timer` + `ctx.now()` ET checks (§16.5) |
 
+## Function registry & remote functions
+
+| File | Shape | Teaches |
+|---|---|---|
+| `functions_push.py` | register a function | `hf.push_function(...)` → store a reusable function in your namespace (§2.2) |
+| `functions_run.py` | use it on the platform | `hf.run_function(job)` runs a QUANT_SCRIPTS task that loads the registered function and applies it (§2.2). Run after `functions_push.py`. |
+
 ## Conventions these examples model (the easy-to-get-wrong parts)
 
 - **Time is EST/EDT.** `ctx.now()` is already the configured-tz (ET) datetime, and
