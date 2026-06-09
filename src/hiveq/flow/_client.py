@@ -106,20 +106,29 @@ class _Client:
         task_name: str,
         task: Any,
         entry_method: Optional[str] = "run",
+        args: Optional[tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         job_type: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         requirements: Optional[List[str]] = None,
         allow_duplicate: bool = False,
         duplicate_action: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Capture-and-send a task for execution. Returns the parsed JSON reply."""
+        """Capture-and-send a task for execution. Returns the parsed JSON reply.
+
+        ``entry_method`` defaults to ``"run"`` (the backtest task shape). For a
+        plain callable pass ``entry_method=None`` with ``args``/``kwargs`` — the
+        executor then calls ``task(*args, **kwargs)``.
+        """
         task_type_value = (
             task_type.value
             if isinstance(task_type, TaskType)
             else TaskType(task_type).value
         )
 
-        wrapper = _TaskWrapper(target=task, entry_method=entry_method)
+        wrapper = _TaskWrapper(
+            target=task, entry_method=entry_method, args=args, kwargs=kwargs
+        )
         payload_b64 = base64.b64encode(cloudpickle.dumps(wrapper)).decode()
 
         body = {

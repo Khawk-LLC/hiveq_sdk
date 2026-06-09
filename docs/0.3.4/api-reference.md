@@ -133,6 +133,42 @@ Recognized keys (all optional; sensible defaults apply):
 
 Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§3) and are intentionally not part of the engine config you pass.
 
+### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
+
+Push reusable Python functions to the platform's function registry, and run a function on the platform on demand. Functions are captured with cloudpickle; the registry/host follows the same platform host as everything else (`HIVEQ_AUTH_URL`, override with `HIVEQ_FUNCTION_REGISTRY_URL`).
+
+```python
+push_function(func, *, version, name=None, requirements=None, docstring=None,
+              namespace=None, override=False, include_source=True) -> dict
+#   register a callable. version is semver ('1.0.0'). name defaults to func.__name__,
+#   docstring to func.__doc__. requirements: ['pandas>=2.0'] or {'packages': [...]}.
+#   Goes to YOUR namespace by default; namespace='default' publishes to public.
+#   -> {'function_id', 'namespace', 'name', 'version'}
+
+run_function(func, *args, task_name=None, requirements=None, job_type=None,
+             wait=True, timeout=None, poll_interval=2.0, **kwargs) -> Any
+#   run func(*args, **kwargs) on the platform as a QUANT_SCRIPTS task. Blocks and
+#   returns the function's RETURN VALUE (wait=False -> {'task_id', ...} immediately).
+#   requirements: pip specs installed in the sandbox, e.g. ['pandas>=2.0'].
+
+list_functions(namespace=None, name=None) -> list[dict]   # name = regex filter
+function_versions(name, namespace=None) -> dict           # {'name','versions':[...],'latest'}
+get_function_source(name, version=None, namespace=None) -> dict
+delete_function(name, version=None, namespace=None) -> dict   # one version, or all
+```
+
+```python
+import hiveq.flow as hf
+
+def zscore(series, window=20):
+    """Rolling z-score."""
+    import numpy as np
+    return (series[-1] - np.mean(series[-window:])) / np.std(series[-window:])
+
+hf.push_function(zscore, version="1.0.0", requirements=["numpy"])   # register
+hf.run_function(zscore, [1, 2, 3, 4, 5], window=3)                  # run on platform -> value
+```
+
 ---
 
 ## 3. Credentials

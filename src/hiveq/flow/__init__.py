@@ -56,6 +56,14 @@ logger()
 from hiveq.flow.metrics.report import PerformanceReport
 from hiveq.flow.uploads import upload_files, list_files, delete_files
 from hiveq.flow.auth import login
+from hiveq.flow.functions import (
+    push_function,
+    run_function,
+    list_functions,
+    function_versions,
+    get_function_source,
+    delete_function,
+)
 
 # --- credentials (lazy, from env) -------------------------------------------
 _trader_id: Optional[str] = None
@@ -357,6 +365,13 @@ def _deploy(
 __all__ = [
     # auth
     "login",
+    # function registry
+    "push_function",
+    "run_function",
+    "list_functions",
+    "function_versions",
+    "get_function_source",
+    "delete_function",
     # deploy + observe
     "run_backtest",
     "upload_files",
