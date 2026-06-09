@@ -245,6 +245,33 @@ def list_functions(
     return (resp.json() or {}).get("functions", [])
 
 
+def load_function(
+    name: str, version: Optional[str] = None, namespace: Optional[str] = None
+) -> Callable:
+    """Fetch a registered function as a callable (cloudpickle-loaded).
+
+    Useful for running a registered function on the platform without the
+    sandbox needing the registry client:
+
+        fn = hf.load_function("zscore")
+        hf.run_function(fn, prices, requirements=["numpy"])
+    """
+    ns = _resolve_namespace(namespace)
+    path = (
+        f"namespaces/{ns}/functions/{name}"
+        if not version
+        else f"namespaces/{ns}/functions/{name}/{version}"
+    )
+    resp = _request(
+        "GET", _endpoint(path), f"Load function '{name}'", headers=_auth_headers()
+    )
+    data = resp.json() or {}
+    b64 = data.get("payload_b64")
+    if not b64:
+        raise RuntimeError(f"Registry returned no payload for function '{name}'.")
+    return cloudpickle.loads(base64.b64decode(b64))
+
+
 def function_versions(name: str, namespace: Optional[str] = None) -> dict:
     """All versions of a function: ``{"name", "versions": [...], "latest"}``."""
     ns = _resolve_namespace(namespace)

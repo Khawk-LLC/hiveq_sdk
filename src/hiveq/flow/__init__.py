@@ -59,6 +59,7 @@ from hiveq.flow.auth import login
 from hiveq.flow.functions import (
     push_function,
     run_function,
+    load_function,
     list_functions,
     function_versions,
     get_function_source,
@@ -368,6 +369,7 @@ __all__ = [
     # function registry
     "push_function",
     "run_function",
+    "load_function",
     "list_functions",
     "function_versions",
     "get_function_source",

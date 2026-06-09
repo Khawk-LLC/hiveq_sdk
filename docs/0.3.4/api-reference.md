@@ -135,7 +135,14 @@ Credentials/identity (API key, user/org) are **not** set here — they resolve f
 
 ### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
 
-Push reusable Python functions to the platform's function registry, and run a function on the platform on demand. Functions are captured with cloudpickle; the registry/host follows the same platform host as everything else (`HIVEQ_AUTH_URL`, override with `HIVEQ_FUNCTION_REGISTRY_URL`).
+**What it is.** The *function registry* is a versioned store of reusable Python callables that live on the HiveQ platform rather than in any one script. You write a function once, `push_function(...)` it (cloudpickled, with its `requirements` and a semver `version`), and from then on it can be fetched and run from anywhere — other scripts, other machines, or inside platform jobs — by name and version. It's the building block for sharing indicators, signal functions, and utilities across strategies and teammates without copy-pasting code.
+
+**Why it's useful.**
+- **Reuse & versioning** — one canonical, immutable `name@version`; bump the version to publish changes (existing versions never change under you).
+- **Portability** — `load_function(name)` pulls the exact callable back on any machine; you don't carry the source around.
+- **Run anywhere** — `run_function(func, ...)` executes a callable on the platform (a `QUANT_SCRIPTS` task) with its deps installed in the sandbox, and returns the result.
+
+Functions are captured with cloudpickle; the registry host follows the same platform host as everything else (`HIVEQ_AUTH_URL`, override with `HIVEQ_FUNCTION_REGISTRY_URL`).
 
 ```python
 push_function(func, *, version, name=None, requirements=None, docstring=None,
@@ -144,6 +151,9 @@ push_function(func, *, version, name=None, requirements=None, docstring=None,
 #   docstring to func.__doc__. requirements: ['pandas>=2.0'] or {'packages': [...]}.
 #   Goes to YOUR namespace by default; namespace='default' publishes to public.
 #   -> {'function_id', 'namespace', 'name', 'version'}
+
+load_function(name, version=None, namespace=None) -> Callable
+#   fetch a registered function back as a callable (latest version by default).
 
 run_function(func, *args, task_name=None, requirements=None, job_type=None,
              wait=True, timeout=None, poll_interval=2.0, **kwargs) -> Any
@@ -165,9 +175,14 @@ def zscore(series, window=20):
     import numpy as np
     return (series[-1] - np.mean(series[-window:])) / np.std(series[-window:])
 
-hf.push_function(zscore, version="1.0.0", requirements=["numpy"])   # register
-hf.run_function(zscore, [1, 2, 3, 4, 5], window=3)                  # run on platform -> value
+# register once...
+hf.push_function(zscore, version="1.0.0", requirements=["numpy"])
+# ...then fetch it back and run it on the platform (from any script/machine):
+fn = hf.load_function("zscore")
+hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> value
 ```
+
+> **TBD — access control.** Function-level ACLs (who can read/run a function, fine-grained sharing across namespaces) are **not fully implemented yet**. Today: functions live in your own namespace by default; `namespace="default"` is the shared/public namespace. Treat cross-namespace permissions as subject to change.
 
 ---
 

@@ -20,9 +20,15 @@ def zscore(values, window=20):
 
 if __name__ == "__main__":
     # The function is cloudpickled and stored in YOUR namespace. `requirements`
-    # are the packages it needs wherever it runs.
-    info = hf.push_function(zscore, version="1.0.0", requirements=["numpy"])
-    print("Registered:", info)  # {'function_id', 'namespace', 'name', 'version'}
+    # are the packages it needs wherever it runs. Versions are immutable — bump
+    # the version to publish changes (re-pushing the same one is a no-op here).
+    try:
+        info = hf.push_function(zscore, version="1.0.0", requirements=["numpy"])
+        print("Registered:", info)  # {'function_id', 'namespace', 'name', 'version'}
+    except RuntimeError as e:
+        if "already exists" not in str(e):
+            raise
+        print("zscore v1.0.0 is already registered.")
 
     # Inspect what's there.
     print("Versions :", hf.function_versions("zscore"))
