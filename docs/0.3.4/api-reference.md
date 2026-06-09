@@ -177,8 +177,9 @@ def zscore(series, window=20):
 
 # register once...
 hf.push_function(zscore, version="1.0.0", requirements=["numpy"])
-# ...then fetch it back and run it on the platform (from any script/machine):
-fn = hf.load_function("zscore")
+# ...then fetch it back and run it on the platform (from any script/machine).
+# Pin the version for reproducibility (omit version=... to take the latest):
+fn = hf.load_function("zscore", version="1.0.0")
 hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> value
 ```
 
