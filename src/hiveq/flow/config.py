@@ -43,6 +43,24 @@ def _load_well_known_env() -> None:
 _load_well_known_env()
 
 
+def platform_origin() -> Optional[str]:
+    """The HiveQ platform's ``scheme://host``, derived from ``HIVEQ_AUTH_URL``.
+
+    ``HIVEQ_AUTH_URL`` is the single host users configure (the sign-in host).
+    When the orchestrator / data URLs aren't set explicitly, they follow this
+    host so one setting points the whole SDK at the right platform (local, LAN,
+    or hosted). Returns ``None`` when ``HIVEQ_AUTH_URL`` is unset.
+    """
+    url = os.environ.get("HIVEQ_AUTH_URL")
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    parsed = urlparse(url if "://" in url else "http://" + url)
+    if not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _fetch_user_info_from_api_key():
     """
     Fetch user info from auth service using API key.

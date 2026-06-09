@@ -14,7 +14,7 @@ authors = [{ name = "HiveQ" }]
 # Thin client deps only — no engine, no polars/hiveq_data.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
 # built on requests + cloudpickle below; no platform-internal client package.
-# quantstats powers the visual tearsheet / summary_stats() only (pulls matplotlib).
+# quantstats + matplotlib power the visual tearsheet / PDF export / summary_stats().
 dependencies = [
     "pandas>=2.3.2",
     "colorlog==6.9.0",
@@ -22,6 +22,7 @@ dependencies = [
     "cloudpickle>=2.0.0",
     "tqdm>=4.0.0",
     "quantstats>=0.0.62",
+    "matplotlib>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,9 @@ dev = ["pytest", "mypy", "build", "twine"]
 # (incremental, with a live progress bar), -l to list.
 [project.scripts]
 hiveq-data = "hiveq.flow.uploads:main"
+# `hiveq-login` signs the user in via the browser and saves their API key to
+# ~/.hiveq/.env (same flow run_backtest triggers when no key is present).
+hiveq-login = "hiveq.flow.auth:main"
 
 # This distribution (`hiveq-sdk`) PROVIDES the `hiveq.flow` import namespace. It
 # must NOT be co-installed with the full `hiveq-flow` package (same namespace) —

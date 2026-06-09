@@ -8,14 +8,12 @@ HiveQ platform; the platform runs it and returns results over REST. You get a
 Prerequisites
 -------------
 1. Install the SDK:   pip install hiveq-sdk
-2. Set your API key:  export HIVEQ_API_KEY=...   (the only required credential)
+2. Have a HiveQ API key available — the only credential needed; the SDK warns
+   if one isn't found.
 
 Run:
     python deploy_buy_and_hold.py
 """
-
-# Credentials are read from the HIVEQ_API_KEY environment variable. Nothing else
-# to set here — the platform resolves your user/org from the key.
 
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

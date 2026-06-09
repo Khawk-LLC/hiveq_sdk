@@ -15,7 +15,7 @@ Shape: spread = log(A) - beta*log(B). When z < -ENTRY_Z the spread is cheap ->
 long A / short B; when z > +ENTRY_Z it's rich -> short A / long B; close both
 legs when |z| < EXIT_Z. ``beta`` is a fixed hedge ratio here for clarity.
 
-Run:  python pairs_stat_arb.py   (needs HIVEQ_API_KEY; see intraday_momentum_equity.py)
+Run:  python pairs_stat_arb.py
 """
 from collections import deque
 

@@ -12,7 +12,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 Shape: place a market buy early, rest a limit sell 1% above, re-price it to the
 market a few bars later (so it fills), then park a far-away order and cancel it.
 
-Run:  python order_lifecycle.py   (needs HIVEQ_API_KEY)
+Run:  python order_lifecycle.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

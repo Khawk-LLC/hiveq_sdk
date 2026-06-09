@@ -13,14 +13,14 @@ Demonstrates (every ctx call verified against the SDK type surface):
 IMPORTANT — data schema: MOO/MOC fill against the **auction prints**
 (MCOfficialOpen / MCOfficialClose), which exist only in tick-level trade data.
 Use the ``eq_trades`` schema (futures: ``fut_trades``) and
-``ctx.subscribe_trade_ticks(...)`` — minute bars (``bars_1m``) and quotes
+``ctx.subscribe_trades(...)`` — minute bars (``bars_1m``) and quotes
 (``tbbo``) carry NO auction print, so auction orders would never fill on them.
 See API doc §5.2.1 (auction orders) and §9.1 (schemas).
 
 Auctions route to the symbol's primary listing exchange; when ``market_center``
 is omitted they default to NASDAQ (AAPL's primary venue) — §5.2.1.
 
-Run:  python auction_moo_moc.py   (needs HIVEQ_API_KEY)
+Run:  python auction_moo_moc.py
 """
 from datetime import time as dtime
 
@@ -40,7 +40,7 @@ class AuctionMooMoc:
 
     def on_start(self, ctx, event):                              # subscribe in START (R3)
         # Trade ticks (eq_trades) carry the auction prints MOO/MOC fill against.
-        ctx.subscribe_trade_ticks(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY)
+        ctx.subscribe_trades(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY)
 
     def on_trade(self, ctx, event):
         tick = event.data()                                      # -> SigmaTradeTick (§7.5)
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         strategy_configs=[StrategyConfig(name="AuctionMooMoc", type="AuctionMooMoc")],
         symbols=["AAPL"],
         start_date="2025-09-19",
-        end_date="2025-09-19",
+        end_date="2025-09-25",
         # eq_trades = tick-level trades INCLUDING the opening/closing auction prints.
         data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]}],
         # Pre-market (04:00) through after-hours (20:00) so the 08:00 MOO window has data.

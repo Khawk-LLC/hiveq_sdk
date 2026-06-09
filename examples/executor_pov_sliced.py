@@ -15,7 +15,7 @@ Idiom (verified against the SDK surface):
   - re-target IN PLACE with ``replace_executor_params_by_id`` — never stack a
     second executor on the same target.
 
-Run:  python example.py   (needs HIVEQ_API_KEY)
+Run:  python example.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

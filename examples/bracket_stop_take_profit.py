@@ -9,7 +9,7 @@ The idiom shown here:
      emulate OCO (done in ``on_position``);
   4. trail the stop up in ``on_bar`` via ``modify_order`` against a high-water mark.
 
-Run:  python bracket_stop_take_profit.py   (needs HIVEQ_API_KEY)
+Run:  python bracket_stop_take_profit.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

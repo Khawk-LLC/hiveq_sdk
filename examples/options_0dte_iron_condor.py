@@ -13,7 +13,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
   - TIME IS EST/EDT: ``ctx.now()`` is already ET — compare wall-clock directly,
     never convert UTC (R5/R6). Throttle to one entry per clock-minute.
 
-Run:  python options_0dte_iron_condor.py   (needs HIVEQ_API_KEY)
+Run:  python options_0dte_iron_condor.py
 """
 from datetime import time
 

@@ -13,7 +13,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 
 Shape: a single momentum-vs-open lean on ES, flat by the 16:30 ET halt.
 
-Run:  python futures_session.py   (needs HIVEQ_API_KEY)
+Run:  python futures_session.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig, BacktestConfig

@@ -73,8 +73,17 @@ class _Client:
         api_key: Optional[str] = None,
         timeout: int = 30,
     ):
+        # Order: explicit arg > HIVEQ_BASE_URL > the auth host (HIVEQ_AUTH_URL)
+        # + /api/orchestrator > the hosted default. Following the auth host means
+        # one configured URL points the whole SDK at the same platform.
+        from hiveq.flow.config import platform_origin
+
+        origin = platform_origin()
         self.base_url = (
-            base_url or os.environ.get("HIVEQ_BASE_URL", _DEFAULT_BASE_URL)
+            base_url
+            or os.environ.get("HIVEQ_BASE_URL")
+            or (f"{origin}/api/orchestrator" if origin else None)
+            or _DEFAULT_BASE_URL
         ).rstrip("/")
         self.api_key = api_key or os.environ.get("HIVEQ_API_KEY")
         self.timeout = timeout

@@ -12,7 +12,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 The feed (examples/userdata/user_signals.csv) has columns
 ``date,time,sym,signal,weight,action``; we act on the ``action`` column.
 
-Run:  python custom_data.py   (needs HIVEQ_API_KEY)
+Run:  python custom_data.py
 """
 from pathlib import Path
 

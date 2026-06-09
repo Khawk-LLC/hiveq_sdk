@@ -18,7 +18,7 @@ bar per symbol, then hold. Fills are observed in the ORDER_FILLED branch — not
 there is NO on_order_filled callback; the single-dispatch form sees the raw
 EventType (§7.0).
 
-Run:  python global_dispatch.py   (needs HIVEQ_API_KEY; see intraday_momentum_equity.py)
+Run:  python global_dispatch.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

@@ -12,7 +12,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 Shape: long-only intraday. Enter on a fast>slow SMA cross during the entry window;
 exit on the reverse cross or force-flat near the 16:00 ET close.
 
-Run:  python intraday_momentum_equity.py   (needs HIVEQ_API_KEY; see deploy_buy_and_hold.py)
+Run:  python intraday_momentum_equity.py
 """
 from collections import deque
 

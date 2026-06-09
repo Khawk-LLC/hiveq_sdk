@@ -12,7 +12,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 Shape: long-only SMA-free demo — buy a starter position on the first bar, then
 let a 1-minute timer (not the bar stream) drive the end-of-day flatten.
 
-Run:  python timers_scheduling.py   (needs HIVEQ_API_KEY)
+Run:  python timers_scheduling.py
 """
 from datetime import timedelta
 

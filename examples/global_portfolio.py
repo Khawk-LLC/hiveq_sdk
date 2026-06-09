@@ -14,7 +14,7 @@ Shape: StrategyA buys AAPL on any up-bar; StrategyB buys AAPL (smaller clip) on
 a 0.2% up-move. Each logs its own net_position/net_exposure next to the account
 total so you can watch them diverge (§7.2, §8 portfolio API).
 
-Run:  python global_portfolio.py   (needs HIVEQ_API_KEY; see intraday_momentum_equity.py)
+Run:  python global_portfolio.py
 """
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig

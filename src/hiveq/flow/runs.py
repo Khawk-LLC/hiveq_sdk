@@ -8,6 +8,7 @@ REST endpoints so the SDK "feels like" the API:
     run.report()                      # GET /runs/{id}/report  -> PerformanceReport
     run.positions(); run.orders(); run.trades()
     run.daily_returns(); run.equity_curve(); run.metrics(); run.summary()
+    run.tearsheet()                   # quantstats HTML tearsheet
     run.status(); run.event_logs(); run.logs(); run.wait()
 
 Tabular resources come back as pandas DataFrames; scalar ones as dicts.
@@ -64,88 +65,52 @@ def _fmt_pct(v: Optional[float]) -> str:
 
 
 class _ProgressPrinter:
-    """Live progress for a running backtest.
+    """Live progress for a running backtest, rendered with ``tqdm``.
 
-    Prints a one-time header (run id, task id, backtest window), then a compact
-    live status line below it — progress bar, day count, pnl/return, current
-    date, elapsed — kept short so it fits a normal terminal width.
+    Most users run in Jupyter, marimo, or an IDE console, each of which renders
+    progress differently (Jupyter ignores ``\\r``; marimo isn't IPython). Rather
+    than detect and hand-render each, we drive ``tqdm.auto``, which already picks
+    the right backend per environment — the ipywidgets bar in Jupyter, marimo's
+    native bar in marimo, and a carriage-return text bar in terminals / IDE
+    consoles / pipes.
 
-    On a real terminal the status line refreshes *in place* via a carriage
-    return. When stdout is NOT a tty (piped, captured, some IDE run consoles),
-    ``\\r``/``\\033[K`` are not honored — so every refresh would concatenate into
-    one giant run-on line. There we fall back to newline-terminated lines,
-    emitted only when the displayed values change (ignoring the elapsed clock),
-    and drop ANSI color so the codes don't garble the output.
+    The day count drives the bar; pnl / return / current date ride in the
+    postfix; the backtest window is the description. tqdm shows elapsed/rate.
     """
-
-    _BAR_WIDTH = 20
 
     def __init__(self, run_id=None, task_id=None, start_date=None, end_date=None, stream=None):
         self.run_id = run_id
         self.task_id = task_id
         self.start_date = start_date
         self.end_date = end_date
-        self.stream = stream or sys.stdout
-        self._t0 = time.monotonic()
-        # In-place \r redraw only works on a real terminal; detect it once.
-        try:
-            self._tty = bool(self.stream.isatty())
-        except Exception:
-            self._tty = False
-        # Color only when enabled (NO_COLOR unset) AND we're on a tty — otherwise
-        # the escape codes show up as literal garbage in captured output.
-        self._use_color = (os.environ.get("NO_COLOR") in (None, "")) and self._tty
+        self.stream = stream  # optional file override (tests); None -> tqdm default
+        self._bar = None
+        self._closed = False
         self._header_printed = False
-        self._last_key = None
+        # Whether it's safe to put ANSI color in the metrics text. Set once the
+        # tqdm backend is known: yes for the text bar (terminal/IDE), no for the
+        # Jupyter widget (which would render escape codes as literal garbage).
+        self._ansi = False
         # Monotonic display state. The runs gateway occasionally returns a
         # partial/stale /status (current_day missing -> 0, or total_days/pnl
-        # absent) — without this the bar would snap back to 0/lose the total
-        # for one refresh. Backtest progress only moves forward, so the day
-        # count and total never regress; pnl/return/date carry their last
-        # known value across a poll that omits them.
+        # absent). Backtest progress only moves forward, so the day count and
+        # total never regress; pnl/return/date carry their last known value.
         self._best_day = 0
         self._best_total = None
         self._shown: Dict[str, Any] = {}
 
-    def _header(self) -> str:
-        # bold-cyan label, then dim run/task ids + the backtest window, printed
-        # once on its own line above the live status line.
-        parts = [self._c("backtest", "1;36")]
-        if self.run_id:
-            parts.append(self._c(f"run {self.run_id}", "2"))
-        if self.task_id:
-            parts.append(self._c(f"task {self.task_id}", "2"))
-        if self.start_date or self.end_date:
-            parts.append(self._c(f"{self.start_date or '?'}→{self.end_date or '?'}", "2"))
-        return self._c(" │ ", "2").join(parts)
+    def _window(self) -> str:
+        return f"{self.start_date or '?'}→{self.end_date or '?'}"
 
-    @staticmethod
-    def _fmt_elapsed(seconds: float) -> str:
-        s = int(seconds)
-        h, rem = divmod(s, 3600)
-        m, sec = divmod(rem, 60)
-        return f"{h:d}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
+    def _g(self, text: str) -> str:
+        # Green (only when ANSI is safe — see _ansi).
+        return f"\033[32m{text}\033[0m" if self._ansi else text
 
-    def _c(self, text: str, code: str) -> str:
-        # ANSI colors (codes: 2=dim, 31=red, 32=green, 36=cyan, 1=bold).
-        return f"\033[{code}m{text}\033[0m" if self._use_color else text
-
-    def _signed(self, value, text: str) -> str:
-        # green for ≥0, red for <0, dim for unknown
-        if value is None:
-            return self._c(text, "2")
-        return self._c(text, "32" if value >= 0 else "31")
-
-    def _bar(self, cur: int, total) -> str:
-        if not total:
-            return ""
-        frac = max(0.0, min(1.0, cur / total))
-        filled = int(round(frac * self._BAR_WIDTH))
-        bar = self._c("█" * filled, "32") + self._c("░" * (self._BAR_WIDTH - filled), "2")
-        return " |" + bar + "|"
+    def _grey(self, text: str) -> str:
+        # Grey/bright-black — used for the `|` delimiters.
+        return f"\033[90m{text}\033[0m" if self._ansi else text
 
     def _absorb(self, status: Dict[str, Any]) -> None:
-        # Fold a poll into the monotonic display state (see __init__).
         cur = status.get("current_day") or 0
         if cur > self._best_day:
             self._best_day = cur
@@ -156,72 +121,114 @@ class _ProgressPrinter:
             if v is not None:
                 self._shown[k] = v
 
-    def _line(self, status: Dict[str, Any]) -> str:
-        # Compact status line (no run/task ids — those live in the header).
-        self._absorb(status)
-        cur, total = self._best_day, self._best_total
-        days = f"{min(cur, total)}/{total}" if total else f"{cur}/?"
-        pnl = self._shown.get("net_pnl")
-        ret = self._shown.get("return")
-        sep = self._c(" │ ", "2")  # dim separator between groups
-        groups = [
-            f"{self._bar(cur, total).lstrip()} {self._c(days, '1')} days".strip(),
-            f"pnl {self._signed(pnl, _fmt_money(pnl))}  "
-            f"ret {self._signed(ret, _fmt_pct(ret))}  "
-            f"{self._c(self._shown.get('current_date') or '—', '2')}",
-            self._c("[" + self._fmt_elapsed(time.monotonic() - self._t0) + "]", "36"),
-        ]
-        return sep.join(g for g in groups if g)
-
-    def _key(self):
-        # Identity of the displayed state, excluding the elapsed clock — so
-        # non-tty output emits a new line only on real progress, not every poll.
-        # Read AFTER _line so it reflects the absorbed (monotonic) values.
-        return (
-            self._best_day,
-            self._best_total,
-            self._shown.get("current_date"),
-            self._shown.get("net_pnl"),
-            self._shown.get("return"),
-        )
-
-    def _emit_header(self) -> None:
+    def _print_header(self) -> None:
+        # Run/task ids on their own line above the bar (handy for re-attaching
+        # via hf.get_run(run_id) or pulling logs by task_id). Printed once.
+        # Labels + ids in green; the `|` delimiter in grey.
         if self._header_printed:
             return
         self._header_printed = True
+        parts = []
+        if self.run_id:
+            parts.append(self._g(f"run {self.run_id}"))
+        if self.task_id:
+            parts.append(self._g(f"task {self.task_id}"))
+        if not parts:
+            return
+        out = self.stream if self.stream is not None else sys.stdout
         try:
-            self.stream.write(self._header() + "\n")
-            self.stream.flush()
+            out.write(self._grey(" | ").join(parts) + "\n")
+            out.flush()
+        except Exception:
+            pass
+
+    def _ensure_bar(self) -> None:
+        if self._bar is not None:
+            return
+        try:
+            from tqdm.auto import tqdm
+        except Exception:
+            self._bar = None
+            return
+
+        # Decide color BEFORE building the header/format: ANSI is safe for the
+        # text bar but NOT the Jupyter widget (it renders escape codes literally).
+        # tqdm.auto resolves to tqdm.notebook.tqdm in Jupyter — detect via module.
+        is_widget = "notebook" in tqdm.__module__
+        self._ansi = (not is_widget) and (os.environ.get("NO_COLOR") in (None, ""))
+
+        self._print_header()
+        try:
+            # `|`-delimited fields, all green except the grey `|` separators (and
+            # the pnl/return values, which are sign-colored in {desc}). Metrics go
+            # in {desc} — not tqdm's {postfix}, which would force a ", " in front.
+            sep = self._grey("|")
+            bar_format = (
+                self._g("backtest " + self._window()) + " "
+                + sep + "{bar}" + sep + " "
+                + self._g("{n_fmt}/{total_fmt} days") + " " + sep + " "
+                + self._g("{elapsed}") + " " + sep + " {desc}"
+            )
+            kwargs = dict(
+                total=self._best_total,
+                dynamic_ncols=True,
+                leave=True,
+                bar_format=bar_format,
+                colour="green",  # the bar fill itself
+                # stdout, not tqdm's default stderr: PyCharm tints stderr red,
+                # which masks our green/red ANSI. stdout renders color cleanly.
+                file=self.stream if self.stream is not None else sys.stdout,
+            )
+            self._bar = tqdm(**kwargs)
+        except Exception:
+            self._bar = None
+
+    def _signed(self, value, text: str) -> str:
+        # Green for >= 0, red for < 0 — only when ANSI is safe (see _ansi).
+        if not self._ansi or value is None:
+            return text
+        return f"\033[{'32' if value >= 0 else '31'}m{text}\033[0m"
+
+    def _metrics(self) -> str:
+        pnl = self._shown.get("net_pnl")
+        ret = self._shown.get("return")
+        sep = self._grey(" | ")
+        date = self._shown.get("current_date") or "—"
+        return (
+            self._g("pnl") + " " + self._signed(pnl, _fmt_money(pnl)) + sep
+            + self._g("ret") + " " + self._signed(ret, _fmt_pct(ret)) + sep
+            + self._g(date)
+        )
+
+    def _refresh(self) -> None:
+        self._ensure_bar()
+        if self._bar is None:
+            return
+        try:
+            if self._best_total and self._bar.total != self._best_total:
+                self._bar.total = self._best_total
+            target = self._best_day
+            if self._best_total:
+                target = min(target, self._best_total)
+            self._bar.n = target  # advance the bar to the current day
+            self._bar.set_description_str(self._metrics(), refresh=False)
+            self._bar.refresh()
         except Exception:
             pass
 
     def update(self, status: Dict[str, Any]) -> None:
-        self._emit_header()
-        try:
-            line = self._line(status)  # absorbs the poll into monotonic state
-            if self._tty:
-                # Refresh the single line in place (\r + clear-to-EOL).
-                self.stream.write("\r\033[K" + line)
-            else:
-                key = self._key()
-                if key == self._last_key:
-                    return  # nothing changed but the clock — don't spam lines
-                self._last_key = key
-                self.stream.write(line + "\n")
-            self.stream.flush()
-        except Exception:
-            pass
+        self._absorb(status)
+        self._refresh()
 
     def finish(self, status: Dict[str, Any]) -> None:
-        self._emit_header()
-        try:
-            if self._tty:
-                self.stream.write("\r\033[K" + self._line(status) + "\n")
-            else:
-                self.stream.write(self._line(status) + "\n")
-            self.stream.flush()
-        except Exception:
-            pass
+        self._absorb(status)
+        self._refresh()
+        if self._bar is not None and not self._closed:
+            try:
+                self._bar.close()
+            except Exception:
+                pass
+            self._closed = True
 
 
 class Run:
@@ -235,11 +242,14 @@ class Run:
         report=None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        task_name: Optional[str] = None,
     ):
         if not run_id:
             raise ValueError("run_id is required")
         self.run_id = run_id
         self.task_id = task_id
+        # Optional human-friendly backtest name; used to name tearsheet files.
+        self.task_name = task_name
         # Backtest window, surfaced on the live progress line (best-effort: set
         # by run_backtest at submit time; None when attaching via get_run).
         self.start_date = start_date
@@ -323,6 +333,27 @@ class Run:
                 logger.debug(f"platform result fallback failed: {e}")
 
         return PerformanceReport.from_rest(payload)
+
+    def tearsheet(self, output: Optional[str] = None) -> str:
+        """Render the performance tearsheet for this run to a PDF.
+
+        Produces a multi-page PDF — equity curve, drawdowns, monthly-returns
+        heatmap, rolling risk, return distribution, and a full metrics table.
+        When ``output`` is omitted the file is named after the run (the
+        backtest task name when known, otherwise the run id), written to the
+        current directory. Returns the path of the PDF written.
+
+            run.tearsheet()                      # -> '<task_name|run_id>.pdf'
+            run.tearsheet(output='my_report.pdf')
+        """
+        if output is None:
+            base = self.task_name or self.run_id
+            output = f"{base}.pdf"
+        elif not output.lower().endswith(".pdf"):
+            output = f"{output}.pdf"
+        path = self.report().save_tearsheet_pdf(output)
+        logger.info(f"Tearsheet written to {path}")
+        return path
 
     # --- tabular resources (DataFrames) ------------------------------------
     def metrics(self, **kw) -> pd.DataFrame:
@@ -445,11 +476,11 @@ class Run:
         )
         start = time.time()
         last: Dict[str, Any] = {}
-        # Throttle the runs-gateway /status polling: the progress line only
-        # refreshes every few seconds, and hammering it every poll_interval trips
-        # the gateway's per-user rate limiter (429). Terminal detection stays
-        # responsive via the cheap platform check below.
-        status_every = max(poll_interval, 5.0)
+        # How often to re-poll the runs-gateway /status for day/pnl. Kept at the
+        # caller's poll_interval (default 1s) so the line advances per day even on
+        # fast backtests. For very long runs where per-second polling could trip
+        # the gateway's per-user rate limiter (429), pass a larger poll_interval.
+        status_every = max(poll_interval, 1.0)
         last_status_poll = 0.0
         # Don't poll forever if the platform becomes unreachable: once every
         # attempted poll has failed continuously for this long, stop and point

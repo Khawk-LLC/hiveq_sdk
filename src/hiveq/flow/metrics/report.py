@@ -284,6 +284,132 @@ class PerformanceReport:
 
         return "\n\n".join(sections) if sections else "PerformanceReport: No data available"
 
+    def _prepared_returns(self) -> Optional[pd.Series]:
+        """Return a clean, UTC-datetime-indexed returns Series, or ``None``.
+
+        Shared normalization for the tearsheet / metrics paths: pull the
+        returns out of ``returns_series`` (Series or DataFrame), drop NaN/NaT,
+        coerce the index to a tz-aware (UTC) DatetimeIndex. Returns ``None``
+        when there is no usable returns data.
+        """
+        if self.returns_series is None:
+            return None
+        if isinstance(self.returns_series, pd.DataFrame):
+            returns = self.returns_series.get('returns')
+            if returns is None:
+                return None
+        else:
+            returns = self.returns_series.copy()
+
+        returns = returns.dropna()
+        if returns.empty:
+            return None
+
+        if not isinstance(returns.index, pd.DatetimeIndex):
+            try:
+                returns.index = pd.to_datetime(returns.index)
+            except Exception as e:
+                logging.warning(f"Could not convert returns index to datetime: {e}")
+                return None
+        if returns.index.isna().any():
+            returns = returns[~returns.index.isna()]
+        if returns.empty:
+            return None
+
+        if returns.index.tz is None:
+            returns.index = returns.index.tz_localize('UTC')
+        else:
+            returns.index = returns.index.tz_convert('UTC')
+        return returns
+
+    def save_tearsheet_pdf(self, output: str) -> str:
+        """Render the performance tearsheet to a multi-page PDF at ``output``.
+
+        Builds the PDF from quantstats' plots plus a full metrics table using
+        matplotlib (which ships with quantstats) — no extra system tooling is
+        required. Returns the path written. Raises ``ValueError`` if the run
+        has no usable returns data.
+        """
+        returns = self._prepared_returns()
+        if returns is None:
+            raise ValueError(
+                "No returns data available for this run — cannot build a tearsheet PDF."
+            )
+
+        import os
+        import tempfile
+
+        import matplotlib
+        matplotlib.use('Agg')  # headless: no display needed to write a file
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_pdf import PdfPages
+
+        import quantstats as qs
+        qs.extend_pandas()
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+        warnings.filterwarnings('ignore')
+
+        # The plots to render, in order. Each is best-effort: quantstats'
+        # plot set varies slightly across versions, so a missing/raising one
+        # is skipped rather than failing the whole PDF.
+        plot_fns = [
+            ('snapshot', lambda f: qs.plots.snapshot(returns, show=False, savefig=f)),
+            ('returns', lambda f: qs.plots.returns(returns, show=False, savefig=f)),
+            ('log_returns', lambda f: qs.plots.log_returns(returns, show=False, savefig=f)),
+            ('yearly_returns', lambda f: qs.plots.yearly_returns(returns, show=False, savefig=f)),
+            ('monthly_heatmap', lambda f: qs.plots.monthly_heatmap(returns, show=False, savefig=f)),
+            ('drawdown', lambda f: qs.plots.drawdown(returns, show=False, savefig=f)),
+            ('drawdowns_periods', lambda f: qs.plots.drawdowns_periods(returns, show=False, savefig=f)),
+            ('rolling_sharpe', lambda f: qs.plots.rolling_sharpe(returns, show=False, savefig=f)),
+            ('rolling_volatility', lambda f: qs.plots.rolling_volatility(returns, show=False, savefig=f)),
+            ('distribution', lambda f: qs.plots.distribution(returns, show=False, savefig=f)),
+        ]
+
+        os.makedirs(os.path.dirname(os.path.abspath(output)) or '.', exist_ok=True)
+        with PdfPages(output) as pdf:
+            # Page 1: the full metrics table.
+            try:
+                metrics = qs.reports.metrics(returns, display=False, mode='full')
+                fig, ax = plt.subplots(figsize=(8.5, 11))
+                ax.axis('off')
+                ax.set_title('Performance Metrics', fontsize=14, fontweight='bold', loc='left')
+                table = ax.table(
+                    cellText=metrics.astype(str).values,
+                    rowLabels=metrics.index,
+                    colLabels=metrics.columns,
+                    loc='upper left',
+                    cellLoc='right',
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(7)
+                table.scale(1, 1.1)
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+            except Exception as e:
+                logging.warning(f"Could not render metrics table page: {e}")
+
+            # Following pages: one chart each. quantstats writes the chart to a
+            # temp PNG via savefig; we drop that image onto a full PDF page.
+            with tempfile.TemporaryDirectory() as tmp:
+                for name, render in plot_fns:
+                    png = os.path.join(tmp, f"{name}.png")
+                    try:
+                        render({'fname': png, 'dpi': 150, 'bbox_inches': 'tight'})
+                    except Exception as e:
+                        logging.warning(f"Skipping '{name}' plot in tearsheet: {e}")
+                        continue
+                    if not os.path.exists(png):
+                        continue
+                    img = plt.imread(png)
+                    fig = plt.figure(figsize=(11, 8.5))
+                    ax = fig.add_axes([0, 0, 1, 1])
+                    ax.axis('off')
+                    ax.imshow(img)
+                    pdf.savefig(fig)
+                    plt.close(fig)
+
+        return output
+
     def create_tearsheet(self) -> str:
         """Create a quantstats HTML report with comprehensive performance analysis.
 

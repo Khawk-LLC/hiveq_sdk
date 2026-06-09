@@ -1,6 +1,5 @@
 <!--
 CANONICAL MACHINE-READABLE API SPEC FOR HIVEQ FLOW.
-This file supersedes docs/prompts/hiveq_flow_api_prompt.md and docs/context7/llms-full.txt.
 Audience: code-generation agents AND human developers.
 Every signature, type, enum value, and dict key below is verified against source.
 If you are unsure of a value, use the documented dataset/schema codes in §9 rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
@@ -8,7 +7,7 @@ If you are unsure of a value, use the documented dataset/schema codes in §9 rat
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.2`
+- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.4`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped.
@@ -33,7 +32,7 @@ R5  Timestamps on payloads: ts_event / ts_init are int NANOSECONDS. Use .time (c
     .time_utc (UTC) for datetime. ctx.now() is configured-tz datetime; ctx.now_utc() is UTC.
 R6  session_start / session_end are ET (America/New_York) wall-clock "HH:MM" strings, always.
 R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, open short with short_order.
-R8  Credentials come from environment variables (§3). Never hard-code them.
+R8  A HiveQ API key is the only credential required (§3); auth is handled for you. Never hard-code keys.
 R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
     across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
 ```
@@ -92,40 +91,53 @@ run_backtest(
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
     silent: bool = False,                       # True -> deploy + return Run immediately (no blocking)
-    task_name: Optional[str] = None,
-    allow_duplicate: bool = True,
-    duplicate_action: str = 'override',
-    timeout: Optional[float] = None,
-    poll_interval: float = 1.0,
-    **kwargs,                                   # e.g. config={'hiveq_log_level':'DEBUG'}, engine_config=EngineConfig(...) (§13)
+    **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
 #   silent=False (default): deploy to platform, block w/ live progress, return the finished Run.
 #   silent=True           : deploy and return the Run immediately (run.run_id / run.task_id).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
-#   DEBUG: pass config={'hiveq_log_level': 'DEBUG'} for verbose executor logs, then read the full
-#         executor log (incl. tracebacks) with run.logs() (§10.0). Levels: DEBUG/INFO/WARNING/ERROR.
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
 event_logs() -> pandas.DataFrame                # logs of the LAST run_backtest, fetched over REST (§10.2)
 config() -> EngineConfig                        # the module EngineConfig (timezone + params)
+
+login(*, timeout=300.0, open_browser=True) -> str   # browser sign-in (loopback); saves the API key to ~/.hiveq/.env, returns it (§3)
 ```
 
 **Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
 
+### 2.1 Engine configuration (via `**kwargs`)
+
+Engine behavior is tuned through `run_backtest`'s `**kwargs`, in either of two equivalent forms:
+
+```python
+# (a) inline override dict — merged into the engine params:
+run = hf.run_backtest(..., config={'hiveq_log_level': 'DEBUG'})
+
+# (b) a full EngineConfig (e.g. to set the timezone) — see §13:
+from hiveq.flow import EngineConfig
+run = hf.run_backtest(..., engine_config=EngineConfig(timezone='America/New_York',
+                                                      params={'hiveq_log_level': 'DEBUG'}))
+```
+
+Recognized keys (all optional; sensible defaults apply):
+
+| key | type | default | purpose |
+|---|---|---|---|
+| `hiveq_log_level` | str | `'INFO'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Use `DEBUG`, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). |
+| `oms_console_log` | bool | `False` | Echo order-management-system activity to the executor console. |
+| `futures_datasets` | list[str] | `['HIVEQ_US_FUT']` | Datasets treated as futures (enables contract resolution + rollover events, §7.12). |
+| `signals_datasets` | list[str] | `['HIVEQ_QUANT_SIGNALS']` | Datasets that key off `config['symbols']` rather than the run's symbol universe. |
+| `hiveq_data_page_size` | int | `100_000` | Max records per data request (raise for very dense schemas, e.g. options). |
+
+Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§3) and are intentionally not part of the engine config you pass.
+
 ---
 
-## 3. Environment / credentials
+## 3. Credentials
 
-Auto-initialized on first API call. **`HIVEQ_API_KEY` is the only required variable** — user id, org id, and user name are resolved from the auth service using the key. The rest are optional overrides:
-
-| Var | Required | Meaning |
-|---|---|---|
-| `HIVEQ_API_KEY` | **yes** | API key — the only credential you must set |
-| `HIVEQ_BASE_URL` | no | Platform base URL override (also read by the data + jobs clients); defaults to the canonical host |
-| `HIVEQ_USER_ID` | no | User id — auto-resolved from the API key if unset |
-| `HIVEQ_ORG_ID` | no | Org id — auto-resolved from the API key if unset |
-| `HIVEQ_USER_NAME` | no | User name — auto-resolved from the API key if unset |
+A **HiveQ API key** is the only credential required, and the SDK handles it for you — you don't set or manage it by hand. Identity (user, org) is resolved from the key.
 
 ---
 
@@ -177,7 +189,7 @@ class MyStrategy:
 ```python
 ctx.subscribe_bars(symbols: List[str], asset_type: AssetType = None, interval: str = "1m")
 ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = None)
-ctx.subscribe_trade_ticks(symbols: List[str], asset_type: AssetType)      # trades; with the `tbbo` schema, quotes arrive too (on_quote)
+ctx.subscribe_trades(symbols: List[str], asset_type: AssetType)      # trades; with the `tbbo` schema, quotes arrive too (on_quote)
 ctx.subscribe_data(data_id: str, signals: List[str] = None)               # custom / signal data
 ctx.subscribe_index(symbols: List[str])                                   # spot index value
 ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
@@ -235,7 +247,7 @@ ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
 Auction orders participate in an exchange's opening or closing cross/auction, not the continuous book. Pass them via `order_type=OrderType.MOO|MOC|LOO|LOC` (LOO/LOC also need `limit_price`). Each exchange enforces its own **entry cutoff** (latest time an order is accepted) and **cancel/modify cutoff** (after which the order is locked). These differ by venue.
 
 > ⚠️ **Two requirements for auction orders to fill in a backtest:**
-> 1. **Trade-print data.** Auction orders cross against the official open/close prints (`MCOfficialOpen` / `MCOfficialClose`), which live only in tick-level **trade** data. Subscribe with `ctx.subscribe_trade_ticks(...)` and use schema **`eq_trades`** (equities) or **`fut_trades`** (futures). Minute/second **bars** (`bars_*`) and **quotes** (`tbbo`) carry **no auction print** — auction orders on those never fill (§9.1).
+> 1. **Trade-print data.** Auction orders cross against the official open/close prints (`MCOfficialOpen` / `MCOfficialClose`), which live only in tick-level **trade** data. Subscribe with `ctx.subscribe_trades(...)` and use schema **`eq_trades`** (equities) or **`fut_trades`** (futures). Minute/second **bars** (`bars_*`) and **quotes** (`tbbo`) carry **no auction print** — auction orders on those never fill (§9.1).
 > 2. **Primary listing exchange.** The cross happens at the symbol's primary venue. When `market_center` is **omitted, auction orders default to NASDAQ** — correct for NASDAQ-listed names (e.g. AAPL), so omitting it is the portable choice. Pass `market_center=` (e.g. `'NYSE'`) only to override routing. ⚠️ Explicit `market_center` on a *direct* `buy_order`/`sell_order` requires a recent engine — older deployed executors raise `TypeError: ... unexpected keyword argument 'market_center'`; if you hit that, omit it (or route via the `AUCTION` executor, which has always accepted `market_center`).
 
 **Two ways to send an auction order:**
@@ -339,7 +351,7 @@ An executor is a server-side execution algo that owns the *entire* order lifecyc
 
 For **simple cases — a single immediate market order, or a signal-style backtest** that just needs a position — plain `buy_order`/`sell_order` (or the §5.2 sizing helpers) are simpler and sufficient; an executor adds no value there. Don't wrap a one-shot market order in an executor.
 
-> ⚠️ **Executors require a tick-by-tick data stream — they do NOT work on bars.** POV/TWAP/VWAP/PASSIVE/AUCTION etc. slice and reprice against the live tick stream, so the strategy must subscribe to ticks — **prefer trades: `ctx.subscribe_trade_ticks(...)` with schema `eq_trades` (equities) / `fut_trades` (futures)**. (`ctx.subscribe_quotes(...)` with the `tbbo` schema also drives executors, but tbbo tick coverage is limited — default to `eq_trades`/`fut_trades`.) **Not** `bars_1m`/`bars_*` (§9.1) — subscribing only to bars and starting an executor will not work.
+> ⚠️ **Executors require a tick-by-tick data stream — they do NOT work on bars.** POV/TWAP/VWAP/PASSIVE/AUCTION etc. slice and reprice against the live tick stream, so the strategy must subscribe to ticks — **prefer trades: `ctx.subscribe_trades(...)` with schema `eq_trades` (equities) / `fut_trades` (futures)**. (`ctx.subscribe_quotes(...)` with the `tbbo` schema also drives executors, but tbbo tick coverage is limited — default to `eq_trades`/`fut_trades`.) **Not** `bars_1m`/`bars_*` (§9.1) — subscribing only to bars and starting an executor will not work.
 
 ```python
 ctx.build_executor_params(symbol: str, quantity: int, side: str, executor_type: str,
@@ -530,11 +542,12 @@ run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
 run.positions() / run.orders() / run.trades() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
 run.summary() -> dict
 run.overview() -> dict
+run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats PDF tearsheet; returns the file path. Default name: <task_name|run_id>.pdf
 run.logs() -> list[str]                    # the COMPLETE remote executor log (stdout/strategy errors), by task_id
 run.download_logs(path: str) -> str        # stream the full gzipped executor log to `path` (.gz); returns path
 ```
 - Default `run_backtest()` already blocked until done, so `run.report()` is ready immediately.
-- For `silent=True`, call `run.wait().report()` (or poll `run.status()`), e.g. `hf.get_run(run_id).wait().report()`.
+- **`hf.get_run(run_id, task_id=None)`** re-attaches to a run that was already submitted and returns its `Run` handle. `run_backtest` runs on the platform, so its results outlive your Python process — `get_run` is how you reconnect later (a new session, a different machine, or after a `silent=True` deploy) to check status or pull results without re-running anything. Pass the `run_id` from an earlier `run.run_id`. Typical use: `hf.get_run(run_id).wait().report()`.
 - **`event_logs()` vs `logs()`**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing; `download_logs(path)` for very large logs.
 
 ### 10.1 `PerformanceReport` (obtained via `run.report()`)
@@ -563,7 +576,8 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 report = run.report()                 # or hf.get_run(run_id).wait().report()
 
 # Visual HTML tearsheet (equity curve, drawdowns, monthly returns, risk metrics)
-html = report.create_tearsheet()
+html = report.create_tearsheet()      # or, straight off the run: run.tearsheet()
+run.tearsheet(output='report.html')   # write the tearsheet to a file to open in a browser
 # In a Marimo notebook:
 import marimo as mo; mo.md(html)
 # In a Jupyter notebook:
@@ -584,7 +598,7 @@ if stats:
 
 ## 11. Remote deploy + observability  (`hiveq.flow.jobs`)
 
-One surface to deploy a job and pull its status/logs/results. A thin **direct-REST** client (built on `requests`) against the platform API — there is no `hiveq_orchestrator` package or any second install. Reads the same env vars (§3).
+One surface to deploy a job and pull its status/logs/results. A thin **direct-REST** client (built on `requests`) against the platform API — there is no `hiveq_orchestrator` package or any second install. Uses the same API key (§3).
 
 ```python
 from hiveq.flow.jobs import (
@@ -717,7 +731,9 @@ from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig
 |---|---|---|
 | `oms` | str | "SIGMA" (use `OMSType.SIGMA.value`) |
 | `timezone` | Optional[str] | None (IANA name; auto-detected if None) |
-| `params` | Dict[str, Any] | {} |
+| `params` | Dict[str, Any] | {} (engine-behavior keys — see §2.1 for the recognized keys) |
+
+Pass an `EngineConfig` (or a plain `config={...}` dict) to `run_backtest` via `**kwargs`; the tunable `params` keys are listed in **§2.1**.
 
 ---
 
@@ -827,7 +843,7 @@ def on_timer(self, ctx, event):
 ### 16.6 Executor-driven strategies (when execution quality matters)
 When the strategy needs managed execution — sizeable orders to slice, live trading with order-chasing/replaces, or auction routing (see "when to use" in §5.10) — let an **executor** work the order instead of hand-managing `buy_order`/`sell_order` + replaces + cancels. The executor handles child-order slicing, repricing, cancel/replace, and fill aggregation. For a simple one-shot market entry this is overkill — use a direct order. The idiom: **hold one executor handle per (symbol, role); check its state before starting another; re-target in place.**
 
-⚠️ **Executors need a tick stream, not bars** (§5.10/§9.1): subscribe with `ctx.subscribe_trade_ticks(...)` — **prefer schema `eq_trades`/`fut_trades`** (`tbbo` quotes work but have limited coverage) — and drive them from `on_trade`. They will not work on a `bars_*` subscription.
+⚠️ **Executors need a tick stream, not bars** (§5.10/§9.1): subscribe with `ctx.subscribe_trades(...)` — **prefer schema `eq_trades`/`fut_trades`** (`tbbo` quotes work but have limited coverage) — and drive them from `on_trade`. They will not work on a `bars_*` subscription.
 
 ```python
 class ExecAlgo:
@@ -836,7 +852,7 @@ class ExecAlgo:
 
     def on_start(self, ctx, event):
         # Executors work the TICK stream — subscribe to trades (eq_trades/fut_trades), not bars.
-        ctx.subscribe_trade_ticks(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY)
+        ctx.subscribe_trades(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY)
 
     def on_trade(self, ctx, event):
         tick = event.data()                              # -> SigmaTradeTick (§7.5)

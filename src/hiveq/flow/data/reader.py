@@ -46,8 +46,16 @@ class HiveQDataReader:
         timeout: float = 30.0,
     ):
         self.api_key = api_key or os.environ.get("HIVEQ_API_KEY")
+        # Follow the auth host (HIVEQ_AUTH_URL) when HIVEQ_DATA_URL isn't set, so a
+        # single configured URL points the whole SDK at the same platform.
+        from hiveq.flow.config import platform_origin
+
+        origin = platform_origin()
         self.base_url = (
-            base_url or os.environ.get("HIVEQ_DATA_URL") or "http://localhost:80/"
+            base_url
+            or os.environ.get("HIVEQ_DATA_URL")
+            or (f"{origin}/" if origin else None)
+            or "http://localhost:80/"
         ).rstrip("/")
         self.org_id = org_id or os.environ.get("HIVEQ_ORG_ID")
         self.user_id = user_id or os.environ.get("HIVEQ_USER_ID")

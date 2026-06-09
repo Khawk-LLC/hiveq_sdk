@@ -3,7 +3,8 @@
 Complete, runnable strategies that deploy to the HiveQ platform. Each file is
 self-contained: a strategy class authored against the SDK type surface plus a
 `run_backtest(...)` deploy block. Every `ctx` call is verified against the SDK
-stubs; the canonical reference is [`docs/HIVEQ_FLOW_API.md`](../docs/HIVEQ_FLOW_API.md).
+stubs; the canonical reference is the version-matched spec at `docs/<version>/api-reference.md`
+(current: [`docs/0.3.4/api-reference.md`](../docs/0.3.4/api-reference.md)).
 
 ## Authoring basics
 
@@ -51,6 +52,5 @@ stubs; the canonical reference is [`docs/HIVEQ_FLOW_API.md`](../docs/HIVEQ_FLOW_
 
 ```bash
 pip install hiveq-sdk
-export HIVEQ_API_KEY=...        # the only required credential
 python examples/intraday_momentum_equity.py
 ```

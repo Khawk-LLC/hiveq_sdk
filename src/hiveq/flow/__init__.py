@@ -55,6 +55,7 @@ logger()
 
 from hiveq.flow.metrics.report import PerformanceReport
 from hiveq.flow.uploads import upload_files, list_files, delete_files
+from hiveq.flow.auth import login
 
 # --- credentials (lazy, from env) -------------------------------------------
 _trader_id: Optional[str] = None
@@ -77,12 +78,12 @@ def _init_from_env() -> None:
 
     api_key = os.environ.get('HIVEQ_API_KEY')
     if not api_key:
-        from hiveq.flow.config import HIVEQ_CREDS_FILE
-        raise RuntimeError(
-            f"HIVEQ_API_KEY not found. Set it in your environment or put it in "
-            f"{HIVEQ_CREDS_FILE} (HIVEQ_API_KEY=...). The platform resolves your "
-            f"identity from the key. [Error: API_KEY_MISSING]"
-        )
+        # No key yet — sign in through the browser (loopback flow). login() opens
+        # the sign-in page (host from HIVEQ_AUTH_URL), waits for the redirect that
+        # carries the freshly minted key, writes it to ~/.hiveq/.env, and returns
+        # it so we carry on.
+        from hiveq.flow import auth
+        api_key = auth.login()
 
     # Optional (resolved from the key by the platform if absent).
     _trader_id = os.environ.get('HIVEQ_USER_NAME')
@@ -233,6 +234,7 @@ def run_backtest(
         task_id=result.get('task_id'),
         start_date=start_date,
         end_date=end_date,
+        task_name=task_name or result.get('task_name'),
     )
     run.check_credentials()
     global _last_run
@@ -353,6 +355,8 @@ def _deploy(
 
 
 __all__ = [
+    # auth
+    "login",
     # deploy + observe
     "run_backtest",
     "upload_files",

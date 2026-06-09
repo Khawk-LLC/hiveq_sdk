@@ -13,7 +13,7 @@ Demonstrates (every ctx call verified against the SDK type surface):
 
 Shape: act on the signal feed; long when flag=='long' & weight high, else flat.
 
-Run:  python quant_signals.py   (needs HIVEQ_API_KEY)
+Run:  python quant_signals.py
 """
 import json
 

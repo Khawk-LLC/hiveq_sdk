@@ -11,7 +11,7 @@ Demonstrates (verified against the SDK surface):
 
 Continuous symbol forms (§5.1): "ES.c.0" = front by calendar roll, "ES.v.0" = volume-roll.
 
-Run:  python futures_continuous_rollover.py   (needs HIVEQ_API_KEY)
+Run:  python futures_continuous_rollover.py
 """
 from collections import deque
 
