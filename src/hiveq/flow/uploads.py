@@ -16,8 +16,8 @@ Properties:
 
 Configuration (env / ``~/.hiveq/.env``):
 - ``HIVEQ_API_KEY``           — required; identifies the user/org.
-- ``HIVEQ_CONTAINER_URL``     — container-service base URL
-                                (default ``http://localhost:3003``).
+- ``HIVEQ_AUTH_URL``          — the single platform host the whole SDK points at
+                                (default ``https://staging.hiveq.ai``).
 """
 import hashlib
 import json
@@ -43,7 +43,14 @@ _RETRY_WAIT = 2.0
 
 # --- config -----------------------------------------------------------------
 def _container_base_url() -> str:
-    return (os.environ.get("HIVEQ_CONTAINER_URL") or "http://localhost:3003").rstrip("/")
+    """Platform base URL — the single sign-in host (``HIVEQ_AUTH_URL``).
+
+    One configured URL points the whole SDK at the same platform; uploads go to
+    that host. Defaults to staging when ``HIVEQ_AUTH_URL`` is unset.
+    """
+    from hiveq.flow.config import platform_origin
+
+    return (platform_origin() or "https://staging.hiveq.ai").rstrip("/")
 
 
 def _endpoint(path: str) -> str:
