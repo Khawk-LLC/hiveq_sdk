@@ -406,30 +406,56 @@ class Run:
 
         These are the executor's stdout / strategy-callback output — including
         crashes like ``STRATEGY_CALLBACK_ERROR`` — which are NOT in the runs REST
-        API's ``event-logs``. They live only on the platform ``GET /logs`` endpoint
-        (keyed by ``task_id``; run_id != task_id). Fetched as the full gzipped log
-        (``format=gz``) over direct REST and decompressed — the whole log, not a
-        tail, so errors anywhere in the run are captured. Use :meth:`download_logs`
-        to stream a very large log straight to a file instead.
-        """
-        if not self.task_id:
-            return []
-        from hiveq.flow import jobs
+        API's ``event-logs``. Fetched as the full gzipped log (``format=gz``) over
+        direct REST and decompressed — the whole log, not a tail, so errors
+        anywhere in the run are captured. Use :meth:`download_logs` to stream a
+        very large log straight to a file instead.
 
-        text = jobs.get_logs_gz(task_id=self.task_id)
+        Works from a bare ``run_id`` too (e.g. ``hf.get_run(run_id).logs()`` after
+        the run finished): the platform ``GET /logs`` endpoint accepts ``run_id``
+        directly for backtests (it resolves logs by ``run_id`` or ``task_id``), so
+        we don't need the task_id in hand. If neither id is set, or the platform
+        has no log under that id, returns ``[]``.
+        """
+        text = self._fetch_log_text()
         return text.splitlines() if text else []
 
     def download_logs(self, path: str) -> str:
         """Stream the full gzipped executor log to ``path`` (a ``.gz`` file).
 
-        For huge logs — never decompresses in memory. Returns ``path``. Keyed by
-        ``task_id`` via ``GET /logs?format=gz`` (direct REST).
+        For huge logs — never decompresses in memory. Returns ``path``. Resolved
+        by ``task_id`` when known, else by ``run_id`` (the ``GET /logs`` endpoint
+        accepts either for backtests).
         """
-        if not self.task_id:
-            raise ValueError("this run has no task_id; cannot fetch logs")
+        if not (self.task_id or self.run_id):
+            raise ValueError("this run has neither task_id nor run_id; cannot fetch logs")
         from hiveq.flow import jobs
 
-        return jobs.get_logs_gz(task_id=self.task_id, dest=path)
+        # Prefer task_id (the known-good key); fall back to run_id, which the
+        # platform accepts for backtests.
+        if self.task_id:
+            return jobs.get_logs_gz(task_id=self.task_id, dest=path)
+        return jobs.get_logs_gz(run_id=self.run_id, dest=path)
+
+    def _fetch_log_text(self):
+        """Best-effort fetch of the full executor log text (or ``None``).
+
+        Prefer ``task_id`` (set during the launching session); when it's absent —
+        e.g. attached via ``hf.get_run(run_id)`` — fall back to ``run_id``, which
+        the ``/logs`` endpoint resolves for backtests. A missing log (404) is
+        treated as "no logs yet", not an error.
+        """
+        from hiveq.flow import jobs
+
+        if self.task_id:
+            return jobs.get_logs_gz(task_id=self.task_id)
+        if self.run_id:
+            try:
+                return jobs.get_logs_gz(run_id=self.run_id)
+            except Exception as e:  # 404 / not-found -> no logs available by run_id
+                logger.debug(f"logs by run_id={self.run_id} unavailable: {e}")
+                return None
+        return None
 
     # --- lifecycle ----------------------------------------------------------
     def check_credentials(self) -> "Run":

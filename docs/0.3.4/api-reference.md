@@ -32,7 +32,7 @@ R5  Timestamps on payloads: ts_event / ts_init are int NANOSECONDS. Use .time (c
     .time_utc (UTC) for datetime. ctx.now() is configured-tz datetime; ctx.now_utc() is UTC.
 R6  session_start / session_end are ET (America/New_York) wall-clock "HH:MM" strings, always.
 R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, open short with short_order.
-R8  A HiveQ API key is the only credential required (§3); auth is handled for you. Never hard-code keys.
+R8  A HiveQ API key is the only credential required (§3); auth is fully automatic. Never hard-code a key, never tell the user to `export HIVEQ_API_KEY` or set it any other way, and never add `hf.login()` or "# if not already saved…" lines to generated code — the first `run_backtest` provisions and persists the key by itself (§3).
 R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
     across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
 ```
@@ -102,7 +102,7 @@ get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an e
 event_logs() -> pandas.DataFrame                # logs of the LAST run_backtest, fetched over REST (§10.2)
 config() -> EngineConfig                        # the module EngineConfig (timezone + params)
 
-login(*, timeout=300.0, open_browser=True) -> str   # browser sign-in (loopback); saves the API key to ~/.hiveq/.env, returns it (§3)
+login(*, timeout=300.0, open_browser=True) -> str   # ADVANCED/RARE: run_backtest already signs in on first use. Do NOT put this in generated scripts (§3).
 ```
 
 **Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
@@ -189,7 +189,17 @@ hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> va
 
 ## 3. Credentials
 
-A **HiveQ API key** is the only credential required, and the SDK handles it for you — you don't set or manage it by hand. Identity (user, org) is resolved from the key.
+A **HiveQ API key** is the only credential required, and the SDK provisions it **automatically** — the user never sets, exports, or manages it by hand. Identity (user, org) is resolved from the key server-side.
+
+How it actually works: the **first** `run_backtest` (any deploy) calls the SDK's init, which looks for a key in the environment / `~/.hiveq/.env`. If none is found, it opens a browser sign-in (loopback), mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run** — no prompt, no env var, no code. There is no "set up your key first" step.
+
+**Therefore, when generating code or instructions, DO NOT:**
+- tell the user to `export HIVEQ_API_KEY=...` (or set it in a shell/`.env`/`os.environ` by hand) — the sign-in does this;
+- add `hf.login()` to a strategy/backtest script — `run_backtest` already signs in on first use;
+- add hedging comments like `# if not already saved via hf.login()` or `# make sure your API key is set`;
+- hard-code, print, or ask the user to paste a key.
+
+`hf.login()` exists only as an **advanced/rare** escape hatch (e.g. pre-authenticating a headless/CI box *before* any run). It is never needed in normal usage and must not appear in generated strategy code. A finished script should be runnable as-is, with **zero** credential setup mentioned to the user.
 
 ---
 
