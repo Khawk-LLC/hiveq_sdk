@@ -351,7 +351,17 @@ class Run:
             output = f"{base}.pdf"
         elif not output.lower().endswith(".pdf"):
             output = f"{output}.pdf"
-        path = self.report().save_tearsheet_pdf(output)
+        # Stamp identifiers into the PDF so it can be traced back to the DB record.
+        period = None
+        if self.start_date or self.end_date:
+            period = f"{self.start_date or '?'} → {self.end_date or '?'}"
+        meta = {
+            "Run ID": self.run_id,
+            "Task ID": self.task_id,
+            "Task": self.task_name,
+            "Period": period,
+        }
+        path = self.report().save_tearsheet_pdf(output, meta=meta)
         logger.info(f"Tearsheet written to {path}")
         return path
 

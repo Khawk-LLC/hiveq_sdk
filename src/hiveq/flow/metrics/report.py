@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 import pandas as pd
@@ -9,6 +10,146 @@ from hiveq.flow import utils
 
 if TYPE_CHECKING:
     from hiveq.flow.tca.types import TCAReport
+
+
+def _find_browser() -> Optional[str]:
+    """Locate a headless-capable Chromium/Chrome/Edge binary on PATH."""
+    import shutil
+
+    env = os.environ.get("HIVEQ_CHROME") or os.environ.get("CHROME_BIN")
+    if env:
+        return shutil.which(env) or (env if os.path.exists(env) else None)
+    for name in (
+        "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+        "microsoft-edge", "chrome",
+    ):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+def _html_to_pdf(html_path: str, output: str) -> None:
+    """Convert an HTML file to PDF, preferring a headless browser, else WeasyPrint.
+
+    A browser renders quantstats' report CSS with the highest fidelity; WeasyPrint
+    is the portable pure-Python fallback. Force one with ``HIVEQ_HTML2PDF``
+    (``browser`` | ``weasyprint``). Raises ``RuntimeError`` if neither works.
+    """
+    backend = os.environ.get("HIVEQ_HTML2PDF", "").strip().lower()
+    out_abs = os.path.abspath(output)
+
+    def via_browser() -> bool:
+        browser = _find_browser()
+        if not browser:
+            return False
+        import subprocess
+
+        url = "file://" + os.path.abspath(html_path)
+        # `--headless=new` on modern Chrome, plain `--headless` on older builds.
+        for headless in ("--headless=new", "--headless"):
+            cmd = [
+                browser, headless, "--disable-gpu", "--no-sandbox",
+                "--no-pdf-header-footer",
+                "--run-all-compositor-stages-before-draw",
+                "--virtual-time-budget=10000",
+                f"--print-to-pdf={out_abs}", url,
+            ]
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=180)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if r.returncode == 0 and os.path.exists(out_abs) and os.path.getsize(out_abs) > 0:
+                return True
+        return False
+
+    def via_weasyprint() -> bool:
+        try:
+            from weasyprint import HTML
+        except Exception:
+            return False
+        HTML(filename=html_path).write_pdf(out_abs)
+        return os.path.exists(out_abs) and os.path.getsize(out_abs) > 0
+
+    if backend == "weasyprint":
+        order = [via_weasyprint]
+    elif backend == "browser":
+        order = [via_browser]
+    else:
+        order = [via_browser, via_weasyprint]  # browser first (best fidelity)
+
+    for fn in order:
+        try:
+            if fn():
+                return
+        except Exception as e:  # noqa: BLE001 — try the next backend
+            logging.warning(f"tearsheet PDF backend {fn.__name__} failed: {e}")
+
+    raise RuntimeError(
+        "Could not convert the HTML tearsheet to PDF — no working backend found. "
+        "Install a Chromium/Chrome browser on PATH, or WeasyPrint "
+        "(`pip install weasyprint`). Force a backend with "
+        "HIVEQ_HTML2PDF=browser|weasyprint."
+    )
+
+
+# Styling for the run-metadata banner only. We intentionally do NOT inject any
+# page/pagination CSS: quantstats' compact two-column layout is what we want, and
+# fighting its page breaks (to stop a chart straddling an edge) forced the report
+# onto far more pages, which read worse than the occasional break. So we leave
+# pagination to the browser's default and only style the banner.
+_PRINT_CSS = """
+<style id="hiveq-print">
+.hiveq-meta { margin: 6px 0 16px 0; font: 12px/1.55 Arial, sans-serif; color: #333; }
+.hiveq-meta td { padding: 1px 16px 1px 0; font: 12px/1.55 Arial, sans-serif; }
+.hiveq-meta .k { color: #888; white-space: nowrap; }
+.hiveq-meta .v { font-weight: 600; }
+</style>
+"""
+
+
+def _meta_header_html(meta: Optional[dict]) -> str:
+    """Render a small key/value banner (run id, task, period, …) for traceability.
+
+    Always stamps a UTC generation time so a PDF can be tied back to its DB record.
+    """
+    import html as _html
+    from datetime import datetime, timezone
+
+    fields = dict(meta or {})
+    fields.setdefault("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+    rows = "".join(
+        f'<tr><td class="k">{_html.escape(str(k))}</td>'
+        f'<td class="v">{_html.escape(str(v))}</td></tr>'
+        for k, v in fields.items() if v not in (None, "", "None")
+    )
+    if not rows:
+        return ""
+    return f'<div class="hiveq-meta"><table>{rows}</table></div>'
+
+
+def _decorate_report_html(html: str, meta: Optional[dict]) -> str:
+    """Inject the print CSS (into <head>) and the run-metadata banner (under the
+    report title) into quantstats' HTML before it is converted to PDF."""
+    if "</head>" in html:
+        html = html.replace("</head>", _PRINT_CSS + "</head>", 1)
+    else:
+        html = _PRINT_CSS + html
+
+    banner = _meta_header_html(meta)
+    if banner:
+        # Prefer to land it right under the title/byline; fall back progressively.
+        for anchor in ("</h4>", "<hr>", '<div class="container">', "<body>", "<body"):
+            idx = html.find(anchor)
+            if idx != -1:
+                # for the bare "<body" case, jump to the end of that tag
+                pos = idx + len(anchor)
+                if anchor == "<body":
+                    end = html.find(">", idx)
+                    pos = end + 1 if end != -1 else pos
+                return html[:pos] + banner + html[pos:]
+        html = banner + html
+    return html
 
 
 def _create_no_data_html(title: str = "Strategy Performance Report", message: str = "No data available") -> str:
@@ -322,13 +463,22 @@ class PerformanceReport:
             returns.index = returns.index.tz_convert('UTC')
         return returns
 
-    def save_tearsheet_pdf(self, output: str) -> str:
-        """Render the performance tearsheet to a multi-page PDF at ``output``.
+    def save_tearsheet_pdf(self, output: str, meta: Optional[dict] = None) -> str:
+        """Render the quantstats HTML tearsheet to a PDF at ``output``.
 
-        Builds the PDF from quantstats' plots plus a full metrics table using
-        matplotlib (which ships with quantstats) — no extra system tooling is
-        required. Returns the path written. Raises ``ValueError`` if the run
-        has no usable returns data.
+        Generates quantstats' full HTML report — where metrics are formatted as
+        percentages with decimals and laid out properly — and converts that HTML
+        to PDF (headless browser if available, else WeasyPrint). This replaces the
+        old matplotlib path, whose raw 2-decimal table ("Cumulative Return 0.01")
+        and whole-percent chart axes were unreadable for low-volatility runs.
+
+        Print CSS is injected so the compact two-column layout is preserved while
+        no chart/row is sliced across a page break. ``meta`` (e.g. ``{"Run ID":
+        ..., "Task": ...}``) is rendered as a small banner under the title so the
+        PDF can be traced back to its DB record.
+
+        Returns the path written. Raises ``ValueError`` if the run has no usable
+        returns data, ``RuntimeError`` if no HTML->PDF backend is available.
         """
         returns = self._prepared_returns()
         if returns is None:
@@ -336,77 +486,36 @@ class PerformanceReport:
                 "No returns data available for this run — cannot build a tearsheet PDF."
             )
 
-        import os
         import tempfile
-
-        import matplotlib
-        matplotlib.use('Agg')  # headless: no display needed to write a file
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_pdf import PdfPages
 
         import quantstats as qs
         qs.extend_pandas()
         logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
         warnings.filterwarnings('ignore')
 
-        # The plots to render, in order. Each is best-effort: quantstats'
-        # plot set varies slightly across versions, so a missing/raising one
-        # is skipped rather than failing the whole PDF.
-        plot_fns = [
-            ('snapshot', lambda f: qs.plots.snapshot(returns, show=False, savefig=f)),
-            ('returns', lambda f: qs.plots.returns(returns, show=False, savefig=f)),
-            ('log_returns', lambda f: qs.plots.log_returns(returns, show=False, savefig=f)),
-            ('yearly_returns', lambda f: qs.plots.yearly_returns(returns, show=False, savefig=f)),
-            ('monthly_heatmap', lambda f: qs.plots.monthly_heatmap(returns, show=False, savefig=f)),
-            ('drawdown', lambda f: qs.plots.drawdown(returns, show=False, savefig=f)),
-            ('drawdowns_periods', lambda f: qs.plots.drawdowns_periods(returns, show=False, savefig=f)),
-            ('rolling_sharpe', lambda f: qs.plots.rolling_sharpe(returns, show=False, savefig=f)),
-            ('rolling_volatility', lambda f: qs.plots.rolling_volatility(returns, show=False, savefig=f)),
-            ('distribution', lambda f: qs.plots.distribution(returns, show=False, savefig=f)),
-        ]
-
         os.makedirs(os.path.dirname(os.path.abspath(output)) or '.', exist_ok=True)
-        with PdfPages(output) as pdf:
-            # Page 1: the full metrics table.
-            try:
-                metrics = qs.reports.metrics(returns, display=False, mode='full')
-                fig, ax = plt.subplots(figsize=(8.5, 11))
-                ax.axis('off')
-                ax.set_title('Performance Metrics', fontsize=14, fontweight='bold', loc='left')
-                table = ax.table(
-                    cellText=metrics.astype(str).values,
-                    rowLabels=metrics.index,
-                    colLabels=metrics.columns,
-                    loc='upper left',
-                    cellLoc='right',
-                )
-                table.auto_set_font_size(False)
-                table.set_fontsize(7)
-                table.scale(1, 1.1)
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close(fig)
-            except Exception as e:
-                logging.warning(f"Could not render metrics table page: {e}")
 
-            # Following pages: one chart each. quantstats writes the chart to a
-            # temp PNG via savefig; we drop that image onto a full PDF page.
-            with tempfile.TemporaryDirectory() as tmp:
-                for name, render in plot_fns:
-                    png = os.path.join(tmp, f"{name}.png")
-                    try:
-                        render({'fname': png, 'dpi': 150, 'bbox_inches': 'tight'})
-                    except Exception as e:
-                        logging.warning(f"Skipping '{name}' plot in tearsheet: {e}")
-                        continue
-                    if not os.path.exists(png):
-                        continue
-                    img = plt.imread(png)
-                    fig = plt.figure(figsize=(11, 8.5))
-                    ax = fig.add_axes([0, 0, 1, 1])
-                    ax.axis('off')
-                    ax.imshow(img)
-                    pdf.savefig(fig)
-                    plt.close(fig)
+        with tempfile.TemporaryDirectory() as tmp:
+            html_path = os.path.join(tmp, "tearsheet.html")
+            # Non-interactive => charts are embedded, so the HTML carries no JS and
+            # converts cleanly under any backend (WeasyPrint can't run JS).
+            qs.reports.html(
+                returns,
+                title="Strategy Performance Report",
+                output=html_path,
+                download_filename=None,
+                display=False,
+            )
+            if not os.path.exists(html_path) or os.path.getsize(html_path) == 0:
+                raise RuntimeError(
+                    "quantstats did not produce an HTML report to convert to PDF."
+                )
+            with open(html_path, "r", encoding="utf-8") as fh:
+                html = fh.read()
+            html = _decorate_report_html(html, meta)
+            with open(html_path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            _html_to_pdf(html_path, output)
 
         return output
 
