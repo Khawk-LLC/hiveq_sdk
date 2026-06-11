@@ -3,6 +3,7 @@ build/
 __pycache__/
 *.egg-info/
 *.pyc
+logs/
 
 # IDE / editor
 .idea/
