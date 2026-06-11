@@ -311,15 +311,28 @@ def _deploy(
     # payload carries no client-frozen data URL — the executor supplies it.
     kwargs = _sanitize_kwargs_for_deploy(kwargs)
 
-    # Capture user strategy classes/functions + local modules (cloudpickle).
-    local_modules, pickled_objects = DeploymentHelper.capture_calling_module(strategy_configs)
+    # Capture the caller's strategy code AS SOURCE: the first-party import graph
+    # + the entry script (or notebook __main__ definitions) + adjacent config
+    # files, packed into a source archive. The executor recompiles it under its
+    # own interpreter — no user code is cloudpickled.
+    user_object_names, source_bundle = DeploymentHelper.capture_calling_module(strategy_configs)
 
-    # Empty strategy_configs is valid ONLY for the global-dispatch form: a captured
-    # on_hiveq_event the engine auto-discovers. Otherwise there's nothing to run.
-    if not strategy_configs and 'on_hiveq_event' not in pickled_objects:
+    # Empty strategy_configs is valid ONLY for the global-dispatch form: a
+    # module-level on_hiveq_event the engine auto-discovers. Otherwise there's
+    # nothing to run.
+    if not strategy_configs and 'on_hiveq_event' not in user_object_names:
         return {'status': 'error',
                 'message': "strategy_configs is required, or define a module-level "
                            "on_hiveq_event(ctx, event) for global dispatch",
+                'task_id': None}
+
+    # Source is the only carrier of user code now — if we couldn't capture it,
+    # the deploy cannot run on the engine, so fail loudly here.
+    if not source_bundle:
+        return {'status': 'error',
+                'message': "Could not capture strategy source to deploy. Define your "
+                           "strategy in an importable .py file (or a normally-defined "
+                           "notebook cell whose source inspect can read).",
                 'task_id': None}
 
     task = HiveQFlowBackTestTask(
@@ -333,8 +346,7 @@ def _deploy(
         data_configs=data_configs,
         backtest_config=backtest_config.to_dict() if hasattr(backtest_config, 'to_dict') else None,
         kwargs=kwargs,
-        local_modules=local_modules,
-        pickled_objects=pickled_objects,
+        source_bundle=source_bundle,
     )
 
     run_config = {
