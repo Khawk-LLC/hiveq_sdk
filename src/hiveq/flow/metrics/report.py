@@ -463,27 +463,22 @@ class PerformanceReport:
             returns.index = returns.index.tz_convert('UTC')
         return returns
 
-    def save_tearsheet_pdf(self, output: str, meta: Optional[dict] = None) -> str:
-        """Render the quantstats HTML tearsheet to a PDF at ``output``.
+    def _build_tearsheet_html(self, meta: Optional[dict] = None) -> str:
+        """Build quantstats' full HTML report (with the run-metadata banner).
 
-        Generates quantstats' full HTML report — where metrics are formatted as
-        percentages with decimals and laid out properly — and converts that HTML
-        to PDF (headless browser if available, else WeasyPrint). This replaces the
-        old matplotlib path, whose raw 2-decimal table ("Cumulative Return 0.01")
-        and whole-percent chart axes were unreadable for low-volatility runs.
+        Shared source for both the PDF and the standalone-HTML tearsheet writers.
+        Generates a self-contained report — metrics formatted as percentages with
+        decimals, charts embedded (non-interactive, so no JS) — then injects the
+        print CSS and the ``meta`` banner (e.g. ``{"Run ID": ..., "Task": ...}``)
+        under the title so the file can be traced back to its DB record.
 
-        Print CSS is injected so the compact two-column layout is preserved while
-        no chart/row is sliced across a page break. ``meta`` (e.g. ``{"Run ID":
-        ..., "Task": ...}``) is rendered as a small banner under the title so the
-        PDF can be traced back to its DB record.
-
-        Returns the path written. Raises ``ValueError`` if the run has no usable
-        returns data, ``RuntimeError`` if no HTML->PDF backend is available.
+        Raises ``ValueError`` if the run has no usable returns data,
+        ``RuntimeError`` if quantstats produces nothing.
         """
         returns = self._prepared_returns()
         if returns is None:
             raise ValueError(
-                "No returns data available for this run — cannot build a tearsheet PDF."
+                "No returns data available for this run — cannot build a tearsheet."
             )
 
         import tempfile
@@ -492,8 +487,6 @@ class PerformanceReport:
         qs.extend_pandas()
         logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
         warnings.filterwarnings('ignore')
-
-        os.makedirs(os.path.dirname(os.path.abspath(output)) or '.', exist_ok=True)
 
         with tempfile.TemporaryDirectory() as tmp:
             html_path = os.path.join(tmp, "tearsheet.html")
@@ -508,15 +501,53 @@ class PerformanceReport:
             )
             if not os.path.exists(html_path) or os.path.getsize(html_path) == 0:
                 raise RuntimeError(
-                    "quantstats did not produce an HTML report to convert to PDF."
+                    "quantstats did not produce an HTML report."
                 )
             with open(html_path, "r", encoding="utf-8") as fh:
                 html = fh.read()
-            html = _decorate_report_html(html, meta)
+
+        return _decorate_report_html(html, meta)
+
+    def save_tearsheet_pdf(self, output: str, meta: Optional[dict] = None) -> str:
+        """Render the quantstats HTML tearsheet to a PDF at ``output``.
+
+        Generates quantstats' full HTML report (see :meth:`_build_tearsheet_html`)
+        and converts it to PDF (headless browser if available, else WeasyPrint).
+        This replaces the old matplotlib path, whose raw 2-decimal table
+        ("Cumulative Return 0.01") and whole-percent chart axes were unreadable
+        for low-volatility runs.
+
+        Returns the path written. Raises ``ValueError`` if the run has no usable
+        returns data, ``RuntimeError`` if no HTML->PDF backend is available.
+        """
+        import tempfile
+
+        html = self._build_tearsheet_html(meta)
+        os.makedirs(os.path.dirname(os.path.abspath(output)) or '.', exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            html_path = os.path.join(tmp, "tearsheet.html")
             with open(html_path, "w", encoding="utf-8") as fh:
                 fh.write(html)
             _html_to_pdf(html_path, output)
 
+        return output
+
+    def save_tearsheet_html(self, output: str, meta: Optional[dict] = None) -> str:
+        """Write the quantstats HTML tearsheet to a standalone file at ``output``.
+
+        Same self-contained report as :meth:`save_tearsheet_pdf` (charts embedded,
+        run-metadata banner included) — just left as ``.html`` to open in a
+        browser instead of converting to PDF. For inline rendering inside a
+        notebook use :meth:`create_tearsheet`, which returns the HTML *string*.
+
+        Returns the path written. Raises ``ValueError`` if the run has no usable
+        returns data.
+        """
+        html = self._build_tearsheet_html(meta)
+        os.makedirs(os.path.dirname(os.path.abspath(output)) or '.', exist_ok=True)
+        with open(output, "w", encoding="utf-8") as fh:
+            fh.write(html)
         return output
 
     def create_tearsheet(self) -> str:

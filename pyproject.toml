@@ -14,7 +14,9 @@ authors = [{ name = "HiveQ" }]
 # Thin client deps only — no engine, no polars/hiveq_data.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
 # built on requests + cloudpickle below; no platform-internal client package.
-# quantstats + matplotlib power the visual tearsheet / PDF export / summary_stats().
+# quantstats + matplotlib power the visual tearsheet / summary_stats(); weasyprint
+# is the bundled HTML->PDF backend for run.tearsheet() so PDF export works out of
+# the box (a headless browser, if present, is used first for higher fidelity).
 dependencies = [
     "pandas>=2.3.2",
     "colorlog==6.9.0",
@@ -23,6 +25,7 @@ dependencies = [
     "tqdm>=4.0.0",
     "quantstats>=0.0.62",
     "matplotlib>=3.5.0",
+    "weasyprint>=60",
 ]
 
 [project.optional-dependencies]

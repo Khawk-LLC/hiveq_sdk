@@ -335,23 +335,32 @@ class Run:
         return PerformanceReport.from_rest(payload)
 
     def tearsheet(self, output: Optional[str] = None) -> str:
-        """Render the performance tearsheet for this run to a PDF.
+        """Render the performance tearsheet for this run to a file.
 
-        Produces a multi-page PDF — equity curve, drawdowns, monthly-returns
-        heatmap, rolling risk, return distribution, and a full metrics table.
-        When ``output`` is omitted the file is named after the run (the
-        backtest task name when known, otherwise the run id), written to the
-        current directory. Returns the path of the PDF written.
+        The single entry point for producing a tearsheet — equity curve,
+        drawdowns, monthly-returns heatmap, rolling risk, return distribution,
+        and a full metrics table. The format is chosen from ``output``'s
+        extension: ``.html`` writes a standalone HTML file to open in a browser;
+        anything else (including no extension) writes a PDF. When ``output`` is
+        omitted the file is a PDF named after the run (the backtest task name
+        when known, otherwise the run id), written to the current directory.
+        Returns the path written.
 
             run.tearsheet()                      # -> '<task_name|run_id>.pdf'
             run.tearsheet(output='my_report.pdf')
+            run.tearsheet(output='my_report.html')
+
+        For the HTML *string* to render inline in a Jupyter/marimo notebook, use
+        ``run.report().create_tearsheet()`` instead.
         """
         if output is None:
             base = self.task_name or self.run_id
             output = f"{base}.pdf"
-        elif not output.lower().endswith(".pdf"):
+        ext = os.path.splitext(output)[1].lower()
+        if ext not in (".pdf", ".html", ".htm"):
             output = f"{output}.pdf"
-        # Stamp identifiers into the PDF so it can be traced back to the DB record.
+            ext = ".pdf"
+        # Stamp identifiers into the file so it can be traced back to the DB record.
         period = None
         if self.start_date or self.end_date:
             period = f"{self.start_date or '?'} → {self.end_date or '?'}"
@@ -361,7 +370,11 @@ class Run:
             "Task": self.task_name,
             "Period": period,
         }
-        path = self.report().save_tearsheet_pdf(output, meta=meta)
+        report = self.report()
+        if ext in (".html", ".htm"):
+            path = report.save_tearsheet_html(output, meta=meta)
+        else:
+            path = report.save_tearsheet_pdf(output, meta=meta)
         logger.info(f"Tearsheet written to {path}")
         return path
 

@@ -641,7 +641,7 @@ run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
 run.positions() / run.orders() / run.trades() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
 run.summary() -> dict
 run.overview() -> dict
-run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats PDF tearsheet; returns the file path. Default name: <task_name|run_id>.pdf
+run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats tearsheet file; returns the path. Format from extension: .html -> HTML, anything else -> PDF. Default name: <task_name|run_id>.pdf
 run.logs() -> list[str]                    # the COMPLETE remote executor log (stdout/strategy errors), by task_id
 run.download_logs(path: str) -> str        # stream the full gzipped executor log to `path` (.gz); returns path
 ```
@@ -674,9 +674,15 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 ```python
 report = run.report()                 # or hf.get_run(run_id).wait().report()
 
-# Visual HTML tearsheet (equity curve, drawdowns, monthly returns, risk metrics)
-html = report.create_tearsheet()      # or, straight off the run: run.tearsheet()
-run.tearsheet(output='report.html')   # write the tearsheet to a file to open in a browser
+# Tearsheet file on disk (equity curve, drawdowns, monthly returns, risk metrics).
+# run.tearsheet() is the single entry point; the format is chosen from the output
+# extension — `.html` writes a standalone HTML file, anything else writes a PDF.
+path = run.tearsheet()                       # -> '<task_name|run_id>.pdf' in the cwd
+path = run.tearsheet(output='my_report.pdf')
+path = run.tearsheet(output='my_report.html')
+
+# Only when you need the HTML *string* to render inline in a notebook:
+html = report.create_tearsheet()
 # In a Marimo notebook:
 import marimo as mo; mo.md(html)
 # In a Jupyter notebook:
