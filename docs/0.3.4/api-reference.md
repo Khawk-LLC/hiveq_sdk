@@ -287,8 +287,8 @@ class MyStrategy:
 ### 5.1 Subscriptions  (call in START; return `None`)
 ```python
 ctx.subscribe_bars(symbols: List[str], asset_type: AssetType = None, interval: str = "1m")
-ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = None)
-ctx.subscribe_trades(symbols: List[str], asset_type: AssetType)      # trades; with the `tbbo` schema, quotes arrive too (on_quote)
+ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = AssetType.EQUITY)
+ctx.subscribe_trades(symbols: List[str], asset_type: AssetType = AssetType.EQUITY)  # trades; with the `tbbo` schema, quotes arrive too (on_quote)
 ctx.subscribe_data(data_id: str, signals: List[str] = None)               # custom / signal data → on_custom_data
 #   data_id must match the 'id' field in data_configs (CSV or HIVEQ_QUANT_SIGNALS).
 #   signals: optional list of signal names to filter; None subscribes to all.
@@ -296,11 +296,14 @@ ctx.subscribe_index(symbols: List[str])                                   # spot
 ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
 ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C'|'P'|'CALL'|'PUT'
                            strike: Optional[float] = None,
-                           expiration_type: Optional[str] = None,         # '0dte' | 'YYYY-MM-DD'
+                           expiration_type: Optional[Union[str, datetime]] = None,  # '0dte' | 'YYYY-MM-DD' | datetime
                            underlying: Optional[str] = None, interval: str = "1s")
 # Futures: subscribe by SYMBOL STRING in `symbols=` (the clear, single way):
-ctx.subscribe_futures_bars(symbols=["ES.c.0"], interval="1m")
-ctx.subscribe_futures_trade_ticks(symbols=["ES.c.0"])
+ctx.subscribe_futures_bars(symbols: Optional[List[str]] = None, root: Optional[str] = None,
+                           contract: Optional[str] = None, continuous: Optional[str] = None,
+                           interval: str = "1m")
+ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional[str] = None,
+                             contract: Optional[str] = None, continuous: Optional[str] = None)
 #   The futures symbol string encodes the contract:
 #     "ES.c.0" — continuous, calendar/front-month roll, front (rank 0)
 #     "ES.v.0" — continuous, volume roll, front
