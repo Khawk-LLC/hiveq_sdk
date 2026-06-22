@@ -127,7 +127,7 @@ class HiveQDataReader:
         return self._get(run_id, "/daily-returns", _page(limit, offset))
 
     def equity_curve(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/equity-curve", _page(limit, offset))
 
