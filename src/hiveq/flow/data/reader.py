@@ -122,7 +122,7 @@ class HiveQDataReader:
         return self._get(run_id, "/metrics")
 
     def daily_returns(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/daily-returns", _page(limit, offset))
 
@@ -132,21 +132,21 @@ class HiveQDataReader:
         return self._get(run_id, "/equity-curve", _page(limit, offset))
 
     def positions(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/positions", _page(limit, offset))
 
     def orders(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/orders", _page(limit, offset))
 
     def trades(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/trades", _page(limit, offset))
 
     def event_logs(
-        self, run_id: str, limit: Optional[int] = None, offset: Optional[int] = None
+        self, run_id: str, limit: Optional[int] = 100_000, offset: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         return self._get(run_id, "/event-logs", _page(limit, offset))
