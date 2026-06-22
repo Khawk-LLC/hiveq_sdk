@@ -24,7 +24,7 @@ write a strategy or use this SDK, read these two, **in order**:
 - **R5** — **time is EST/EDT.** Payload `.time` and `ctx.now()` are already the configured tz (ET). **Never convert to/from UTC** — `.time_utc`/`ctx.now_utc()` exist if you truly need UTC.
 - **R6** — `session_start`/`session_end` are ET (`America/New_York`) `"HH:MM"` strings, always.
 - **R7** — quantities are floats; `buy_order` / `sell_order` (exit long) / `short_order`.
-- **R8** — a **HiveQ API key** is the only credential required; the first call with no key opens a browser sign-in (loopback redirect) that saves the key to `~/.hiveq/.env` automatically — no copy/paste. The sign-in host comes from `HIVEQ_AUTH_URL` (env / `~/.hiveq/.env`). Never hard-code it.
+- **R8** — a **HiveQ API key** is the only credential required; the first call with no key opens a browser sign-in (loopback redirect) that saves the key to `~/.hiveq/.env` automatically — no copy/paste. The sign-in host defaults to `https://staging.hiveq.ai`; override with `HIVEQ_AUTH_URL` in env / `~/.hiveq/.env` to point at a different platform.
 - **R9** — prefer `ctx.portfolio()` (strategy-scoped) for P&L/position queries; `ctx.global_portfolio()` aggregates account-wide.
 
 ## Key facts

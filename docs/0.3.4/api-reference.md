@@ -227,7 +227,7 @@ A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the red
 - Show the user internal commands (`hf.login()`, `hiveq-login`, etc.), env vars, or file paths and ask them to run/set anything.
 - Retry the run in a loop or downgrade to a "manual API-key setup" workaround. Signup IS the browser flow — there is no manual key.
 
-> If (and only if) sign-in raises `HIVEQ_AUTH_URL is not set`, the sign-in host hasn't been configured on this machine. It's normally already set; in that one case ask the user for their HiveQ host in plain language — do not invent or hard-code one.
+> `HIVEQ_AUTH_URL` defaults to `https://staging.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
 
 ### 3.2 When generating deliverable code or instructions, DO NOT:
 - tell the user to `export HIVEQ_API_KEY=...` (or set it in a shell/`.env`/`os.environ` by hand) — the sign-in does this;

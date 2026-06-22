@@ -48,14 +48,9 @@ class LoginError(RuntimeError):
 
 
 def _auth_url() -> str:
-    """Sign-in host, from the ``HIVEQ_AUTH_URL`` env var (required)."""
-    url = os.environ.get("HIVEQ_AUTH_URL")
-    if not url:
-        raise LoginError(
-            "HIVEQ_AUTH_URL is not set — set it to your HiveQ sign-in host so the "
-            "SDK knows where to send you to sign in."
-        )
-    return url.rstrip("/")
+    """Sign-in host — ``HIVEQ_AUTH_URL`` env var, defaulting to staging."""
+    from hiveq.flow.config import platform_origin
+    return platform_origin().rstrip("/")
 
 
 def _login_path() -> str:

@@ -43,21 +43,24 @@ def _load_well_known_env() -> None:
 _load_well_known_env()
 
 
-def platform_origin() -> Optional[str]:
+_DEFAULT_AUTH_URL = "https://staging.hiveq.ai"
+
+
+def platform_origin() -> str:
     """The HiveQ platform's ``scheme://host``, derived from ``HIVEQ_AUTH_URL``.
 
     ``HIVEQ_AUTH_URL`` is the single host users configure (the sign-in host).
     When the orchestrator / data URLs aren't set explicitly, they follow this
     host so one setting points the whole SDK at the right platform (local, LAN,
-    or hosted). Returns ``None`` when ``HIVEQ_AUTH_URL`` is unset.
+    or hosted). Defaults to ``https://staging.hiveq.ai`` when unset.
     """
     url = os.environ.get("HIVEQ_AUTH_URL")
     if not url:
-        return None
+        return _DEFAULT_AUTH_URL
     from urllib.parse import urlparse
     parsed = urlparse(url if "://" in url else "http://" + url)
     if not parsed.netloc:
-        return None
+        return _DEFAULT_AUTH_URL
     return f"{parsed.scheme}://{parsed.netloc}"
 
 

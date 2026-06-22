@@ -46,11 +46,11 @@ def _container_base_url() -> str:
     """Platform base URL — the single sign-in host (``HIVEQ_AUTH_URL``).
 
     One configured URL points the whole SDK at the same platform; uploads go to
-    that host. Defaults to staging when ``HIVEQ_AUTH_URL`` is unset.
+    that host. Defaults to ``https://staging.hiveq.ai`` when unset.
     """
     from hiveq.flow.config import platform_origin
 
-    return (platform_origin() or "https://staging.hiveq.ai").rstrip("/")
+    return platform_origin().rstrip("/")
 
 
 def _endpoint(path: str) -> str:
