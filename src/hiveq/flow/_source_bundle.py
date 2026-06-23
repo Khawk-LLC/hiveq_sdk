@@ -138,6 +138,8 @@ def _first_party_files(root: str, lib_dirs: Sequence[str]) -> Dict[str, str]:
     for name, mod in list(sys.modules.items()):
         if name == "hiveq" or name.startswith("hiveq."):
             continue  # shipped by the engine; never bundle the SDK
+        if name == "hiveq_data" or name.startswith("hiveq_data."):
+            continue  # shipped by the engine; never bundle the data SDK
         f = getattr(mod, "__file__", None)
         if not f or not f.endswith(".py"):
             continue

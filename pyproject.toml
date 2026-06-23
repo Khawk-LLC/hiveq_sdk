@@ -11,9 +11,11 @@ requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "HiveQ" }]
 
-# Thin client deps only — no engine, no polars/hiveq_data.
+# Thin client deps only — no engine, no polars.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
 # built on requests + cloudpickle below; no platform-internal client package.
+# Stubs for data_driver (hiveq.dd/driver/symbol/datetime) and hiveq_data are
+# shipped so user code that references those imports resolves locally.
 # quantstats + matplotlib power the visual tearsheet / summary_stats(); weasyprint
 # is the bundled HTML->PDF backend for run.tearsheet() so PDF export works out of
 # the box (a headless browser, if present, is used first for higher fidelity).
@@ -49,8 +51,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
-"hiveq" = ["py.typed"]
+"hiveq" = ["py.typed", "**/*.pyi"]
 "hiveq.flow" = ["py.typed", "**/*.pyi"]
+"hiveq_data" = ["py.typed"]
 
 [tool.setuptools]
 include-package-data = true
