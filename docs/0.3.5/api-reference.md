@@ -483,7 +483,7 @@ ctx.executor_state(executor) -> str   # "STARTED"|"NEW"|"PARTIALLY_FILLED"|"FILL
 | `AUCTION` | Routes to the opening/closing auction (`order_type='MOC'/'MOO'/'LOC'/'LOO'`) | `order_type`, `market_center` (§5.2.1) |
 | `ALGO_COBRA` | Adaptive liquidity-seeking algo | type-specific |
 
-> These are the executor-type strings referenced in the engine (`build_executor_params` docstring + the `algo_instruction` slot map). The authoritative registry is server-side (PySigma); if you need one not listed, confirm the exact string with the engine rather than guessing. `executor_type` is a **string**, not an enum.
+> These are the executor-type strings referenced in the engine (`build_executor_params` docstring). The authoritative registry is server-side (PySigma); if you need one not listed, confirm the exact string with the engine rather than guessing. `executor_type` is a **string**, not an enum.
 
 Common params: `quantity` is unsigned (direction is `side='BUY'|'SELL'`); `min_order_size`/`max_order_size` bound child clip size; `refresh_millis` is the work cadence; `min_notional`/`max_notional` bound child notionals; `market_center` routes the venue (§5.2.1); `account`/`custom_fix_params` for live/FIX.
 
