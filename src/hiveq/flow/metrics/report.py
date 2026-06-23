@@ -353,6 +353,51 @@ class PerformanceReport:
                     return float(v)
             return 0.0
 
+        # strategy_metrics carries the authoritative PnL scalars from the
+        # engine (realized_pnl, unrealized_pnl, total_pnl, fees).  The server
+        # may store multiple rows per strategy_id (stitcher + C++ publisher);
+        # keep only the latest per strategy_id (by db_event_ts) to avoid
+        # double-counting, then sum across strategies.
+        strat_rows = payload.get("strategy_metrics") or []
+        strat_df = _df(strat_rows)
+
+        def _dedup_latest(rows):
+            """Keep the latest row per strategy_id (by db_event_ts)."""
+            if not rows:
+                return []
+            by_sid = {}
+            for row in rows:
+                sid = row.get("strategy_id", "")
+                prev = by_sid.get(sid)
+                if prev is None:
+                    by_sid[sid] = row
+                else:
+                    cur_ts = str(row.get("db_event_ts", ""))
+                    prev_ts = str(prev.get("db_event_ts", ""))
+                    if cur_ts > prev_ts:
+                        by_sid[sid] = row
+            return list(by_sid.values())
+
+        latest_rows = _dedup_latest(strat_rows)
+
+        def _strat_sum(key):
+            """Sum a column across deduped strategy_metrics rows."""
+            if not latest_rows:
+                return None
+            total = 0.0
+            found = False
+            for row in latest_rows:
+                v = row.get(key)
+                if isinstance(v, (int, float)):
+                    total += float(v)
+                    found = True
+            return total if found else None
+
+        total_realized = _strat_sum("realized_pnl")
+        total_unrealized = _strat_sum("unrealized_pnl")
+        total_fees_val = _strat_sum("total_commission") or _strat_sum("fees")
+        net_pnl_val = _strat_sum("total_pnl")
+
         return cls(
             return_stats=return_stats,
             returns_series=returns_series,
@@ -360,11 +405,12 @@ class PerformanceReport:
             trades=_df(payload.get("trades")),
             orders=_df(payload.get("orders")),
             daily_returns=daily_df,
-            strategy_stats=_df(payload.get("strategy_metrics")),
+            strategy_stats=strat_df,
             run_info=_df([payload.get("config")] if payload.get("config") else None),
-            total_realized_pnl=_num("Total Realized PnL", "realized_pnl"),
-            total_fees=_num("Total Commission", "total_fees", "fees"),
-            net_pnl=_num("Net PnL", "Total PnL", "net_pnl"),
+            total_realized_pnl=total_realized if total_realized is not None else _num("Total Realized PnL", "realized_pnl"),
+            total_unrealized_pnl=total_unrealized if total_unrealized is not None else _num("Total Unrealized PnL", "unrealized_pnl"),
+            total_fees=total_fees_val if total_fees_val is not None else _num("Total Commission", "total_fees", "fees"),
+            net_pnl=net_pnl_val if net_pnl_val is not None else _num("Net PnL", "Total PnL", "net_pnl"),
             run_id=payload.get("run_id"),
         )
 
