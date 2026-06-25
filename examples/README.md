@@ -4,7 +4,7 @@ Complete, runnable strategies that deploy to the HiveQ platform. Each file is
 self-contained: a strategy class authored against the SDK type surface plus a
 `run_backtest(...)` deploy block. Every `ctx` call is verified against the SDK
 stubs; the canonical reference is the version-matched spec at `docs/<version>/api-reference.md`
-(current: [`docs/0.3.5/api-reference.md`](../docs/0.3.5/api-reference.md)).
+(latest: [`docs/latest/api-reference.md`](../docs/latest/api-reference.md)).
 
 ## Authoring basics
 

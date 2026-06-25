@@ -7,9 +7,8 @@ write a strategy or use this SDK, read these two, **in order**:
 1. **The version-matched API spec** — `docs/<version>/api-reference.md`. The canonical
    API spec (every signature verified against source) is **versioned per SDK release**:
    each release has its own folder under `docs/` named for its version, e.g.
-   [`docs/0.3.5/api-reference.md`](docs/0.3.5/api-reference.md). **Always read the folder
-   matching the installed SDK version** — find it with
-   `python -c "import hiveq.flow as hf; print(hf.__version__)"`, then open
+   [`docs/latest/api-reference.md`](docs/latest/api-reference.md). **Always read the `latest` folder**
+   (symlink to current release), or a specific version folder if needed. Then open
    `docs/<that-version>/api-reference.md`. It is the **single source of truth**; start
    with its §0 "Hard rules / invariants".
 2. **[`examples/`](examples/)** — complete, runnable strategies (see

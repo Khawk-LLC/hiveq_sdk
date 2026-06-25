@@ -151,6 +151,5 @@ and options — plus your own custom data feeds, all tradable in one backtest.
 - **[`docs/`](docs/)** — the complete API reference: every callback, order type,
   execution algorithm, data schema, and result accessor. Docs are versioned per
   release — read the one matching your installed SDK at
-  **`docs/<version>/api-reference.md`** (current:
-  [`docs/0.3.5/api-reference.md`](docs/0.3.5/api-reference.md)). Check your
-  version with `python -c "import hiveq.flow as hf; print(hf.__version__)"`.
+  **`docs/<version>/api-reference.md`** (or use
+  [`docs/latest/api-reference.md`](docs/latest/api-reference.md) for the current version).
