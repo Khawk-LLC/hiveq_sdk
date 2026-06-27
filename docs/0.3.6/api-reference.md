@@ -35,6 +35,26 @@ R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, o
 R8  A HiveQ API key is the only credential required (§3); auth is fully automatic via browser sign-in. On the FIRST run with no key, sign-in opens a browser and BLOCKS ~5 min waiting for the user — this is expected, NOT a hang. The user's whole experience is "a browser opens, I sign in, done"; tell them only that, and (if the browser didn't open) the bare link. NEVER show the user internal commands (`hf.login()`, `hiveq-login`), env vars, or file paths; NEVER bisect, kill the process, or fall back to a manual/`export HIVEQ_API_KEY` key (§3.1). Trigger sign-in invisibly on the user's behalf; never put it in deliverable code.
 R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
     across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
+R10 Every strategy MUST include logging via the HiveQ logger throughout all callbacks and decision
+    branches. This is MANDATORY — not optional. Use logger.debug(...) for per-bar state, condition
+    checks, and intermediate values; logger.info(...) for milestone events (signal triggered, order
+    placed, pattern detected). Because the default level is INFO, debug lines are silent in normal
+    runs and add zero noise. When the strategy misbehaves, re-run with hiveq_log_level='DEBUG'
+    (§2.1) and all context surfaces immediately — no code changes needed.
+
+    Import and instantiate at module level (NOT inside the class):
+        from hiveq.flow.logger import logger as _get_logger
+        logger = _get_logger()
+
+    DO NOT use logging.getLogger(__name__) or logging.basicConfig — those are silenced by the
+    executor and do not respond to hiveq_log_level (§5.9.1).
+
+    Minimum logging required in every strategy:
+    - on_start:  log what was subscribed and any initial config values
+    - on_bar:    log bar time, close, and key state variables at DEBUG level every bar
+    - every signal/condition check: log the values being compared and the outcome at DEBUG
+    - every order placement: log symbol, side, quantity, and the reason at INFO
+    - on_order:  log the order status and fill price at INFO
 ```
 
 ---
@@ -45,6 +65,9 @@ R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.globa
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
+from hiveq.flow.logger import logger as _get_logger
+
+logger = _get_logger()   # module-level — REQUIRED in every strategy (R10)
 
 class BuyAndHold:
     def __init__(self):
@@ -53,15 +76,19 @@ class BuyAndHold:
     # PER-EVENT CALLBACKS (default contract). One focused method per event type.
     def on_start(self, ctx: hf.Context, event):
         ctx.subscribe_bars(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY, interval='1m')
+        logger.info(f"[START] subscribed 1m bars for {ctx.strategy_config.symbols}")
 
     def on_bar(self, ctx, event):
         bar = event.data()                           # -> SigmaBar (§7.1)
+        logger.debug(f"[BAR] {bar.symbol} {bar.time} close={bar.close:.2f} bought={self.bought}")
         if not self.bought and ctx.is_flat(bar.symbol):
+            logger.info(f"[ENTRY] buying 100 {bar.symbol} at {bar.close:.2f}")
             ctx.buy_order(bar.symbol, quantity=100)
             self.bought = True
 
     def on_order(self, ctx, event):                  # NOT on_order_filled — fills come here
         order = event.data()                         # -> SigmaOrder (§7.3)
+        logger.info(f"[ORDER] {order.symbol} status={order.status} filled={order.is_filled}")
         if order.is_filled:
             fill = order.last_fill                   # -> SigmaFill (§7.4)
 
@@ -127,7 +154,7 @@ Recognized keys (all optional; sensible defaults apply):
 
 | key | type | default | purpose |
 |---|---|---|---|
-| `hiveq_log_level` | str | `'INFO'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Use `DEBUG`, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). |
+| `hiveq_log_level` | str | `'INFO'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Controls the HiveQ strategy logger (`from hiveq.flow.logger import logger as _get_logger` — §5.9.1). Use `'DEBUG'`, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). See the full debugging workflow in §11.5. |
 | `oms_console_log` | bool | `False` | Echo order-management-system activity to the executor console. |
 | `futures_datasets` | list[str] | `['HIVEQ_US_FUT']` | Datasets treated as futures (enables contract resolution + rollover events, §7.12). |
 | `signals_datasets` | list[str] | `['HIVEQ_QUANT_SIGNALS']` | Datasets that key off `config['symbols']` rather than the run's symbol universe. |
@@ -443,6 +470,29 @@ ctx.add_event_log(message: str, sub_event_type: Optional[str] = None,
 ctx.log_parameter_change(param_name: str, old_value, new_value, symbol: Optional[str] = None)
 ```
 
+### 5.9.1 Strategy logger
+
+Use the HiveQ logger — **not** the standard Python `logging` module — so your output is controlled by `hiveq_log_level` (§2.1):
+
+```python
+from hiveq.flow.logger import logger as _get_logger
+
+logger = _get_logger()   # module-level; call once per strategy file
+```
+
+The executor sets all non-HiveQ loggers to `WARNING` by default, and `logging.basicConfig` is a no-op once the executor has already installed handlers — so `logging.getLogger(__name__)` is silent regardless of level. The HiveQ logger is the only one controlled by `hiveq_log_level`.
+
+```python
+logger.debug("...")    # visible only when hiveq_log_level='DEBUG'
+logger.info("...")     # visible at INFO and above (the default)
+logger.warning("...")
+logger.error("...")
+```
+
+**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the default level is `INFO`, these are silent in normal runs and add zero noise. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all debug context surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
+
+`ctx.add_event_log(...)` (above) is complementary: it writes a structured, queryable row into the event-log table (readable via `run.event_logs()`). Use it for milestone events (pattern detected, target set, regime change) rather than for fine-grained per-bar diagnostics. Use `logger.debug` for everything else.
+
 ### 5.10 Executors — managed order working  (POV / TWAP / VWAP / AUCTION …)
 
 An executor is a server-side execution algo that owns the *entire* order lifecycle for a target — it slices the parent quantity into child orders, places them, **modifies/replaces and cancels** as the market moves, aggregates fills, and guarantees order-state consistency even when a downstream provider misbehaves (chasing/re-pricing, repeated replaces). It is well-tested and shared across strategies. You hand it a target (qty/side/type/limits) and it works toward it, keeping **one executor handle per target** instead of you re-sending orders every bar.
@@ -522,7 +572,7 @@ event.time_utc    -> Optional[datetime] # UTC
 | `SECURITY_EVENT` | security/reference payload (opaque) | 7.13 |
 
 ### 7.1 SigmaBar
-`symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str` · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
+`symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str`(human-readable: `'1d'` / `'1m'` / `'1s'` — matches the available bar schemas; no `'1h'`) · `interval_millis:int`(`86400000` / `60000` / `1000`) · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.2 SigmaPosition
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
@@ -915,6 +965,49 @@ logs = get_logs(task_id=run.task_id, limit=500)  # for debugging / course-correc
 report = run.report()                            # PerformanceReport on success (§10.1)
 ```
 > Incremental mid-run P&L is not streamed today; status transitions are PENDING→RUNNING→DONE, with the report available on completion. Use `get_logs` for in-flight diagnostics.
+
+### 11.5 Debugging strategies
+
+When a strategy produces no trades or misbehaves, follow this workflow:
+
+**Step 1 — Instrument the strategy with logs before you run it.** Every callback and decision branch should have a `logger.debug(...)` call (§5.9.1). Milestone events (pattern detected, signal set, position opened) also warrant a `ctx.add_event_log(...)` row. If logging is sparse, add it now — re-running is cheaper than guessing.
+
+**Step 2 — Re-run with DEBUG level and OMS echoing on:**
+```python
+run = hf.run_backtest(
+    ...,
+    config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True},
+)
+```
+
+**Step 3 — Guard `run_backtest` so the executor doesn't recurse.** The executor re-imports your script to restore the strategy class. Any unguarded `run_backtest(...)` at module level fires again inside the executor with no data, producing 0 bars. Wrap it:
+```python
+import os
+if __name__ == "__main__" and os.environ.get("HIVEQ_SDK_CLIENT_RUN") == "1":
+    run = hf.run_backtest(...)
+```
+
+**Step 4 — Read the raw executor log** (includes all `logger.*` output and any tracebacks):
+```python
+logs = run.logs()                       # list[str] — the complete executor stdout
+# OR via jobs API (larger limit):
+from hiveq.flow.jobs import get_logs
+logs = get_logs(task_id=run.task_id, limit=5000)
+for entry in logs.get('logs', []):
+    print(entry)
+```
+
+**Step 5 — Read structured event logs** (milestone events written with `ctx.add_event_log`):
+```python
+df = run.event_logs()    # pandas DataFrame; columns: time, symbol, message, …
+print(df[['time','symbol','message']])
+```
+
+**Common root causes checklist:**
+- `on_bar` fires but no orders: the strategy has logging but no actual `ctx.buy_order(...)` call on the signal path — trace with `logger.debug` to confirm the entry condition is reached.
+- 0 bars received: unguarded `run_backtest` at module level (Step 3 above).
+- `logger.debug` silent: using `logging.getLogger(__name__)` instead of the HiveQ logger (§5.9.1).
+- Pattern detected but no trade: detection fires on the last bar of the backtest — extend the date range so there are subsequent bars on which to act.
 
 ---
 
