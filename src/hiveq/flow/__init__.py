@@ -209,6 +209,7 @@ def run_backtest(
     data_configs: Optional[List[dict]] = None,
     backtest_config: Optional[BacktestConfig] = None,
     *,
+    requirements: Optional[List[str]] = None,
     silent: bool = False,
     task_name: Optional[str] = None,
     allow_duplicate: bool = True,
@@ -221,7 +222,9 @@ def run_backtest(
 
     Captures your strategy code, ships it to the HiveQ platform, and (unless
     ``silent=True``) blocks with a live progress line until the run finishes,
-    then returns the completed ``Run``. Results via ``run.report()`` etc.
+    then returns the completed ``Run``. ``requirements`` is accepted for API
+    compatibility; package installation is handled by the remote orchestrator
+    once supported. Results via ``run.report()`` etc.
     """
     result = _deploy(
         strategy_configs,

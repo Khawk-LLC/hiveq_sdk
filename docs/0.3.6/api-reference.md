@@ -119,12 +119,15 @@ run_backtest(
     data_configs: Optional[list[dict]] = None, # §9
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
+    requirements: Optional[list[str]] = None,   # accepted for future orchestrator package installs
     silent: bool = False,                       # True -> deploy + return Run immediately (no blocking)
     **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
 #   silent=False (default): deploy to platform, block w/ live progress, return the finished Run.
 #   silent=True           : deploy and return the Run immediately (run.run_id / run.task_id).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
+#   requirements: accepted for API compatibility; currently not sent by the
+#                 SDK backtest wrapper until orchestrator support lands.
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
@@ -1261,6 +1264,53 @@ class MA:
             sma20 = sum(w) / len(w)
 ```
 `ctx.instrument(symbol).last_bar` returns the most recent bar if you only need the latest price.
+
+#### Cross-session state for daily / overnight strategies
+
+The backtest engine initializes strategy objects per session/trading day. That
+means `__init__` may run again on the next session, and state kept only on
+`self` can be reset before the strategy has enough prior-day context to trade.
+For daily, swing, or overnight strategies that aggregate `bars_1m` into daily
+signals, keep cross-session state in module-level containers and have `__init__`
+bind each strategy instance to those containers. Use `__init__` only to attach
+state references and initialize per-instance counters.
+
+```python
+from collections import deque
+
+DAILY_CLOSES = {}        # symbol -> deque[float], survives per-session init
+CURRENT_DAY = {}         # symbol -> current trading day
+CURRENT_DAY_CLOSE = {}   # symbol -> latest close for current day
+
+
+class DailyMeanReversion:
+    def __init__(self):
+        self.daily_closes = DAILY_CLOSES
+        self.current_day = CURRENT_DAY
+        self.current_day_close = CURRENT_DAY_CLOSE
+
+    def on_start(self, ctx, event):
+        ctx.subscribe_bars(ctx.strategy_config.symbols,
+                           asset_type=AssetType.EQUITY,
+                           interval="1m")
+
+    def on_bar(self, ctx, event):
+        bar = event.data()
+        day = ctx.trading_day
+        if self.current_day.get(bar.symbol) != day:
+            prior_close = self.current_day_close.get(bar.symbol)
+            if prior_close is not None:
+                self.daily_closes.setdefault(
+                    bar.symbol, deque(maxlen=20)
+                ).append(prior_close)
+            self.current_day[bar.symbol] = day
+        self.current_day_close[bar.symbol] = bar.close
+```
+
+This is run-local process memory: it persists across sessions within one
+backtest run, but not across separate backtest submissions or separate executor
+containers. For state that must survive across runs, persist it through an
+external store or input data source.
 
 ### 16.3 Indicators (no built-in TA library)
 Compute with `numpy`/`pandas` (both are dependencies). Examples over a `deque`/`np.array` of closes:
