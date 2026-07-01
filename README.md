@@ -149,7 +149,10 @@ and options — plus your own custom data feeds, all tradable in one backtest.
   momentum, bracket orders, pairs trading, 0DTE options, futures sessions,
   scheduled timers, custom data, and more.
 - **[`docs/`](docs/)** — the complete API reference: every callback, order type,
-  execution algorithm, data schema, and result accessor. Docs are versioned per
-  release — read the one matching your installed SDK at
-  **`docs/<version>/api-reference.md`** (or use
-  [`docs/latest/api-reference.md`](docs/latest/api-reference.md) for the current version).
+  execution algorithm, and result accessor, at
+  **`docs/<version>/api-reference.md`** (or
+  [`docs/latest/api-reference.md`](docs/latest/api-reference.md) for the
+  current version). Available datasets/schemas live alongside it in
+  **`docs/<version>/data-reference.md`**
+  ([`docs/latest/data-reference.md`](docs/latest/data-reference.md)). Docs are
+  versioned per release — read the folder matching your installed SDK.

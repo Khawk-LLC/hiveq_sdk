@@ -11,7 +11,12 @@ write a strategy or use this SDK, read these two, **in order**:
    (symlink to current release), or a specific version folder if needed. Then open
    `docs/<that-version>/api-reference.md`. It is the **single source of truth**; start
    with its §0 "Hard rules / invariants".
-2. **[`examples/`](examples/)** — complete, runnable strategies (see
+2. **`docs/<version>/data-reference.md`** (same folder as the API spec) — the
+   catalog of every `dataset`/`schema` code available for `data_configs`
+   (§9 of the API spec links here). This is where the platform/data team's
+   updates to available data land — always defer to it over your own
+   assumptions about what data exists.
+3. **[`examples/`](examples/)** — complete, runnable strategies (see
    [`examples/README.md`](examples/README.md)). Mirror their structure.
 
 ## Hard rules (summary — full text in `docs/<version>/api-reference.md` §0)

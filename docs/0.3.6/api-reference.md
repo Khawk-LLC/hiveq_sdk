@@ -2,7 +2,7 @@
 CANONICAL MACHINE-READABLE API SPEC FOR HIVEQ FLOW.
 Audience: code-generation agents AND human developers.
 Every signature, type, enum value, and dict key below is verified against source.
-If you are unsure of a value, use the documented dataset/schema codes in §9 rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
+If you are unsure of a value, use the documented dataset/schema codes in §9 / data-reference.md rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
 -->
 
 # HiveQ Flow — Canonical API Specification
@@ -650,11 +650,18 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 ## 9. `data_configs` schema  (list of dicts)
 
 ### 9.1 `type='hiveq_historical'`
+
+> **Full data catalog — datasets, schemas, coverage caveats — lives in
+> [`data-reference.md`](data-reference.md).** That file is the single source
+> of truth for "what data exists"; keep this section limited to the
+> `data_configs` dict shape. If a dataset/schema code isn't in
+> `data-reference.md`, don't guess — it doesn't exist.
+
 | key | type | notes |
 |---|---|---|
 | `type` | str | `'hiveq_historical'` |
-| `dataset` | str | dataset code: `HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_US_OPT`, `HIVEQ_US_IND`, `HIVEQ_US_ETF`, `HIVEQ_QUANT_SIGNALS`, `HIVEQ_ECON`. (`HIVEQ_STRAT` holds published run *results* — an output you read after a run, not a strategy input.) |
-| `schema` | list[str] \| str | one or more exact schema codes, e.g. `bars_1m`, `bars_1s`, `bars_1d`, `tbbo`, `eq_trades`, `fut_trades`, `snaps_1s`, `signals`. Bar data exists only at `bars_1s` / `bars_1m` / `bars_1d` per asset class — there is **no** `bars_5m` / `bars_1h`. **Trade prints** (incl. the opening/closing **auction** prints that MOO/MOC fill against, §5.2.1) come from `eq_trades` (equities) / `fut_trades` (futures); `tbbo` is **quotes** (bid/ask) and `bars_*` are aggregated — neither carries trade/auction prints. **Executors** (POV/TWAP/VWAP…, §5.10) also need a tick stream — **prefer `eq_trades`/`fut_trades`** (`tbbo` quotes work too but have limited coverage); never `bars_*`. |
+| `dataset` | str | dataset code — see `data-reference.md` §1 for the full list (`HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_QUANT_SIGNALS`, …). |
+| `schema` | list[str] \| str | one or more exact schema codes — see `data-reference.md` §2 for the full list (`bars_1m`, `eq_trades`, `fut_trades`, `tbbo`, …) and coverage caveats (bar granularities, auction prints, executor tick-stream requirement). |
 | `id` | str (opt) | identifier referenced by `ctx.subscribe_data(data_id=...)` for signal/custom sources |
 | `enabled` | bool (opt) | default `True` |
 
@@ -669,20 +676,9 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
  'id':'mysignals','symbols':['My_Signal_Name']}
 ```
 
-**`HIVEQ_QUANT_SIGNALS`** delivers platform-hosted signal data to `on_custom_data`. Each row has a `signal_json` column containing a JSON-encoded payload with the signal fields. Parse it in your strategy:
-```python
-def on_custom_data(self, ctx, event):
-    data = event.data()
-    sig = json.loads(data.column_data("signal_json"))
-    value = sig.get("my_field")
-```
-
-The `symbols` key in `data_configs` selects which signal stream to subscribe to. The `id` field must match the `data_id` argument in `ctx.subscribe_data(data_id=...)`.
+**`HIVEQ_QUANT_SIGNALS`** delivers platform-hosted signal data to `on_custom_data` — see `data-reference.md` §3 for the `signal_json` payload format.
 
 > **Backtest with your own signals?** Use a CSV custom data source instead (§9.2) — it fires the same `on_custom_data` callback. Put your signal fields as columns in the CSV and read them with `column_data()`. No `signal_json` wrapping needed.
-
-```python
-```
 
 ### 9.2 `type='csv'`
 | key | type | notes |
@@ -827,9 +823,7 @@ hiveq-data -l signals
 ```
 
 ### 9.3 Behavior derived from schema/dataset
-- schema containing `bar` → bar-based fills; schema with `trade`/`tbbo` → tick-based fills.
-- `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
-- `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
+See `data-reference.md` §4 (fill mode, futures session defaults, options snapshot handling).
 
 ---
 
