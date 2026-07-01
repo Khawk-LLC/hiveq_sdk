@@ -680,6 +680,41 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 
 > **Backtest with your own signals?** Use a CSV custom data source instead (§9.2) — it fires the same `on_custom_data` callback. Put your signal fields as columns in the CSV and read them with `column_data()`. No `signal_json` wrapping needed.
 
+#### `data_type='custom'` + `filters` (query a ClickHouse-backed table directly)
+
+A `hiveq_historical` entry can also route through `HiveQUserDataAdapter`
+instead of the default signal path, by adding `data_type: 'custom'` and a
+`filters` dict. `filters` is flattened verbatim into `<id>.<key>` config
+read by the adapter — every key is optional except `adapter`/`dataset`/
+`schema`, and omitting a key keeps that setting at its default (no effect
+on existing configs).
+
+| key | type | notes |
+|---|---|---|
+| `adapter` | str | Must be `'HiveQUserDataAdapter'`. |
+| `dataset` | str | Dataset code to query, e.g. `'HIVEQ_QUANT_CLUSTERS'`. |
+| `schema` | str | Schema code to query, e.g. `'clusters'`. |
+| `symbols` | str, comma-separated | Symbol/identifier filter values, e.g. `'ES.c.0'` or `'ES.c.0,NQ.c.0'`. Opaque by default (signal name, zone tag, etc.) unless a resolution mode below is set. |
+| `symbolFilterKey` | str | The request-body field name `symbols` is sent under — dataset-dependent (`'symbol'` for `HIVEQ_QUANT_SIGNALS`, `'sym'` for `HIVEQ_QUANT_CLUSTERS`/`_MODES`). **Not** a list — one field name applies to the whole `symbols` array. |
+| `symbolsAreFuturesContracts` | bool | Legacy flag. `True`/`'true'` resolves `symbols` as `<ROOT>.c.<N>` continuous contracts (dated contract + Nanex translation, re-resolved per backtest day). Superseded by `symbolResolutionMode` below when both are set. |
+| `symbolResolutionMode` | str | `'continuous_contract'` (same as `symbolsAreFuturesContracts: True`), `'root_symbol'` (strip the `.c.<N>` suffix, use the bare root, no per-date lookup or Nanex translation), or `'option'` (reserved, not yet implemented — logs a warning and falls back to unresolved symbols). Unset defaults to `continuous_contract`/`none` based on `symbolsAreFuturesContracts`. |
+| `timestampColumn` | str | Overrides the row column used as the event timestamp. Default (unset) guesses from `ts_event` > `db_event` > `time`, in that preference order. Set this when a table's timestamp column doesn't match any of those three names. |
+| `extraFilters` | str, comma-separated `col=val` pairs | Arbitrary hardcoded column=value literal filters merged into the query alongside `symbols`, e.g. `'exchange=CME,session=RTH'`. No built-in equivalent before this key — use it for any column/value constraint beyond symbol and date range. |
+
+```python
+{'type': 'hiveq_historical', 'dataset': 'HIVEQ_QUANT_CLUSTERS', 'data_type': 'custom',
+ 'id': 'es_mm_zones', 'filters': {
+     'adapter': 'HiveQUserDataAdapter',
+     'dataset': 'HIVEQ_QUANT_CLUSTERS',
+     'schema': 'clusters',
+     'symbols': 'ES.c.0',
+     'symbolFilterKey': 'sym',
+     'symbolResolutionMode': 'continuous_contract',
+     'timestampColumn': 'time',
+     'extraFilters': 'tag=ON',
+ }}
+```
+
 ### 9.2 `type='csv'`
 | key | type | notes |
 |---|---|---|
