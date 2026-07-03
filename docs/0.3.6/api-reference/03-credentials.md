@@ -2,7 +2,7 @@
 
 A **HiveQ API key** is the only credential required, and the SDK provisions it **automatically** — the user never sets, exports, or manages it by hand. Identity (user, org) is resolved from the key server-side.
 
-How it actually works: the **first** `run_backtest` (any deploy) calls the SDK's init, which looks for a key in the environment / `~/.hiveq/.env`. If none is found, it opens a browser sign-in (loopback), mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run** — no prompt, no env var, no code. There is no "set up your key first" step.
+How it actually works: the **first** `run_backtest`/`deploy_job` (any deploy — a backtest or a plain `QUANT_SCRIPTS` job, §11.6) calls the SDK's init, which looks for a key in the environment / `~/.hiveq/.env`. If none is found, it opens a browser sign-in (loopback), mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run** — no prompt, no env var, no code. There is no "set up your key first" step.
 
 ### 3.1 First run — the sign-in you will see, and what to do (AI agents: READ THIS)
 

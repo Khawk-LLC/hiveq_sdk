@@ -27,7 +27,7 @@ Prose elsewhere in this doc set (and in code comments) refers to sections as `§
 | 8 | [08-portfolio-api.md](08-portfolio-api.md) | Portfolio API — `SigmaPortfolio` / `SigmaGlobalPortfolio` shared surface. |
 | 9 | [09-data-configs.md](09-data-configs.md) | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers. |
 | 10 | [10-results.md](10-results.md) | Results — `Run` handle, `report()`, `positions()`/`trades()`/`tearsheet()`/`event_logs()`/`logs()`, quantstats, phantom-PnL canary checks. |
-| 11 | [11-remote-deploy.md](11-remote-deploy.md) | Remote deploy + observability (`hiveq.flow.jobs`). |
+| 11 | [11-remote-deploy.md](11-remote-deploy.md) | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`. |
 | 12 | [12-enums.md](12-enums.md) | Enums — exact members and `.value` strings. |
 | 13 | [13-config-dataclasses.md](13-config-dataclasses.md) | Config dataclasses (`BacktestConfig`, `StrategyConfig`, `EngineConfig`, ...). |
 | 14 | [14-imports-cheatsheet.md](14-imports-cheatsheet.md) | Imports cheat-sheet, incl. §14.1 ancillary data packages shipped as stubs with the SDK. |

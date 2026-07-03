@@ -27,5 +27,9 @@ from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCe
 
 **time_in_force** (valid strings): `"DAY" "GTC" "IOC" "FOK" "GTX" "GTD" "OPG" "ATC"`
 
+**TaskType** (`from hiveq.flow.jobs import TaskType`; `.value` == name): `QUANT_SCRIPTS HIVEQ_FLOW_BT HIVEQ_FLOW_LIVE_SIM HIVEQ_FLOW_PROD HIVEQ_ALPHA_AI HIVEQ_DEV_OPS_SCRIPTS`
+
+**ScheduleFrequency** (`from hiveq.flow.jobs import ScheduleFrequency`; `.value` == name; §11.6): `ONCE DAILY WEEKDAYS WEEKENDS WEEKLY MONTHLY INTERVAL`
+
 ---
 

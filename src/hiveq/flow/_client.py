@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import time
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urljoin
@@ -48,6 +49,69 @@ class TaskType(str, Enum):
     HIVEQ_FLOW_PROD = "HIVEQ_FLOW_PROD"
     HIVEQ_ALPHA_AI = "HIVEQ_ALPHA_AI"
     HIVEQ_DEV_OPS_SCRIPTS = "HIVEQ_DEV_OPS_SCRIPTS"
+
+
+class ScheduleFrequency(str, Enum):
+    """Recurring-execution frequency for a scheduled task."""
+
+    ONCE = "ONCE"
+    DAILY = "DAILY"
+    WEEKDAYS = "WEEKDAYS"
+    WEEKENDS = "WEEKENDS"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    INTERVAL = "INTERVAL"
+
+
+@dataclass
+class Schedule:
+    """Recurring-schedule config for a task, mirroring the platform's job schedule.
+
+    Attributes
+    ----------
+    frequency : ScheduleFrequency
+        How often the task runs.
+    start_time : str
+        Time of day to run, ``"HH:MM"`` or ``"HH:MM:SS"``.
+    timezone : str
+        IANA/plain timezone name (default ``"UTC"``).
+    days_of_week : list[int], optional
+        For ``WEEKLY``/``INTERVAL`` — days to run, ``0``=Monday..``6``=Sunday.
+    day_of_month : int, optional
+        For ``MONTHLY`` — day of month (1-31).
+    end_time : str, optional
+        For ``INTERVAL`` — stop firing after this time of day (``"HH:MM"``).
+    interval_minutes : int, optional
+        For ``INTERVAL`` — run every N minutes within the window.
+    end_date : str, optional
+        ``"YYYY-MM-DD"`` after which the schedule stops firing entirely.
+    enabled : bool
+        Whether the schedule is active (default ``True``).
+    """
+
+    frequency: "ScheduleFrequency"
+    start_time: str
+    timezone: str = "UTC"
+    days_of_week: Optional[List[int]] = None
+    day_of_month: Optional[int] = None
+    end_time: Optional[str] = None
+    interval_minutes: Optional[int] = None
+    end_date: Optional[str] = None
+    enabled: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        freq = self.frequency
+        return {
+            "frequency": freq.value if isinstance(freq, ScheduleFrequency) else freq,
+            "start_time": self.start_time,
+            "timezone": self.timezone,
+            "days_of_week": self.days_of_week,
+            "day_of_month": self.day_of_month,
+            "end_time": self.end_time,
+            "interval_minutes": self.interval_minutes,
+            "end_date": self.end_date,
+            "enabled": self.enabled,
+        }
 
 
 class DuplicateTaskError(RuntimeError):
@@ -111,6 +175,7 @@ class _Client:
         job_type: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         requirements: Optional[List[str]] = None,
+        schedule: Optional[Union[Schedule, Dict[str, Any]]] = None,
         allow_duplicate: bool = False,
         duplicate_action: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -119,6 +184,18 @@ class _Client:
         ``entry_method`` defaults to ``"run"`` (the backtest task shape). For a
         plain callable pass ``entry_method=None`` with ``args``/``kwargs`` — the
         executor then calls ``task(*args, **kwargs)``.
+
+        ``schedule`` (a :class:`Schedule` or an equivalent dict) registers the
+        task for recurring execution instead of a single one-off run — the
+        platform validates/stores it and Celery Beat drives future firings.
+
+        ``requirements`` (pip specs) are forwarded to the sandbox in the shape
+        the executor expects (``{"payload": ..., "requirements": [...]}`` inside
+        the cloudpickled blob) — the executor genuinely runs ``pip install``
+        with them. Whether the install *succeeds* depends on the sandbox's pip
+        index being reachable for what you ask for (e.g. a private-index-only
+        sandbox rejects public packages); treat that part as environment-
+        dependent rather than a client-side guarantee.
         """
         task_type_value = (
             task_type.value
@@ -129,14 +206,20 @@ class _Client:
         wrapper = _TaskWrapper(
             target=task, entry_method=entry_method, args=args, kwargs=kwargs
         )
-        payload_b64 = base64.b64encode(cloudpickle.dumps(wrapper)).decode()
+        reqs = list(requirements) if requirements else None
+        to_pickle: Any = {"payload": wrapper, "requirements": reqs} if reqs else wrapper
+        payload_b64 = base64.b64encode(cloudpickle.dumps(to_pickle)).decode()
+
+        schedule_dict = (
+            schedule.to_dict() if isinstance(schedule, Schedule) else schedule
+        )
 
         body = {
             "payload_b64": payload_b64,
             "job_type": job_type,
-            "schedule": None,
+            "schedule": schedule_dict,
             "metadata": metadata or {},
-            "requirements": requirements,
+            "requirements": reqs,
         }
         headers = {
             "X-Task-Type": task_type_value,
@@ -255,6 +338,15 @@ class _Client:
                 )
             time.sleep(poll_interval)
 
+    def terminate(self, task_name: str) -> Dict[str, Any]:
+        """Terminate a task (and cancel its schedule, if any) by task name."""
+        resp = self._request(
+            "POST", "/terminate", data=json.dumps({"task_name": task_name}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
 
 _default_client: Optional[_Client] = None
 
@@ -313,3 +405,7 @@ def poll_result(
     poll_interval: float = 1.0,
 ) -> Dict[str, Any]:
     return get_client().poll_result(task_id, timeout, poll_interval)
+
+
+def terminate(task_name: str) -> Dict[str, Any]:
+    return get_client().terminate(task_name)

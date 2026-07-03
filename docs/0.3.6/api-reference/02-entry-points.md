@@ -116,5 +116,7 @@ hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> va
 
 > **TBD — access control.** Function-level ACLs (who can read/run a function, fine-grained sharing across namespaces) are **not fully implemented yet**. Today: functions live in your own namespace by default; `namespace="default"` is the shared/public namespace. Treat cross-namespace permissions as subject to change.
 
+> **Need a non-blocking deploy, or a recurring schedule?** `run_function` always blocks and returns a value. For a fetch/compute/publish script you want to deploy and walk away from (optionally on a recurring `Schedule`), use `deploy_job` instead — §11.6.
+
 ---
 

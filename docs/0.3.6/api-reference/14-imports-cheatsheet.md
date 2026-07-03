@@ -10,6 +10,7 @@ from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCe
 from hiveq.flow.trading.price_utils import adjust_tick_size, get_min_tick   # round your own limit/stop prices (§5.2)
 from hiveq.flow.utils.date_calendar import TradingCalendar   # trading-day / session helpers (US-only today)
 from hiveq.flow.jobs import submit, poll_result, get_status, get_logs, get_logs_gz, get_result, get_client, TaskType
+from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency, terminate   # arbitrary script deploy + scheduling (§11.6)
 
 # Ancillary: data facade (§14.1 — only when clearly the right tool or user-requested)
 from hiveq import dd                           # keyword-style data load/save/subscribe

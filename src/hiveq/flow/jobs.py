@@ -29,6 +29,8 @@ API key is sent on the wire — the platform resolves identity from it.
 """
 
 from hiveq.flow._client import (  # noqa: F401 — re-exported public surface
+    Schedule,
+    ScheduleFrequency,
     TaskType,
     get_client,
     get_logs,
@@ -37,12 +39,18 @@ from hiveq.flow._client import (  # noqa: F401 — re-exported public surface
     get_status,
     poll_result,
     submit,
+    terminate,
 )
+from hiveq.flow.job_deploy import Job, deploy_job  # noqa: F401 — re-exported public surface
 
 __all__ = [
     "TaskType",
+    "Schedule",
+    "ScheduleFrequency",
     # deploy
     "submit",
+    "deploy_job",
+    "Job",
     # observe / pull
     "poll_result",
     "get_status",
@@ -50,4 +58,5 @@ __all__ = [
     "get_logs",
     "get_logs_gz",
     "get_client",
+    "terminate",
 ]

@@ -105,5 +105,84 @@ print(df[['time','symbol','message']])
 - **Duplicate `on_bar` deliveries (framework bug, fix pending)**: over multi-week runs the engine has been observed firing `on_bar` 2×–3× for the same daily bar (identical `ts_event`, identical OHLCV, back-to-back within one tick). This is **NOT** caused by per-session re-init (`__init__` runs once — see §16.2) and **NOT** caused by subscription accumulation (`on_start` re-subscribes are deduped internally). It is a framework bug currently pending a fix. Symptoms: rolling deques and SMAs silently drift; strategies that produced trades in a short backtest produce different (or no) trades over longer windows. **Do not** add a permanent `ts_event` dedup to production strategy code; if you must work around it while the fix is in flight, mark it clearly as a temporary local workaround.
 - **Silent stuck position → phantom PnL**: `return_stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.
 
+### 11.6 Deploy an arbitrary script/job (`QUANT_SCRIPTS`) — `deploy_job`
+
+For a plain fetch/compute/publish script (not a `hiveq.flow` strategy) — e.g. pull data with `hiveq.dd.load(...)` and push a signal with `hiveq.dd.save(...)`. This is the `QUANT_SCRIPTS` counterpart to `run_backtest`: same cloudpickle-and-REST capture, no platform-internal package. Unlike `run_function` (§2.2, which blocks and returns the function's value), `deploy_job` is a **stub like `deploy_backtest`** — it submits and returns a handle immediately (`wait=False` is the default).
+
+> **When this is the right tool.** `deploy_job` is for *after* the script's logic is written and working, not for developing it. Write and iterate on the function itself first — call it directly, inspect its output, fix bugs — the ordinary way you develop any Python function, using `hiveq_data` (§14.1) for any data access you need to exercise while iterating (`hiveq.dd`, by contrast, is a stub client-side; its `load`/`save` only do real work once the function is actually running on the platform executor, §14.1). Reach for `deploy_job` once the function is correct and you're ready to run it on the platform itself — either as a one-off to validate it under real platform conditions (sandboxed execution, real data access, real credentials) before committing to a schedule, or to put it into production as a one-off or recurring (`schedule`d) job. It is not a development loop — each call is a full platform round-trip (submit → sandbox → logs), much slower than local iteration.
+
+> **Config: `HIVEQ_API_KEY` only — nothing else.** Exactly like `run_backtest`, identity and data access resolve **server-side** from the API key alone (§3). Do **not** generate code that sets `HIVEQ_DATA_URL`, `HIVEQ_USER_ID`, `HIVEQ_ORG_ID`, or `HIVEQ_USER_NAME` for a `deploy_job` call — none of them are read anywhere on this path. `HIVEQ_DATA_URL` in particular is a `run_backtest`-only concern (it gets baked into the `EngineConfig` the backtest payload carries); `deploy_job` never builds an `EngineConfig`, and the executor gets its own `HIVEQ_DATA_URL` injected server-side regardless of what the client sends. `HIVEQ_BASE_URL` only needs to be set to target a non-default platform host, exactly as with `run_backtest` — not something specific to `deploy_job`.
+
+```python
+from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency
+
+deploy_job(
+    func: Callable, *,
+    task_name: str = None,              # defaults to 'job-<func name>-<short id>'
+    args: tuple = None, kwargs: dict = None,
+    requirements: list[str] = None,     # pip specs installed in the sandbox — best-effort (see caveat below)
+    schedule: Schedule | dict = None,   # recurring execution instead of a one-off run
+    job_type: str = None,
+    metadata: dict = None,
+    wait: bool = False,                 # True -> block for a terminal result before returning
+    allow_duplicate: bool = True, duplicate_action: str = 'override',
+) -> Job
+
+class Job:                              # lighter than Run (§10.0) — no metrics/positions/trades
+    task_id: str; task_name: str
+    status() -> dict                    # full status; falls back to get_result() if the
+                                         # ClickHouse-backed /status route has no row yet
+                                         # (e.g. a schedule that hasn't fired its first run)
+    result() -> dict                    # GET /result/{task_id}
+    logs(limit: int = 1000) -> dict     # tail
+    download_logs(dest: str = None) -> str   # full gzipped log
+    wait(timeout=None, poll_interval=2.0) -> dict   # block for terminal state (not meaningful
+                                         # for a recurring `schedule` job — it never reaches one)
+    terminate() -> dict                 # cancels the schedule too, if any
+```
+
+```python
+import hiveq.flow as hf   # credentials: fully automatic, see §3 — do not add any setup for this
+
+def fetch_aapl():
+    from hiveq import dd
+    from hiveq.dd import DateRange
+
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"],
+                 date=DateRange("2025-08-01", "2025-08-08"))
+    print(f"Fetched {len(df)} rows for AAPL")
+    print(df.to_string())     # ends up in job.logs() / job.download_logs()
+    return {"rows": len(df)}  # ends up in job.result()['result']
+
+# One-off, blocks until it finishes (wait=True), then inspect result + logs:
+job = hf.deploy_job(fetch_aapl, task_name="fetch-aapl-once", wait=True)
+job.result()   # -> {'status': 'completed', 'result': {'rows': 6}, ...}
+job.logs()     # -> the printed DataFrame, exactly as it ran on the executor
+
+# Recurring — fires every day at 16:05 US/Eastern, non-blocking (the default):
+job = hf.deploy_job(
+    fetch_aapl,
+    task_name="fetch-aapl-scheduled",
+    schedule=hf.Schedule(frequency=hf.ScheduleFrequency.DAILY, start_time="16:05",
+                         timezone="US/Eastern"),
+)
+job.status()   # -> {'status': 'scheduled', ...} — check back later; won't reach a terminal state itself
+
+# A fetch + publish version follows the same shape:
+def fetch_and_publish(multiplier=2):
+    from hiveq import dd
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"])
+    dd.save(df, schema="quant_features", key="my_signal")
+    return {"rows": len(df)}
+
+job = hf.deploy_job(fetch_and_publish, task_name="daily-signal", requirements=["pandas"])
+```
+
+`Schedule` fields: `frequency` (`ScheduleFrequency`, §12), `start_time` (`"HH:MM"`/`"HH:MM:SS"`), `timezone` (default `"UTC"`), `days_of_week` (list of `0`=Mon..`6`=Sun, for `WEEKLY`/`INTERVAL`), `day_of_month` (for `MONTHLY`), `end_time`/`interval_minutes` (for `INTERVAL`), `end_date` (`"YYYY-MM-DD"`, stops the schedule entirely), `enabled` (default `True`). A plain dict with the same keys works too — `Schedule` is a convenience dataclass with `.to_dict()`.
+
+> **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them. Whether the install **succeeds** depends on the sandbox's package index being reachable for what you ask for; treat actual installation as environment-dependent rather than guaranteed by the SDK itself.
+
+> **`status()` fallback.** `GET /status/{task_id}` is backed by a task-history pipeline that may not have a row yet for every deployment target — `Job.status()` falls back to `get_result()` automatically in that case, so this is transparent in normal use; it's only worth knowing if you drop to the low-level `get_status()` directly (§11.3).
+
 ---
 
