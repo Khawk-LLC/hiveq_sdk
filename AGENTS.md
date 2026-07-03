@@ -4,13 +4,17 @@ This repo is the **thin-client SDK** for authoring HiveQ Flow trading strategies
 deploying backtests to the HiveQ platform. If you are an AI / code-gen agent asked to
 write a strategy or use this SDK, read these two, **in order**:
 
-1. **The version-matched API spec** — `docs/<version>/api-reference.md`. The canonical
+1. **The version-matched API spec** — `docs/<version>/api-reference/`. The canonical
    API spec (every signature verified against source) is **versioned per SDK release**:
    each release has its own folder under `docs/` named for its version, e.g.
-   [`docs/latest/api-reference.md`](docs/latest/api-reference.md). **Always read the `latest` folder**
-   (symlink to current release), or a specific version folder if needed. Then open
-   `docs/<that-version>/api-reference.md`. It is the **single source of truth**; start
-   with its §0 "Hard rules / invariants".
+   [`docs/latest/api-reference/`](docs/latest/api-reference/). **Always read the `latest` folder**
+   (symlink to current release), or a specific version folder if needed. It is split
+   one file per topic — open `docs/<that-version>/api-reference/index.md` first, it
+   lists every section with a one-line description and a link; read only the
+   section(s) relevant to your task, not the whole tree. It is the **single source
+   of truth**; read `00-hard-rules.md` (§0) at least once per session — every other
+   section assumes it. Superseded versions live under `docs/_archive/` — don't read
+   those unless you specifically need the diff against an old release.
 2. **`docs/<version>/data-reference.md`** (same folder as the API spec) — the
    catalog of every `dataset`/`schema` code available for `data_configs`
    (§9 of the API spec links here). This is where the platform/data team's
@@ -18,8 +22,12 @@ write a strategy or use this SDK, read these two, **in order**:
    assumptions about what data exists.
 3. **[`examples/`](examples/)** — complete, runnable strategies (see
    [`examples/README.md`](examples/README.md)). Mirror their structure.
+4. **The data driver reference** — if the task involves `hiveq.driver`/`dd.load`/`dd.save`
+   (a separate tool from the API spec above), read
+   [`docs/data_driver/latest/api_reference/index.md`](docs/data_driver/latest/api_reference/index.md)
+   the same way: index first, then only the relevant section(s).
 
-## Hard rules (summary — full text in `docs/<version>/api-reference.md` §0)
+## Hard rules (summary — full text in `docs/<version>/api-reference/00-hard-rules.md`, §0)
 
 - **R1** — a strategy is a Python class with per-event callbacks (`on_start`/`on_bar`/`on_order`/`on_trade`/…).
 - **R2** — `StrategyConfig.type` is the strategy **class name as a string**; must match exactly.

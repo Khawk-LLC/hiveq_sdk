@@ -2,7 +2,7 @@
 CANONICAL DATA CATALOG FOR HIVEQ FLOW.
 Audience: code-generation agents AND human developers, plus the data team keeping
 this catalog current. This file owns the "what data exists / what does it look like"
-facts. `api-reference.md` §9 owns "how to wire it into data_configs" and links here.
+facts. `api-reference/09-data-configs.md` (§9) owns "how to wire it into data_configs" and links here.
 -->
 
 # HiveQ Flow — Data Reference
@@ -12,8 +12,8 @@ facts. `api-reference.md` §9 owns "how to wire it into data_configs" and links 
   granularity, and any coverage caveats. Update this file when a dataset or
   schema is added, removed, or its coverage changes — no other doc needs to
   change for a data-catalog update.
-- See `api-reference.md` §9 for the `data_configs` dict shape and how to wire
-  a dataset/schema into a strategy.
+- See [`api-reference/09-data-configs.md`](api-reference/09-data-configs.md) (§9) for the
+  `data_configs` dict shape and how to wire a dataset/schema into a strategy.
 
 ---
 
@@ -65,7 +65,7 @@ The `symbols` key in the `data_configs` entry selects which signal stream to
 subscribe to; the entry's `id` must match `ctx.subscribe_data(data_id=...)`.
 
 > Backtesting with your **own** signals? Use a CSV custom data source instead
-> (`api-reference.md` §9.2) — it fires the same `on_custom_data` callback
+> ([`api-reference/09-data-configs.md`](api-reference/09-data-configs.md) §9.2) — it fires the same `on_custom_data` callback
 > without the `signal_json` wrapping.
 
 ## 4. Behavior derived from dataset/schema

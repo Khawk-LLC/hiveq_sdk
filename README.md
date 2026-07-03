@@ -150,9 +150,32 @@ and options — plus your own custom data feeds, all tradable in one backtest.
   scheduled timers, custom data, and more.
 - **[`docs/`](docs/)** — the complete API reference: every callback, order type,
   execution algorithm, and result accessor, at
-  **`docs/<version>/api-reference.md`** (or
-  [`docs/latest/api-reference.md`](docs/latest/api-reference.md) for the
+  **`docs/<version>/api-reference/`** (or
+  [`docs/latest/api-reference/`](docs/latest/api-reference/) for the
   current version). Available datasets/schemas live alongside it in
   **`docs/<version>/data-reference.md`**
   ([`docs/latest/data-reference.md`](docs/latest/data-reference.md)). Docs are
-  versioned per release — read the folder matching your installed SDK.
+  versioned per release — read the folder matching your installed SDK. Older
+  versions are kept for reference under `docs/_archive/` — don't read those by
+  default, they're superseded.
+- **[`docs/data_driver/latest/api_reference/`](docs/data_driver/latest/api_reference/)**
+  — reference for the separate data-driver config DSL (`hiveq.driver`), split
+  the same way as the API reference above.
+
+### How to read the split docs
+
+The API reference and the data-driver reference are each split into one file
+per topic, with an **`index.md`** at the root of the folder listing every
+section with a one-line description and a link. This applies whether you're a
+human, Claude, Codex, Kimi, or any other agent reading this repo — there is no
+special tooling involved, just plain markdown files:
+
+1. Open the relevant `index.md` first (`docs/latest/api-reference/index.md` or
+   `docs/data_driver/latest/api_reference/index.md`).
+2. Read only the section file(s) that match your question — e.g. an order-
+   placement question only needs `05-context-api.md`, not the whole tree.
+3. Start with `00-hard-rules.md` in the API reference at least once per
+   session — it's short and every other section assumes you've read it.
+
+Don't load an entire reference folder into context for a single question;
+that's exactly what the split is meant to avoid.
