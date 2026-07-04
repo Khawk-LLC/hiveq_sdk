@@ -374,7 +374,7 @@ def _deploy(
             'end_date': backtest_config.end_date,
             'symbols': backtest_config.symbols,
         },
-        requirements=['hiveq-flow'],
+        requirements=[],
         allow_duplicate=allow_duplicate,
         duplicate_action=duplicate_action,
         run_config=run_config,
