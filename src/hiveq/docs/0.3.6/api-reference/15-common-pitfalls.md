@@ -1,0 +1,19 @@
+## 15. Common pitfalls (accurate)
+
+- **Use per-event callbacks** (`on_start`/`on_bar`/`on_order`/…), not a single `on_hiveq_event` — that global form is opt-in only (§4).
+- **There is no `on_order_filled` callback** — handle fills in `on_order` and check `order.is_filled`.
+- **`run_backtest(...)` returns a `Run`, not a `PerformanceReport`** — call `run.report()` (§10.0). For non-blocking deploy use `run_backtest(..., silent=True)`.
+- **No built-in indicators or rolling-history accessor** — maintain your own `collections.deque` windows and compute with `numpy`/`pandas` (§16). `ctx.instrument(symbol).last_bar` is the only built-in "latest price" accessor.
+- **Sizing helpers exist** (`ctx.close_position`/`order_to_target`/`flatten_all`, §5.2/§16.1) but **percent-of-equity sizing and native brackets do not** — build stop-loss/take-profit as explicit child orders (§16.4).
+- **Match the order mechanism to the need:** a single immediate market order or a signal backtest → direct `buy_order`/`sell_order` (§5.2). Sizeable/sliced orders, live order-chasing/replaces, or auction routing → an **executor** (§5.10/§16.6), which owns slicing/replaces/cancels/fill-aggregation. Don't wrap a one-shot order in an executor; don't hand-roll replace/retry logic when one fits. With executors, hold one handle per target and `replace_executor_params_by_id` to re-target — never `add_executor` a duplicate.
+- `event.data()` is untyped — use §7.0 to know the concrete type for the branch you are in.
+- `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
+- Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
+- `report.*` DataFrames can be `None`/empty — guard before use.
+- For futures, subscribe by the continuous symbol string in `symbols=`, e.g. `subscribe_futures_bars(symbols=['ES.c.0'])` (or `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES)`). For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
+- **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`/TBBO), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
+- **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.
+- Set `symbols`/`start_date`/`end_date` in one place (top-level args OR `BacktestConfig`), not both.
+
+---
+

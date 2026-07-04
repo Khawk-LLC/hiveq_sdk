@@ -76,8 +76,9 @@ baseUrl = https://vm.hiveq.ai
 - Section header is **`[HiveQ]`** — capital `H` and `Q`.
 - Manual credential property is **`apiKey`** (camelCase); endpoint is **`baseUrl`**.
 
-> The API key is a secret. Prefer `hiveq login`; use a manual `apiKey` override
-> only when you intentionally manage credentials outside the HiveQ login flow.
+> ⚠️ The API key is a secret. Prefer `hiveq login`; if you use a manual
+> `apiKey` override, keep it only in a **gitignored** config — never in a
+> tracked/committed config file.
 
 **Read timeout:** each request uses a connect=10s / read=**300s** timeout, overridable
 via the **`HIVEQ_READ_TIMEOUT`** env var (seconds). Large pages of tick data take

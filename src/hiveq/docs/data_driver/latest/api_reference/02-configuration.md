@@ -61,8 +61,9 @@ baseUrl = https://vm.hiveq.ai    ; optional Data API endpoint override
   single place. The service derives the user/org from the key — no user/org ids are
   sent.
 
-> The API key is a secret. Prefer `hiveq login`; use a manual `apiKey` override
-> only when you intentionally manage credentials outside the HiveQ login flow.
+> ⚠️ The API key is a secret. Prefer `hiveq login`; if you use a manual
+> `apiKey` override, keep it only in a **gitignored** config, never in a
+> tracked/committed one.
 
 For the full HiveQ pull path (datasets/schemas, filter modes, pagination, the
 config→SDK mapping), see [`hiveq_data_api_reference.md`](../hiveq_data_api_reference.md).

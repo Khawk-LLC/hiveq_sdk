@@ -1,6 +1,6 @@
 <!--
 CANONICAL MACHINE-READABLE API SPEC FOR HIVEQ FLOW.
-Audience: HiveQ SDK users.
+Audience: code-generation agents AND human developers.
 Every signature, type, enum value, and dict key in this tree is verified against source.
 If you are unsure of a value, use the documented dataset/schema codes in §9 / data-reference.md rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
 -->

@@ -146,6 +146,16 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         error = first("error", "error_description")
         state = first("state")
         api_key = first("api_key", "apiKey", "key", "token", "access_token")
+        user_label = first(
+            "email",
+            "user_email",
+            "userEmail",
+            "name",
+            "user_name",
+            "userName",
+            "display_name",
+            "displayName",
+        )
 
         if server.expected_state and state and state != server.expected_state:
             # State mismatch — likely a stale/forged callback; reject it.
@@ -153,7 +163,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         elif error:
             server.result = {"error": error}
         elif api_key:
-            server.result = {"api_key": api_key}
+            server.result = {"api_key": api_key, "user_label": user_label}
         else:
             server.result = {"error": "no_api_key_in_callback"}
 
@@ -175,6 +185,62 @@ def _print_prompt(url: str) -> None:
         f"  Waiting for you to finish signing in…\n"
         f"{bar}\n"
     )
+
+
+def _user_label_from_verify_api_key(api_key: str) -> str | None:
+    try:
+        import requests
+    except Exception:
+        return None
+
+    auth_url = _auth_url()
+    try:
+        resp = requests.post(
+            f"{auth_url}/api/auth/verify-api-key",
+            json={"apiKey": api_key},
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    user = data.get("data", {}).get("user") if isinstance(data.get("data"), dict) else None
+    if not isinstance(user, dict):
+        return None
+    for key in ("email", "userEmail", "name", "userName"):
+        value = user.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _current_user_label(api_key: str) -> str | None:
+    for key in ("HIVEQ_USER_EMAIL", "HIVEQ_USER_NAME"):
+        value = os.environ.get(key)
+        if value:
+            return value
+    return _user_label_from_verify_api_key(api_key)
+
+
+def _print_signed_in(api_key: str, user_label: str | None = None) -> None:
+    label = user_label or _current_user_label(api_key)
+    if label:
+        print(f"Signed in as {label}")
+    else:
+        print("Signed in to HiveQ")
+
+
+def ensure_login(*, timeout: float = 300.0, open_browser: bool = True) -> str:
+    """Return an existing API key, or sign in through the browser if needed."""
+    api_key = os.environ.get("HIVEQ_API_KEY")
+    if api_key:
+        _print_signed_in(api_key)
+        return api_key
+    return login(timeout=timeout, open_browser=open_browser)
 
 
 def login(*, timeout: float = 300.0, open_browser: bool = True) -> str:
@@ -221,13 +287,13 @@ def login(*, timeout: float = 300.0, open_browser: bool = True) -> str:
     if not api_key:
         raise LoginError("Sign-in did not return an API key.")
 
-    path = _write_api_key(api_key)
+    _write_api_key(api_key)
     os.environ["HIVEQ_API_KEY"] = api_key
-    print(f"\n✓ Signed in. Your API key is saved to {path}.\n")
+    _print_signed_in(api_key, result.get("user_label"))
     return api_key
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Console entry point: ``hiveq-login``. Forces a fresh sign-in."""
     try:
         login()

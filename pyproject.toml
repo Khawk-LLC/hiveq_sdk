@@ -37,6 +37,7 @@ dev = ["pytest", "mypy", "build", "twine"]
 # store over REST (same code as hf.upload_files / hf.list_files); -u to upload
 # (incremental, with a live progress bar), -l to list.
 [project.scripts]
+hiveq = "hiveq.cli:main"
 hiveq-data = "hiveq.flow.uploads:main"
 # `hiveq-login` signs the user in via the browser and saves their API key to
 # ~/.hiveq/.env (same flow run_backtest triggers when no key is present).
@@ -51,7 +52,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
-"hiveq" = ["py.typed", "**/*.pyi"]
+"hiveq" = ["py.typed", "**/*.pyi", "docs/**/*.md"]
 "hiveq.flow" = ["py.typed", "**/*.pyi"]
 "hiveq_data" = ["py.typed"]
 
