@@ -187,6 +187,25 @@ def _print_prompt(url: str) -> None:
     )
 
 
+def _user_label_from_mapping(data: object) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    for key in (
+        "email",
+        "userEmail",
+        "user_email",
+        "name",
+        "userName",
+        "user_name",
+        "displayName",
+        "display_name",
+    ):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _user_label_from_verify_api_key(api_key: str) -> str | None:
     try:
         import requests
@@ -208,13 +227,19 @@ def _user_label_from_verify_api_key(api_key: str) -> str | None:
         data = resp.json()
     except ValueError:
         return None
-    user = data.get("data", {}).get("user") if isinstance(data.get("data"), dict) else None
-    if not isinstance(user, dict):
-        return None
-    for key in ("email", "userEmail", "name", "userName"):
-        value = user.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+
+    payload = data.get("data") if isinstance(data, dict) else None
+    for candidate in (
+        payload.get("user") if isinstance(payload, dict) else None,
+        payload.get("metadata") if isinstance(payload, dict) else None,
+        payload,
+        data.get("user") if isinstance(data, dict) else None,
+        data.get("metadata") if isinstance(data, dict) else None,
+        data,
+    ):
+        label = _user_label_from_mapping(candidate)
+        if label:
+            return label
     return None
 
 
@@ -229,7 +254,7 @@ def _current_user_label(api_key: str) -> str | None:
 def _print_signed_in(api_key: str, user_label: str | None = None) -> None:
     label = user_label or _current_user_label(api_key)
     if label:
-        print(f"Signed in as {label}")
+        print(f"Signed in to HiveQ as : {label}")
     else:
         print("Signed in to HiveQ")
 
