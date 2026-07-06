@@ -174,17 +174,17 @@ hiveq-data -l signals                  # verify what's on the platform
 > `hiveq-data -u signals/` stores files as `signals/<name>`, but
 > `hiveq-data -u signals/foo.csv` stores it as just `foo.csv` at the root.
 
-> **Real platform finding — read this before wiring up a custom-data
-> strategy.** The documented pattern (§9.2 of the API reference) says to
-> reference an uploaded CSV in `data_configs` by its plain **relative** path
-> (matching what you uploaded). As of this test, that does **not** work on
-> `staging.hiveq.ai` — `on_custom_data` fires **zero times**, reproduced with
-> three independent files including the SDK's own bundled example fixture.
-> The fix: use the **full absolute persistent-data path**
-> (`/home/hivequser/hiveq/persistent_data/<path>`) **combined with** the
-> `_yyyymmdd.csv` daily-file-naming pattern — both together. Neither the
-> relative path nor the full path alone (with a single non-pattern file)
-> worked; only the combination did. Concretely:
+> **Fixed platform bug (was: relative path silently fired zero events).**
+> Earlier testing found that a plain **relative** `path` in `data_configs`
+> (§9.2 of the API reference) resolved against the wrong working directory on
+> the executor and `on_custom_data` fired zero times. Root cause:
+> `SigmaEnvironment.setup()` `chdir`s into the Sigma bin path *after*
+> `deploy_task.py` already `chdir`s into the persistent-data mount, so the
+> relative path silently matched nothing by the time Sigma opened the file.
+> Fixed in `hiveq-flow` (`sigma_config_builder.py`) — deployed paths now
+> resolve explicitly against the persistent-data root regardless of CWD.
+> Verified working end-to-end (64 real trades, `on_custom_data` firing
+> correctly) with the plain relative path, matching the documented pattern:
 >
 > ```python
 > # Split your signal into one file per trading day, e.g.:
@@ -193,16 +193,13 @@ hiveq-data -l signals                  # verify what's on the platform
 > #   ...
 > # Upload the whole directory:
 > #   hiveq-data -u signals/
-> # Then in data_configs:
-> SIGNAL_PATH = "/home/hivequser/hiveq/persistent_data/signals/my_signal_yyyymmdd.csv"
+> # Then in data_configs — plain relative path, matching what you uploaded:
+> SIGNAL_PATH = "signals/my_signal_yyyymmdd.csv"
 > data_configs = [
 >     {"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]},
 >     {"type": "csv", "data_type": "custom", "id": "my_signal", "path": SIGNAL_PATH},
 > ]
 > ```
->
-> This is a documentation gap, not a broken feature — file a doc fix
-> separately, but use the full-path + daily-pattern form until it's updated.
 
 ## 7. Write a simple execution strategy that consumes the signal (via prompt)
 
