@@ -49,13 +49,15 @@ command in this doc picks the key up from that file. `hiveq docs` prints the
 path to the docs bundled inside the installed wheel; `hiveq datasets` lists
 what's available to your account.
 
-> **Environment note (real finding).** On the test machine, `run_backtest`
-> deployed from a fresh `venv` reliably failed with a `CodeArtifact 401`
-> pulling `hiveq-flow` on the executor container. The exact same script
-> succeeded end-to-end from a different, pre-existing conda environment on
-> the same box with the same API key. The cause is server-side (executor
-> credential/routing), not something in your code — if you hit this, try a
-> different environment before assuming your strategy is broken.
+> **Environment note — resolved 2026-07-06.** On the test machine, `run_backtest`
+> deployed from a fresh `venv` used to reliably fail with a `CodeArtifact 401`
+> pulling `hiveq-flow` on the executor container, while the same script
+> succeeded from a different, pre-existing conda environment on the same box
+> with the same API key. The fix landed in `hiveq-sdk` (`requirements=['hiveq-flow']`
+> → `requirements=[]` in `_deploy()`) paired with a `staging.hiveq.ai` release.
+> Reinstalling the rebuilt wheel into the previously-failing venv and retrying
+> confirmed it: 3/3 successful runs, real PnL, no environment workaround needed
+> anymore.
 
 ## 3. Point Claude Code (or any AI assistant) at the docs to author a strategy
 
@@ -306,7 +308,25 @@ Verified on the test machine: `hiveq-hft build` compiled `minimal_strategy`
 cleanly inside the cached `hiveq-sigma-native-builder:0.3.6` image, and
 `hiveq-hft validate` passed ABI checks.
 
-<!-- TODO: fill in native run-backtest result once confirmed -->
+> **Real finding — native backtest execution hung.** Submitting
+> `minimal_strategy` as a native backtest (`ES.c.0`, 2025-09-15,
+> `fut_trades`) succeeded (`Task deployed successfully`, a real `run_id`),
+> but the run then sat at `status: RUNNING`, `elapsed_ms: 0`,
+> `current_day: 0/1` with **zero progress** for over 20 minutes — this is a
+> hang, not just a slow tick-level backtest. Separately, calling
+> `run.logs()` on that native `run_id` returned the raw HTML of the HiveQ
+> web app's `index.html` instead of any log content — the logs endpoint for
+> native backtests appears misrouted. The CLI's own `hiveq-hft logs`
+> subcommand only supports LiveSim, not backtests, so there is currently
+> **no working way to inspect a native backtest's progress or logs** at
+> all. `build` and `validate` both work correctly; `run-backtest` execution
+> itself does not currently complete. Flagged for the platform team.
+>
+> **Retested 2026-07-06** after a `staging.hiveq.ai` release and a fresh
+> `hiveq-sdk` wheel — this specific hang is unaffected (a new attempt,
+> `run_id=33dc0cc3-270c-4f0f-a8f8-c83e9d13f603`, reproduced the identical
+> symptom). That release fixed a separate, unrelated issue (the
+> `run_backtest` CodeArtifact 401, §2) — the native path needs its own fix.
 
 For a platform-provided canned native strategy (e.g. `POVUserSignalStrategy`)
 you don't need to build or upload anything — omit `--plugin` and provide only
@@ -319,8 +339,9 @@ its image.
 
 | # | Area | Finding | Status |
 |---|---|---|---|
-| 1 | `run_backtest` executor | CodeArtifact 401 pulling `hiveq-flow`, reproducible in a fresh venv but not a pre-existing conda env on the same box | Environment-dependent; root cause not found (server-side) |
+| 1 | `run_backtest` executor | CodeArtifact 401 pulling `hiveq-flow`, reproducible in a fresh venv but not a pre-existing conda env on the same box | **Fixed** 2026-07-06 (commit 763f9f6 + staging release); verified 3/3 |
 | 2 | `hiveq-data-sdk` deps | Unbounded `kafka-python>=2.0.2` pulls incompatible 3.0.7 | Being fixed by repo owner |
-| 3 | Custom CSV `data_configs` | Relative-path (documented) delivers zero rows; full path + `_yyyymmdd.csv` pattern together works | Docs need a fix |
-| 4 | `QUANT_SCRIPTS` sandbox | `from hiveq import dd` fails — module missing in that executor image | Flagged for platform team |
-| 5 | `Job.terminate()` | 404s — no way to cancel a registered schedule from the client | Flagged for platform team |
+| 3 | Custom CSV `data_configs` | Relative-path (documented) delivers zero rows; full path + `_yyyymmdd.csv` pattern together works | Re-verified 2026-07-06, still needs the full-path workaround — docs need a fix |
+| 4 | `QUANT_SCRIPTS` sandbox | `from hiveq import dd` fails — module missing in that executor image | Re-verified 2026-07-06, still broken — flagged for platform team |
+| 5 | `Job.terminate()` | 404s — no way to cancel a registered schedule from the client | Re-verified 2026-07-06, still broken. **Two schedules are now stuck on staging** (`weekly-signal-scheduled`, task IDs `4636a8d7-ce54-4b3e-b2b8-008066916eaf` and `c1bd5c10-ed56-492e-9659-ae78fe7bf294`) and will keep firing and failing daily at 16:05 ET until removed platform-side |
+| 6 | Native (`hiveq-hft`) backtest | `run-backtest` submits fine, but execution hangs (`RUNNING`, `elapsed_ms=0` for 20+ min); `run.logs()` on a native run returns the web app's HTML, not logs; CLI `logs` subcommand only supports LiveSim | Retested 2026-07-06 after the staging release — **still hangs**, identical symptom (new `run_id=33dc0cc3-270c-4f0f-a8f8-c83e9d13f603`); this release did not touch the native path |

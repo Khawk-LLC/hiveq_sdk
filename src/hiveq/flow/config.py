@@ -513,6 +513,12 @@ class BacktestConfig:
     # and sets enableFuturesRollover=True in strategy params automatically
     enable_auto_rollover: bool = False
 
+    # Force-close non-option positions at session/day close (MARKET_STATE_CLOSE).
+    # Off by default — futures/equity positions carry across sessions unless you
+    # flatten them yourself. Options are unaffected either way: expiring option
+    # positions always settle automatically via the data API.
+    auto_flatten_at_close: bool = False
+
     # Transaction Cost Analysis
     enable_tca: bool = False  # Run TCA analysis on fills/orders after backtest
 
@@ -555,6 +561,7 @@ class BacktestConfig:
             'session_start': self.session_start,
             'session_end': self.session_end,
             'enable_auto_rollover': self.enable_auto_rollover,
+            'auto_flatten_at_close': self.auto_flatten_at_close,
             'payload_id': self.payload_id,
             'extra_config': self.extra_config.copy() if self.extra_config else {}
         }
