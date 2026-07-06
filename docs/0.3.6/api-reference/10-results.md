@@ -58,17 +58,22 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 
 **Tearsheet / metrics (quantstats).** `create_tearsheet()` and `summary_stats()` are powered by **quantstats**, which ships with the SDK (no extra install). Both read `report.returns_series`, so they need a run that produced returns; on missing/empty returns `create_tearsheet()` returns a small "no data" HTML page and `summary_stats()` returns `None`.
 
+> **To write a tearsheet FILE, always call `run.tearsheet()` — never `report.create_tearsheet()`.** `run.tearsheet()` **defaults to PDF** (no `output=` needed). `create_tearsheet()` is a *different, notebook-only* method: it returns an HTML/text string for inline display and is not a way to produce a saved report — do not take its return value and write it to `my_report.html` yourself; that is not "the tearsheet defaulting to HTML", that is calling the wrong method. If you want a file on disk, `output=` is optional and PDF is the default; pass `output='x.html'` only if you deliberately want HTML instead.
+
 ```python
 report = run.report()                 # or hf.get_run(run_id).wait().report()
 
-# Tearsheet file on disk (equity curve, drawdowns, monthly returns, risk metrics).
-# run.tearsheet() is the single entry point; the format is chosen from the output
-# extension — `.html` writes a standalone HTML file, anything else writes a PDF.
-path = run.tearsheet()                       # -> '<task_name|run_id>.pdf' in the cwd
+# Tearsheet FILE on disk (equity curve, drawdowns, monthly returns, risk metrics).
+# run.tearsheet() is the single entry point for this — the format is chosen from
+# the output extension: `.html` writes standalone HTML, anything else (including
+# no output= at all) writes a PDF. PDF is the default.
+path = run.tearsheet()                       # -> '<task_name|run_id>.pdf' in the cwd (PDF, default)
 path = run.tearsheet(output='my_report.pdf')
-path = run.tearsheet(output='my_report.html')
+path = run.tearsheet(output='my_report.html')  # explicit opt-in to HTML
 
-# Only when you need the HTML *string* to render inline in a notebook:
+# report.create_tearsheet() is NOT a file-saving method — it returns an HTML/text
+# STRING for inline rendering inside a notebook cell only. Never use it to produce
+# your tearsheet artifact.
 html = report.create_tearsheet()
 # In a Marimo notebook:
 import marimo as mo; mo.md(html)
