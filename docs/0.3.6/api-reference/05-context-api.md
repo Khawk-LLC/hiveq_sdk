@@ -22,6 +22,10 @@ ctx.subscribe_futures_bars(symbols: Optional[List[str]] = None, root: Optional[s
                            interval: str = "1m")
 ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional[str] = None,
                              contract: Optional[str] = None, continuous: Optional[str] = None)
+#   NOTE: there is NO subscribe_futures_quotes. Bars and trades have dedicated
+#   futures convenience methods; quotes do not. For futures NBBO/tbbo quotes,
+#   use subscribe_quotes with the futures symbol string and asset_type=FUTURES:
+#     ctx.subscribe_quotes(['ES.c.0'], asset_type=AssetType.FUTURES)
 #   The futures symbol string encodes the contract:
 #     "ES.c.0" — continuous, calendar/front-month roll, front (rank 0)
 #     "ES.v.0" — continuous, volume roll, front
