@@ -23,6 +23,8 @@
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
 
 ### 7.3 SigmaOrder
+`status` is the order's **state** (sticky once terminal — FIX OrdStatus semantics); `event.type` is what just **happened**. A cancel racing a fill delivers `ORDER_FILLED` then `ORDER_CANCEL_REJECTED`, with `status == FILLED` on both — see the "Order lifecycle contract" in §4.
+
 `symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.4 SigmaFill  (via `order.last_fill`)
