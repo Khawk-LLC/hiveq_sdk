@@ -47,7 +47,7 @@ class BuyAndHold:
             print(f"  filled: {order.symbol} qty={order.filled_qty} @ {order.avg_px}")
 
 
-# --- deploy + block until done (live progress line), then read results ------
+# --- deploy (returns immediately), block until done, then read results ------
 if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="BuyAndHold", type="BuyAndHold")],
@@ -55,8 +55,9 @@ if __name__ == "__main__":
         start_date="2025-08-01",
         end_date="2025-08-02",
         data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]}],
-        # silent=True,  # uncomment to return immediately with the Run handle
+        # silent=False,  # uncomment to block inside the call with a progress bar instead
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
 
     print(f"\nrun_id={run.run_id}  task_id={run.task_id}")
     print("status :", run.status())

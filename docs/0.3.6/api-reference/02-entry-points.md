@@ -10,11 +10,11 @@ run_backtest(
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
     requirements: Optional[list[str]] = None,   # accepted for future orchestrator package installs
-    silent: bool = False,                       # True -> deploy + return Run immediately (no blocking)
+    silent: bool = True,                        # default: deploy + return Run immediately (no blocking)
     **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
-#   silent=False (default): deploy to platform, block w/ live progress, return the finished Run.
-#   silent=True           : deploy and return the Run immediately (run.run_id / run.task_id).
+#   silent=True (default) : deploy and return the Run immediately (run.run_id / run.task_id).
+#   silent=False          : block inside the call w/ a live progress bar until done (interactive use).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
 #   requirements: accepted for API compatibility; currently not sent by the
 #                 SDK backtest wrapper until orchestrator support lands.
@@ -28,6 +28,18 @@ login(*, timeout=300.0, open_browser=True) -> str   # Internal plumbing: browser
 ```
 
 **Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
+
+**Canonical run pattern (R11)** — deploy, block quietly, read the report. This is the whole loop; nothing else needs to be printed or pulled on a healthy run:
+
+```python
+run = hf.run_backtest(...)                    # returns immediately (silent by default)
+print(f"run {run.run_id} task {run.task_id}") # keep the ids (re-attach later via hf.get_run)
+run.wait(progress=False)                      # block quietly until terminal — no progress bar
+report = run.report()                         # the deliverable (§10.1)
+print(report.return_stats.to_string())
+```
+
+`run.wait()` without `progress=False` renders a live tqdm progress bar (day count / PnL / return) — right for a human watching a terminal or notebook, wrong for a scripted or agent-driven run, where the repeated bar redraws land in captured output. Only reach for `run.status()`, `run.logs()`, or `run.event_logs()` when debugging (§11.5).
 
 ### 2.1 Engine configuration (via `**kwargs`)
 
@@ -47,7 +59,7 @@ Recognized keys (all optional; sensible defaults apply):
 
 | key | type | default | purpose |
 |---|---|---|---|
-| `hiveq_log_level` | str | `'INFO'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Controls the HiveQ strategy logger (`from hiveq.flow.logger import logger as _get_logger` — §5.9.1). Use `'DEBUG'`, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). See the full debugging workflow in §11.5. |
+| `hiveq_log_level` | str | `'WARNING'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Controls the HiveQ strategy logger (`from hiveq.flow.logger import logger as _get_logger` — §5.9.1). The `WARNING` default is intentional: a healthy run logs essentially nothing, so there is nothing to pull. Set `'DEBUG'` (or `'INFO'`) **only when investigating**, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). See the debugging workflow in §11.5. |
 | `oms_console_log` | bool | `False` | Echo order-management-system activity to the executor console. |
 | `futures_datasets` | list[str] | `['HIVEQ_US_FUT']` | Datasets treated as futures (enables contract resolution + rollover events, §7.12). |
 | `signals_datasets` | list[str] | `['HIVEQ_QUANT_SIGNALS']` | Datasets that key off `config['symbols']` rather than the run's symbol universe. |
@@ -55,14 +67,13 @@ Recognized keys (all optional; sensible defaults apply):
 
 Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§3) and are intentionally not part of the engine config you pass.
 
-> ⚠️ **`hiveq_log_level` default in practice.** Although the documented default is
-> `'INFO'`, the executor stdout has been observed emitting
-> `default log level set to WARNING` at startup, and strategies' `logger.info(...)`
-> calls did not appear in the log until `hiveq_log_level` was set **explicitly**.
-> If your `logger.info(...)` output is missing from `run.logs()`, pass
-> `config={'hiveq_log_level': 'INFO'}` (or `'DEBUG'`) rather than relying on the
-> default. This is a canary that "the strategy isn't running" hypotheses are
-> usually wrong — it's the logger that's silenced.
+> ⚠️ **The `WARNING` default means `logger.info(...)` is silent by design.** An
+> empty (or near-empty) `run.logs()` on a normal run does **not** mean the
+> strategy didn't run — the executor deliberately suppresses `debug`/`info`
+> output so healthy runs stay quiet and cheap. Never conclude "the strategy
+> isn't running" from a quiet log, and never pass `'INFO'` on a normal run just
+> to see milestone lines. To investigate behavior, re-run with
+> `config={'hiveq_log_level': 'DEBUG'}` (§11.5).
 
 ### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
 

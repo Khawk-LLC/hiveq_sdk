@@ -16,7 +16,7 @@ Prose elsewhere in this doc set (and in code comments) refers to sections as `§
 
 | § | File | What's in it |
 |---|---|---|
-| 0 | [00-hard-rules.md](00-hard-rules.md) | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone). |
+| 0 | [00-hard-rules.md](00-hard-rules.md) | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades). |
 | 1 | [01-minimal-example.md](01-minimal-example.md) | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
 | 2 | [02-entry-points.md](02-entry-points.md) | Entry points (module `hiveq.flow`) — `run_backtest`, engine config via `**kwargs`, the function registry / remote functions. |
 | 3 | [03-credentials.md](03-credentials.md) | Credentials — first-run sign-in flow, what NOT to do when generating deliverable code. |

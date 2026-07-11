@@ -79,6 +79,7 @@ if __name__ == "__main__":
         # Pre-market (04:00) through after-hours (20:00) so the 08:00 MOO window has data.
         backtest_config=BacktestConfig(session_start="04:00", session_end="20:00")
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
     print("status:", run.status())
 
     orders = run.orders()

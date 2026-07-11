@@ -212,7 +212,7 @@ def run_backtest(
     backtest_config: Optional[BacktestConfig] = None,
     *,
     requirements: Optional[List[str]] = None,
-    silent: bool = False,
+    silent: bool = True,
     task_name: Optional[str] = None,
     allow_duplicate: bool = True,
     duplicate_action: str = 'override',
@@ -222,11 +222,14 @@ def run_backtest(
 ):
     """Submit a backtest to the HiveQ platform and return a :class:`Run`.
 
-    Captures your strategy code, ships it to the HiveQ platform, and (unless
-    ``silent=True``) blocks with a live progress line until the run finishes,
-    then returns the completed ``Run``. ``requirements`` is accepted for API
-    compatibility; package installation is handled by the remote orchestrator
-    once supported. Results via ``run.report()`` etc.
+    Captures your strategy code, ships it to the HiveQ platform, and returns
+    the ``Run`` handle immediately (``silent=True``, the default). Block until
+    it finishes with ``run.wait()`` (live progress bar) or
+    ``run.wait(progress=False)`` (quiet — for scripts/agents), then read
+    results via ``run.report()`` etc. Pass ``silent=False`` to block inside
+    this call with a live progress line and return the finished ``Run``.
+    ``requirements`` is accepted for API compatibility; package installation
+    is handled by the remote orchestrator once supported.
     """
     result = _deploy(
         strategy_configs,

@@ -311,6 +311,19 @@ class Run:
         if self.is_local:
             return self._local_report
 
+        # run_backtest deploys silently by default, so guard the classic
+        # footgun: reading the report before the run has finished.
+        try:
+            st = self.status() or {}
+            if not (st.get("is_final") or _is_terminal(st.get("status"))):
+                logger.warning(
+                    f"run {self.run_id} has not finished (status="
+                    f"{st.get('status')!r}) — results may be empty or partial; "
+                    f"call run.wait() first."
+                )
+        except Exception as e:
+            logger.debug(f"pre-report status check inconclusive: {e}")
+
         from hiveq.flow.metrics.report import PerformanceReport
 
         payload = {}

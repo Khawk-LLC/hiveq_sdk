@@ -223,12 +223,12 @@ The executor sets all non-HiveQ loggers to `WARNING` by default, and `logging.ba
 
 ```python
 logger.debug("...")    # visible only when hiveq_log_level='DEBUG'
-logger.info("...")     # visible at INFO and above (the default)
-logger.warning("...")
+logger.info("...")     # visible at INFO and below — NOT at the WARNING default
+logger.warning("...")  # visible at the default level
 logger.error("...")
 ```
 
-**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the default level is `INFO`, these are silent in normal runs and add zero noise. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all debug context surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
+**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the engine default level is `WARNING` (§2.1), both `debug` and `info` lines are silent in normal runs and add zero noise — a healthy run's log is essentially empty, by design. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all instrumentation surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
 
 `ctx.add_event_log(...)` (above) is complementary: it writes a structured, queryable row into the event-log table (readable via `run.event_logs()`). Use it for milestone events (pattern detected, target set, regime change) rather than for fine-grained per-bar diagnostics. Use `logger.debug` for everything else.
 

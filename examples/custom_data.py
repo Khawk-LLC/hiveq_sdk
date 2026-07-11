@@ -67,6 +67,7 @@ if __name__ == "__main__":
             {"type": "csv", "data_type": "custom", "id": DATA_ID, "path": CSV_PATH},
         ],
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
     print("status:", run.status())
     rs = getattr(run.report(), "return_stats", None)
     if rs is not None and not rs.empty:

@@ -22,9 +22,14 @@ R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.globa
 R10 Every strategy MUST include logging via the HiveQ logger throughout all callbacks and decision
     branches. This is MANDATORY — not optional. Use logger.debug(...) for per-bar state, condition
     checks, and intermediate values; logger.info(...) for milestone events (signal triggered, order
-    placed, pattern detected). Because the default level is INFO, debug lines are silent in normal
-    runs and add zero noise. When the strategy misbehaves, re-run with hiveq_log_level='DEBUG'
-    (§2.1) and all context surfaces immediately — no code changes needed.
+    placed, pattern detected). The engine default level is WARNING (§2.1), so BOTH debug and info
+    lines are silent in a normal run — a healthy run produces an essentially empty log, by design.
+    The instrumentation costs nothing until it's needed: when the strategy misbehaves (or the user
+    asks to investigate), re-run with hiveq_log_level='DEBUG' or 'INFO' (§2.1) and all context
+    surfaces immediately — no code changes needed. Do NOT pass a log level on a normal run, and
+    NEVER leave a hiveq_log_level override in delivered strategy/example code — it is a temporary
+    investigation tool; strip it before presenting. Durable observability belongs in
+    ctx.add_event_log(...) (readable via run.event_logs() at any log level).
 
     Import and instantiate at module level (NOT inside the class):
         from hiveq.flow.logger import logger as _get_logger
@@ -39,6 +44,19 @@ R10 Every strategy MUST include logging via the HiveQ logger throughout all call
     - every signal/condition check: log the values being compared and the outcome at DEBUG
     - every order placement: log symbol, side, quantity, and the reason at INFO
     - on_order:  log the order status and fill price at INFO
+R11 Run-output discipline: run_backtest deploys and returns the Run immediately (silent=True is
+    the default). Block with run.wait(progress=False) — NEVER with the live progress bar in a
+    scripted/agent run — then read run.report(). On a healthy run, run.report() is the ONLY
+    output you need: do not poll run.status() in a loop, do not stream progress/PnL, and do not
+    pull run.logs() or run.event_logs() (the default WARNING level means the log is essentially
+    empty anyway). Escalate to §11.5 (DEBUG re-run + run.logs()) only when the run misbehaves or
+    the user asks to investigate.
+R12 A backtest that completes with 0 trades is NOT a deliverable. Design entry conditions so the
+    strategy trades realistically within the requested window (thresholds/tolerances wide enough
+    to actually trigger on real data — validate mentally against the symbols and date range before
+    running). After every run, check report.return_stats["Total Trades"]: if it is 0 (or wildly
+    below the strategy's natural frequency), treat the iteration as FAILED — diagnose via §11.5,
+    loosen/fix the conditions, and re-run until it trades — before presenting any results.
 ```
 
 ---

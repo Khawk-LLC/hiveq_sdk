@@ -11,16 +11,15 @@ from hiveq.flow.jobs import (
 ```
 
 ### 11.1 Deploy a backtest (high-level)
-Prefer **`hf.run_backtest(..., silent=True)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`). Observe via the Run (`run.wait()`, `run.status()`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
+Prefer **`hf.run_backtest(...)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`; silent deploy is the default). Observe via the Run (`run.wait(progress=False)`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
 
 ```python
 run = hf.run_backtest(strategy_configs=[...], symbols=['AAPL'],
                       start_date='2025-08-01', end_date='2025-08-02',
-                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}],
-                      silent=True)
-report = run.wait().report()                    # block to completion, then read results
+                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}])
+report = run.wait(progress=False).report()      # block quietly to completion, then read results
 ```
-For the common backtest case use `run_backtest(..., silent=True)` above; the `jobs` API below remains valid for any job type and for low-level control.
+For the common backtest case use `run_backtest(...)` above; the `jobs` API below remains valid for any job type and for low-level control.
 
 ### 11.2 Generic submit
 ```python
@@ -42,26 +41,21 @@ get_client() -> _Client                         # low-level transport handle (ad
 ```
 - The platform `GET /logs` accepts `task_id` | `run_id` | `task_name` (one required), plus `limit` / `offset` / `tail` / `format` (`json` default, or `gz` for the whole gzipped log). `get_logs(...)` returns the JSON tail; `get_logs_gz(...)` returns the **complete** log text (or, with `dest`, streams the `.gz` to that path). Prefer the `Run` handle — `run.logs()` / `run.download_logs(path)` (§10.0) — which key off the run's `task_id` for you.
 
-### 11.4 Recommended observe loop (poll status + pull logs)
+### 11.4 Recommended observe pattern
 ```python
-from hiveq.flow.jobs import get_logs
-
 # Preferred: deploy and observe via the Run handle (§10.0).
 run = hf.run_backtest(strategy_configs=[...], symbols=['ES.c.0'],
                       start_date='2024-01-01', end_date='2024-03-01',
                       data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT',
-                                     'schema':['bars_1m']}],
-                      silent=True)
-run.wait()                                       # blocks w/ live progress until terminal
-print('status:', run.status()['status'])
-logs = get_logs(task_id=run.task_id, limit=500)  # for debugging / course-correction
+                                     'schema':['bars_1m']}])
+run.wait(progress=False)                         # block quietly until terminal (R11)
 report = run.report()                            # PerformanceReport on success (§10.1)
 ```
-> Incremental mid-run P&L is not streamed today; status transitions are PENDING→RUNNING→DONE, with the report available on completion. Use `get_logs` for in-flight diagnostics.
+> That is the whole loop for a healthy run — do **not** add a status-polling loop or a log pull to it (R11). If the run failed or misbehaved, switch to the debugging workflow in §11.5 (`run.logs()` / `get_logs(task_id=..., limit=...)` belong there). `run.wait()` with no args renders a live progress bar — for a human at a terminal only.
 
 ### 11.5 Debugging strategies
 
-When a strategy produces no trades or misbehaves, follow this workflow:
+This is the **opt-in escalation path** — reach for it when a run misbehaves (0 trades → R12, crashes, wrong fills) or when the user asks to investigate (e.g. "enable debug/info logging"). Do not run any of it preemptively on healthy runs (R11). Workflow:
 
 **Step 1 — Instrument the strategy with logs before you run it.** Every callback and decision branch should have a `logger.debug(...)` call (§5.9.1). Milestone events (pattern detected, signal set, position opened) also warrant a `ctx.add_event_log(...)` row. If logging is sparse, add it now — re-running is cheaper than guessing.
 
@@ -100,7 +94,7 @@ print(df[['time','symbol','message']])
 - `on_bar` fires but no orders: the strategy has logging but no actual `ctx.buy_order(...)` call on the signal path — trace with `logger.debug` to confirm the entry condition is reached.
 - 0 bars received: unguarded `run_backtest` at module level (Step 3 above).
 - `logger.debug` silent: using `logging.getLogger(__name__)` instead of the HiveQ logger (§5.9.1).
-- **`logger.info` silent too**: the executor's *actual* default log level has been observed at `WARNING` even though the doc default is `INFO`. Pass `config={'hiveq_log_level': 'INFO'}` (or `'DEBUG'`) explicitly — see §2.1.
+- **`logger.info` silent**: expected — the executor default level is `WARNING` (§2.1), so `debug` and `info` lines never appear in a normal run's log. An empty log does NOT mean the strategy didn't run. When debugging, pass `config={'hiveq_log_level': 'DEBUG'}` explicitly (Step 2).
 - Pattern detected but no trade: detection fires on the last bar of the backtest — extend the date range so there are subsequent bars on which to act.
 - **Duplicate `on_bar` deliveries (framework bug, fix pending)**: over multi-week runs the engine has been observed firing `on_bar` 2×–3× for the same daily bar (identical `ts_event`, identical OHLCV, back-to-back within one tick). This is **NOT** caused by per-session re-init (`__init__` runs once — see §16.2) and **NOT** caused by subscription accumulation (`on_start` re-subscribes are deduped internally). It is a framework bug currently pending a fix. Symptoms: rolling deques and SMAs silently drift; strategies that produced trades in a short backtest produce different (or no) trades over longer windows. **Do not** add a permanent `ts_event` dedup to production strategy code; if you must work around it while the fix is in flight, mark it clearly as a temporary local workaround.
 - **Silent stuck position → phantom PnL**: `return_stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.

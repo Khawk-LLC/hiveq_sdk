@@ -74,6 +74,7 @@ if __name__ == "__main__":
                        "schema": ["bars_1m"]}],
         backtest_config=BacktestConfig(session_start="18:00", session_end="17:00"),
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
     print("status:", run.status())
     rs = getattr(run.report(), "return_stats", None)
     if rs is not None and not rs.empty:

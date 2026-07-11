@@ -124,6 +124,7 @@ run = hf.run_backtest(
     end_date='2025-08-31',
 )
 
+run.wait()   # deploy returns immediately — this blocks with a live progress bar
 print(run.report().return_stats.to_string())
 ```
 

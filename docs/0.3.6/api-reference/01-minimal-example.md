@@ -31,7 +31,7 @@ class BuyAndHold:
         if order.is_filled:
             fill = order.last_fill                   # -> SigmaFill (§7.4)
 
-# run_backtest returns a Run HANDLE (§10.0), not a PerformanceReport directly.
+# run_backtest returns a Run HANDLE (§10.0) immediately, not a PerformanceReport.
 run = hf.run_backtest(
     strategy_configs=[StrategyConfig(name='BuyAndHold', type='BuyAndHold')],
     symbols=['AAPL'],
@@ -39,6 +39,7 @@ run = hf.run_backtest(
     end_date='2025-08-02',
     data_configs=[{'type': 'hiveq_historical', 'dataset': 'HIVEQ_US_EQ', 'schema': ['bars_1m']}],
 )
+run.wait(progress=False)                             # block quietly until done (R11)
 report = run.report()                                # -> PerformanceReport (§10.1)
 print(report.return_stats.to_string())
 ```

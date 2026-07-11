@@ -92,6 +92,7 @@ run = hf.run_backtest(
     end_date="2025-08-06",
     data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]}],
 )
+run.wait(progress=False)   # deploy returns immediately; block quietly until done
 print(run.report().return_stats.to_string())
 ```
 

@@ -120,6 +120,7 @@ if __name__ == "__main__":
         backtest_config=BacktestConfig(start_date="2026-04-24", end_date="2026-04-24",
                                        session_start="15:30", session_end="16:00"),
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
     print("status:", run.status())
     logs = run.event_logs()
     if not logs.empty:

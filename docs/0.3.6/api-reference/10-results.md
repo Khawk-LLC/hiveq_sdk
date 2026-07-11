@@ -7,7 +7,7 @@
 run.run_id -> str
 run.task_id -> Optional[str]
 run.is_local -> bool
-run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until terminal; returns self (chainable)
+run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until terminal; returns self (chainable). Use progress=False in scripted/agent runs (R11) — progress=True renders a live tqdm bar for humans.
 run.status() -> dict                       # {'status': 'PENDING'|'RUNNING'|'DONE'|'FAILED'|..., ...}
 run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
 run.positions() / run.orders() / run.trades() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
@@ -17,9 +17,9 @@ run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats tears
 run.logs() -> list[str]                    # the COMPLETE remote executor log (stdout/strategy errors), by task_id
 run.download_logs(path: str) -> str        # stream the full gzipped executor log to `path` (.gz); returns path
 ```
-- Default `run_backtest()` already blocked until done, so `run.report()` is ready immediately.
-- **`hf.get_run(run_id, task_id=None)`** re-attaches to a run that was already submitted and returns its `Run` handle. `run_backtest` runs on the platform, so its results outlive your Python process — `get_run` is how you reconnect later (a new session, a different machine, or after a `silent=True` deploy) to check status or pull results without re-running anything. Pass the `run_id` from an earlier `run.run_id`. Typical use: `hf.get_run(run_id).wait().report()`.
-- **`event_logs()` vs `logs()`**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing; `download_logs(path)` for very large logs.
+- `run_backtest()` returns the `Run` **immediately** (silent by default) — call `run.wait(progress=False)` before `run.report()`. Reading the report on an unfinished run logs a warning and may return empty/partial results.
+- **`hf.get_run(run_id, task_id=None)`** re-attaches to a run that was already submitted and returns its `Run` handle. `run_backtest` runs on the platform, so its results outlive your Python process — `get_run` is how you reconnect later (a new session or a different machine) to check status or pull results without re-running anything. Pass the `run_id` from an earlier `run.run_id`. Typical use: `hf.get_run(run_id).wait(progress=False).report()`.
+- **`event_logs()` vs `logs()`** — both are **debugging tools, not part of a normal run's output (R11)**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing (at the default `WARNING` level a healthy run's log is essentially empty anyway); `download_logs(path)` for very large logs.
 
 ### 10.1 `PerformanceReport` (obtained via `run.report()`)
 | attribute | type |
@@ -55,13 +55,16 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 > - `report.trades` row with `exit_ts == '1970-01-01'` (null sentinel) means
 >   the round-trip was never completed.
 > Always eyeball these three columns before trusting the top-line PnL.
+> And independent of phantom PnL: `Total Trades == 0` on its own means the
+> strategy never traded — that is a failed iteration, not a result (R12).
+> Diagnose via §11.5 and adjust before presenting anything.
 
 **Tearsheet / metrics (quantstats).** `create_tearsheet()` and `summary_stats()` are powered by **quantstats**, which ships with the SDK (no extra install). Both read `report.returns_series`, so they need a run that produced returns; on missing/empty returns `create_tearsheet()` returns a small "no data" HTML page and `summary_stats()` returns `None`.
 
 > **To write a tearsheet FILE, always call `run.tearsheet()` — never `report.create_tearsheet()`.** `run.tearsheet()` **defaults to PDF** (no `output=` needed). `create_tearsheet()` is a *different, notebook-only* method: it returns an HTML/text string for inline display and is not a way to produce a saved report — do not take its return value and write it to `my_report.html` yourself; that is not "the tearsheet defaulting to HTML", that is calling the wrong method. If you want a file on disk, `output=` is optional and PDF is the default; pass `output='x.html'` only if you deliberately want HTML instead.
 
 ```python
-report = run.report()                 # or hf.get_run(run_id).wait().report()
+report = run.report()                 # or hf.get_run(run_id).wait(progress=False).report()
 
 # Tearsheet FILE on disk (equity curve, drawdowns, monthly returns, risk metrics).
 # run.tearsheet() is the single entry point for this — the format is chosen from

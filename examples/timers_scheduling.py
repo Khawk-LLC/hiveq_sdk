@@ -64,6 +64,7 @@ if __name__ == "__main__":
         end_date="2025-08-02",
         data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]}],
     )
+    run.wait()  # deploy returns immediately; block (progress bar) until done
     print("status:", run.status())
     print(run.logs())
     print(run.event_logs())
