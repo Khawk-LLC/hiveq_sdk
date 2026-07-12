@@ -35,10 +35,9 @@ def _cmd_login(args: argparse.Namespace) -> int:
 
 def _cmd_docs(_args: argparse.Namespace) -> int:
     docs = _docs_path()
-    readme = docs / "README.md"
     print(f"Docs: {docs}")
-    if readme.exists():
-        print(f"Start: {readme}")
+    print(f"Flow API reference (single file, read in one go): {docs / 'llms.txt'}")
+    print(f"Data-driver reference: {docs / 'data_driver' / 'llms.txt'}")
     return 0
 
 

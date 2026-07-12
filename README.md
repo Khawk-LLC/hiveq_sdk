@@ -175,33 +175,27 @@ and options — plus your own custom data feeds, all tradable in one backtest.
 - **[`examples/`](examples/)** — complete, runnable strategies: intraday
   momentum, bracket orders, pairs trading, 0DTE options, futures sessions,
   scheduled timers, custom data, and more.
-- **[`docs/`](docs/)** — the complete API reference: every callback, order type,
-  execution algorithm, and result accessor, at
-  **`docs/<version>/api-reference/`** (or
-  [`docs/latest/api-reference/`](docs/latest/api-reference/) for the
-  current version). Available datasets/schemas live alongside it in
-  **`docs/<version>/data-reference.md`**
-  ([`docs/latest/data-reference.md`](docs/latest/data-reference.md)); use
-  `hiveq datasets` for the live catalog from HiveQ metadata. Docs are versioned
-  per release — read the folder matching your installed SDK.
-- **[`docs/data_driver/latest/api_reference/`](docs/data_driver/latest/api_reference/)**
-  — reference for the separate data-driver config DSL (`hiveq.driver`), split
-  the same way as the API reference above.
+- **[`docs/llms.txt`](docs/llms.txt)** — the complete API
+  reference in a **single file**: every callback, order type, execution
+  algorithm, and result accessor, with the dataset/schema catalog as an
+  appendix (use `hiveq datasets` for the live catalog from HiveQ metadata).
+  It always matches the SDK release (the version is stated in its header),
+  and a copy ships inside the wheel — `hiveq docs` prints the installed path.
+- **[`docs/data_driver/llms.txt`](docs/data_driver/llms.txt)**
+  — reference for the separate data-driver config DSL (`hiveq.driver`); Part II
+  of the same file covers the underlying `hiveq_data` SDK client.
 
-### How to read the split docs
+### How to read the docs
 
-The API reference and the data-driver reference are each split into one file
-per topic, with an **`index.md`** at the root of the folder listing every
-section with a one-line description and a link. This applies whether you're a
+Each reference is one plain-markdown file (`llms.txt`) sized to be loaded in a
+single read (~31k tokens for the flow spec). This applies whether you're a
 human, Claude, Codex, Kimi, or any other agent reading this repo — there is no
-special tooling involved, just plain markdown files:
+special tooling involved:
 
-1. Open the relevant `index.md` first (`docs/latest/api-reference/index.md` or
-   `docs/data_driver/latest/api_reference/index.md`).
-2. Read only the section file(s) that match your question — e.g. an order-
-   placement question only needs `05-context-api.md`, not the whole tree.
-3. Start with `00-hard-rules.md` in the API reference at least once per
-   session — it's short and every other section assumes you've read it.
-
-Don't load an entire reference folder into context for a single question;
-that's exactly what the split is meant to avoid.
+1. Load the whole file in **one** read — one read is cheap; dozens of
+   fragmented reads of the same content are not.
+2. For a targeted question, jump straight to a section: search for a line
+   starting `## N.` — prose cross-references use `§N` (`§A.N` for the data
+   appendix, `§II.N` for the driver file's Part II).
+3. Read §0 (hard rules) of the flow spec at least once per session — it's
+   short and every other section assumes you've read it.

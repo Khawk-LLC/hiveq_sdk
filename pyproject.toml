@@ -52,7 +52,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 # Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
-"hiveq" = ["py.typed", "**/*.pyi", "docs/**/*.md"]
+"hiveq" = ["py.typed", "**/*.pyi", "docs/**/*.txt"]
 "hiveq.flow" = ["py.typed", "**/*.pyi"]
 "hiveq_data" = ["py.typed"]
 

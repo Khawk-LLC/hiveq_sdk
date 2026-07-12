@@ -1,0 +1,1382 @@
+# HiveQ Data Driver — Reference
+
+The HiveQ data driver Python module standardizes data access and provides a
+transport-agnostic API. Your code names a `data_source_id`, and config decides
+the backend — load data from HiveQ, CSV, HDF5 (or legacy kdb+) by changing config
+files instead of writing any code. KDB is retained (`transport=KDB`) for kdb+
+users; see Migrating from KDB (§20).
+
+> For the underlying **HiveQ Data API SDK** (`hiveq_data`) that the `transport=HiveQ`
+> path uses to pull data — `configure` + `Historical.get_data` params, datasets/schemas,
+> filter modes, pagination, and the config→SDK mapping — see **Part II** at the end of
+> this file.
+
+**HiveQ reference data** (real datasets/schemas; the examples below use a subset)
+
+| | Values |
+|---|---|
+| Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
+| Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES1!` → `ES.c.0` (continuous future) |
+| Session            | `2025-10-13` … `2025-10-17`, `09:30:00`–`16:00:00` US/Eastern |
+| Live topics        | `market_data.equity.tbbo`, `signals.khawk.quant_features` |
+
+**How to read this**: one file, sections §1–§21, then **Part II** — the
+`hiveq_data` SDK reference (its sections are numbered §II.N). Jump to a section
+by searching for a line starting `## N.` (or `## II.N`).
+
+| § | Section | What's in it |
+|---|---|---|
+| 1 | Installation | `pip install`, extras (`[hiveq]`, `[kdb]`), pandas prerequisite. |
+| 2 | Configuration | Config shape, how to supply it (inline dict/JSON/py/ini, auto-discovered `dd-config.ini`), the `[HiveQ]` credentials section. |
+| 3 | Storing data | `dd.save(id, df)` — write to a data source's configured target. |
+| 4 | Loading Data | `dd.load(id, params_tuple=..., cache=...)` — the core read call. |
+| 5 | Caching | The five `Cache` modes: `NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`. |
+| 6 | Python code to load and save the data | Minimal load→CSV round trip; column-name matching for cache filtering. |
+| 7 | Better parameter handling — passing params as a list | Passing multiple symbols as a list in `params_tuple`. |
+| 8 | Subscription support | Live HiveQ subscriptions via `dd.load(...)`: `pullDataSourceID` stitching, `time_out`, `forceRefresh`, dynamic `keyField` subscription, filtering. Largest section. |
+| 9 | Saving output (publishing) | The two publish paths — WebSocket (real-time/live) vs SDK/REST (batch/backtest) — plus CSV/HDF5 output. |
+| 10 | Driver init support from code | `dd.init(config=..., storeBasePath=...)` — programmatic config instead of `dd-config.ini`. |
+| 11 | Alerts | `dd.alert(...)`. |
+| 12 | Examples | Worked pull/save examples (splitSize, cache modes, init, saving). |
+| 13 | HDF5 Data driver | HDF5 transport compression options. |
+| 14 | CSV Data driver | CSV transport `baseCSVPath`. |
+| 15 | Date Range | `DateRange` transform functions (e.g. drop weekends/holidays). |
+| 16 | Workflow Examples | Mode-agnostic code, batching vs multiple calls, subscription+pull combos, timeouts, dedup, in-memory. |
+| 17 | Symbols | Continuous-futures symbol translation (`ES1!` → `ES.c.0`). |
+| 18 | General Guidelines | When to use which cache mode for first-build vs incremental vs bulk-add. |
+| 19 | FAQ | Range queries, "Driver not found" error. |
+| 20 | Migrating from KDB | KDB→HiveQ config mapping table, `qpython3` install notes. |
+| 21 | Appendix — config-driven section properties | Full config-driven section property reference, cache modes, `params_tuple` convention, the `hiveq.dd` keyword facade. |
+
+
+---
+
+## 1. Installation
+
+```sh
+pip install HiveQDataDriver
+# extras:
+pip install 'HiveQDataDriver[hiveq]'    # HiveQ Data API SDK (transport=HiveQ)
+pip install 'HiveQDataDriver[kdb]'      # legacy kdb+ transport (qpython3)
+```
+
+**Pre-requisite:** pandas >= 1.0.
+
+
+---
+
+## 2. Configuration
+
+The driver needs **config** to map a `data_source_id` to a transport — that is
+the only thing it can't infer. The config is the same two-level
+`{section: {property: value}}` shape however you supply it:
+
+```ini
+[AaplBars]
+primary = HiveQBars1m
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+```
+
+You can provide it any of these ways — pick whichever fits how you run:
+
+- **Inline / programmatic** — pass a dict, or a path to a `.json` / `.py`
+  (defining `CONFIG`) / `.ini` file, straight to the driver. Nothing on disk
+  needs to be in a special place:
+  ```python
+  import hiveq.driver as dd
+  dd.init(config={'AaplBars': {'primary': 'HiveQBars1m'},
+                  'HiveQBars1m': {'transport': 'HiveQ',
+                                  'dataset': 'HIVEQ_US_EQ', 'schema': 'bars_1m'}})
+  # or: dd.init(config='dd-config.json')  /  dd.init(config='strategy_config.py')
+  ```
+- **Auto-discovered `dd-config.ini`** — if you pass no `config`, the driver looks
+  for a `dd-config.ini` in the current working directory, then walks up the
+  parent directories. This is just the zero-argument convenience; you are not
+  required to use an ini.
+
+If no config is supplied and none is found, the package still imports — calls
+simply have nothing to resolve until you configure one.
+
+**Note:** ini config supports multi-line entries; indent continuation lines.
+
+**Credentials & endpoint.** The driver itself needs none — CSV/HDF5/KDB use no
+key. A key is required **only** for `transport=HiveQ`, and only when such a section
+is actually used. For HiveQ API access, sign in once:
+
+```bash
+hiveq login
+```
+
+The browser sign-in saves the key in the shared HiveQ credentials location,
+which the SDK reads automatically. Put HiveQ-wide endpoint settings in a
+dedicated **`[HiveQ]`** section only when you need a non-default host:
+
+```ini
+[HiveQ]
+baseUrl = https://vm.hiveq.ai    ; optional Data API endpoint override
+```
+
+- Section header is **`[HiveQ]`** (case-sensitive — capital H, Q); properties are
+  **`apiKey`** and **`baseUrl`** (camelCase). `apiKey` remains supported for
+  advanced/manual overrides, but `hiveq login` is the recommended path.
+- Resolution is **data-source section → `[HiveQ]` → `[default]`**, so you can also
+  set these on an individual source or in `[default]`; `[HiveQ]` is the recommended
+  single place. The service derives the user/org from the key — no user/org ids are
+  sent.
+
+> The API key is a secret. Prefer `hiveq login`; use a manual `apiKey` override
+> only when you intentionally manage credentials outside the HiveQ login flow.
+
+For the full HiveQ pull path (datasets/schemas, filter modes, pagination, the
+config→SDK mapping), see **Part II** at the end of this file.
+
+---
+
+## 3. Storing data
+
+Call the driver's `save` with a data source id. The id is looked up in config
+and the frame is written to its configured target(s) — its `primary` and/or
+`cache` section. Point those at a file transport to store the frame to disk.
+
+```python
+import hiveq.driver as dd
+dd.save('UserData', df)   # written to UserData's configured target
+```
+
+Config entries:
+
+```ini
+[UserData]
+cache = UserDataCSV
+
+[UserDataCSV]
+transport = CSV
+file      = csv/userdata/study.csv
+```
+
+---
+
+## 4. Loading Data
+
+The driver loads data in real time from a source, or from a cache. A HiveQ pull
+needs a date (and symbol) window, so pass a `params_tuple` (see the next
+section); the cache file template uses the same fields.
+
+```python
+import collections
+from hiveq import Cache
+from hiveq.datetime import DateRange
+import hiveq.driver as dd
+
+Params = collections.namedtuple('Params', ['date', 'sym'])
+params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+
+df = dd.load('AaplBars', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+Config for the `AaplBars` data source:
+
+```ini
+[AaplBars]
+primary = HiveQBars1m
+cache   = AaplBarsCSV
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+
+[AaplBarsCSV]
+transport = CSV
+file      = csv/bars/{sym}/{date:%Y.%m.%d}.csv
+```
+
+---
+
+## 5. Caching
+
+Caching data from the primary source and reading it back from the cache enables
+faster access. There are multiple cache options:
+
+1. **NO_CACHE** – loads data directly from the source.
+2. **ONLY_CACHE** – loads data only from the cache.
+3. **CACHE_FORCE_PULL** – loads from source and forcibly updates the cache.
+4. **PULL_UPDATE_CACHE** – loads from the cache, but pulls from the source for
+   anything not found in the cache (and updates it).
+5. **IN_MEMORY** – keeps the loaded frame in process memory.
+
+These ensure that while real-time data is loaded from the primary source, the
+cache is automatically kept up to date.
+
+```ini
+# AAPL 1-minute bars
+[AaplBars]
+primary = HiveQBars1m
+cache   = AaplBarsCSV
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+
+[AaplBarsCSV]
+transport = CSV
+file      = csv/bars/{sym}/{date:%Y.%m.%d}.csv
+```
+
+---
+
+## 6. Python code to load and save the data
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
+params = ParamTuple(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+
+df = dd.load('AaplBars', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+The data is now available in `csv/bars/AAPL/2025.10.14.csv` (under the configured
+`baseCSVPath`).
+
+### Filtering for the cache
+
+Ensure that the dataframe column names match the names passed in as the named
+tuple. The cache driver uses those column names to filter and store data.
+
+---
+
+## 7. Better parameter handling — passing params as a list
+
+```ini
+[EqBars]
+primary = HiveQBars1m
+cache   = EqBarsCSV
+
+[EqBarsCSV]
+transport = CSV
+file      = csv/bars/{sym}/{date:%Y.%m.%d}.csv
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+```
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
+params = ParamTuple(DateRange('2025-10-13', '2025-10-17'), ['AAPL', 'MSFT', 'NVDA'])
+
+df = dd.load('EqBars', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+The cache is updated by filtering the dataframe by symbol and then by date.
+
+---
+
+## 8. Subscription support
+
+The data driver supports asynchronous HiveQ subscriptions. Data is pushed from
+the HiveQ distributor to the driver asynchronously. Use `dd.load()` to retrieve
+it. A live subscription is still a normal data-driver load: configure a
+`data_source_id`, pass symbols through `params_tuple`, and call `dd.load(...)`.
+Subscriber classes such as `HiveQSubscriber` are internal to the transport layer
+and should not be instantiated or exposed by user code. All subscription data is
+held in memory and lost on shutdown.
+
+Config for a subscription (a section whose transport has a `topic`):
+
+```ini
+[TbboSub]
+primary = HiveQTbboSub
+
+[HiveQTbboSub]
+transport = HiveQ
+topic     = market_data.equity.tbbo
+keyField  = sym
+wsHost    = localhost
+wsPort    = 8765
+```
+
+To retrieve data, use the same `dd.load(...)` construct used for pulls:
+
+```python
+import collections, time
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange, TimeRange
+
+dd_params = collections.namedtuple('Input', ['sym', 'date', 'time'])
+params = dd_params(['AAPL'],
+                   DateRange('2025-10-14', '2025-10-14'),
+                   TimeRange('09:30:00', '16:00:00'))
+
+df = dd.load('TbboSub', params_tuple=params)
+for i in range(10):
+    time.sleep(10)
+    df = dd.load('TbboSub', params_tuple=params)
+
+# stop() lets the driver stop its internal subscription threads; otherwise the
+# process won't exit.
+dd.stop()
+```
+
+### Subscription disconnects and support for pull query
+
+The driver supports **pre-loading** historical data and **stitching** it under
+the real-time subscription stream. If the connection drops, the subscribe is
+retried (auto-reconnect + re-subscribe).
+
+To pre-load, set **`pullDataSourceID`** to the data source id whose history
+should seed the buffer.
+
+```ini
+[TbboSub]
+primary = HiveQTbboSub
+
+[HiveQTbboSub]
+transport        = HiveQ
+topic            = market_data.equity.tbbo
+keyField         = sym
+pullDataSourceID = Trades       ; history seed source (any transport)
+
+[Trades]
+primary = HiveQTrades
+cache   = cache_trades
+
+[HiveQTrades]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = eq_trades
+```
+
+> The HiveQ WebSocket handles keepalive and reconnect internally, so the old KDB
+> heartbeat query/table settings are not needed.
+>
+> **Note:** with `pullDataSourceID`, historic pulls and live ticks may arrive
+> unsorted. Ordering is not guaranteed by the driver — dedupe/sort yourself.
+
+### Timeout
+
+When `dd.load` is invoked for a subscription with `pullDataSourceID`, you can
+specify a **`time_out`** (milliseconds). It makes the call blocking until the
+timeout elapses or data is available.
+
+```python
+df = dd.load('TbboSub', params_tuple=params, cache=Cache.CACHE_FORCE_PULL)
+# should load from cache
+df = dd.load('TbboSub', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE, time_out=10000)
+```
+
+If the pull returns empty before the timeout, `dd.load` returns an empty frame.
+
+### ForceRefresh
+
+By default all subscription data is cached in memory. For high-volume topics
+(e.g. trades/tbbo) this can grow over time. Enable **`forceRefresh`** in the
+subscription config to retain only data not yet pulled by the user.
+
+```ini
+[HiveQTbboSub]
+transport    = HiveQ
+topic        = market_data.equity.tbbo
+forceRefresh = true
+```
+
+With `forceRefresh=true`, if `dd.load()` is called at 09:00 and the next pull is
+at 09:30, only the 09:00–09:30 data is kept; once pulled, the buffer is cleared
+and new data accumulates from 09:30 onward. Think of it as a moving window of
+unread data.
+
+### Dynamic Subscription Support
+
+Add **`keyField`** — the params tuple field that holds the symbols looked for as
+new data. New symbols passed on a subsequent `dd.load()` are subscribed live and
+their history is stitched in.
+
+```ini
+[TbboSub]
+primary = HiveQTbboSub
+
+[HiveQTbboSub]
+transport        = HiveQ
+topic            = market_data.equity.tbbo
+keyField         = sym
+pullDataSourceID = Trades
+forceRefresh     = true
+```
+
+```python
+# Start with AAPL, then add MSFT mid-session — both stream on the same subscription.
+df = dd.load('TbboSub', params_tuple=dd_params(['AAPL'], date, time), time_out=3000)
+df = dd.load('TbboSub', params_tuple=dd_params(['AAPL', 'MSFT'], date, time))
+```
+
+> The HiveQ transport layer subscribes the new keys directly on the live socket;
+> user code still only calls `dd.load(...)`. No separate "dynamic query" is
+> needed (unlike the legacy KDB design).
+
+### Filtering
+
+For subscription filtering, the dataframe columns must match the parameter tuple
+field names. Map filters in the config (`filterMap`) to map a param tuple name to
+the actual column name.
+
+For time-based filtering, the param tuple field must be a **`TimeRange`**. Time
+values passed as plain strings are used for equality filtering, not range
+filtering.
+
+```python
+import collections
+from hiveq.datetime import DateRange, TimeRange
+import hiveq.driver as dd
+from hiveq import Cache
+
+dd_input = collections.namedtuple('Input', ['date', 'sym', 'time'])
+dd_param = dd_input(DateRange('2025-10-14', '2025-10-14'), ['AAPL'],
+                    TimeRange('10:00:00', '12:00:00'))
+df = dd.load('TbboSub', params_tuple=dd_param, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+---
+
+## 9. Saving output (publishing)
+
+The HiveQ transport has **two distinct publish paths**. Which one fires depends
+on whether the config section carries a `topic` property. The two paths serve
+different use cases — pick the one that matches your scenario:
+
+| | WebSocket publish (real-time) | SDK / REST publish (batch) |
+|---|---|---|
+| **When to use** | **Live / production** — the preferred mode for real-time publishing. Rows flow instantly through the distributor message broker to all live subscribers on the topic. | **Backtest, analytics, bulk upload** — the preferred mode when you are not publishing to a live stream. Rows are persisted through the HiveQ Data API. |
+| **Trigger** | Section has a **`topic`** property | Section has **no** `topic`; uses `publishSchema`/`schema` + `key` |
+| **Wire** | Opens a WebSocket to the distributor (`ws://<wsHost>:<wsPort>`), sends one JSON frame per row: `{"action":"publish","topic","key","data":<row>}`, waits for a per-message ack | `hiveq_data.Publisher().publish(...)` → `POST /api/publish/v0/data` (HTTP) |
+| **Latency** | Sub-second per row (WebSocket) | HTTP request/response per batch |
+| **Destination** | Distributor message broker → live WebSocket subscribers | HiveQ Data API (persisted storage) |
+| **Requires** | Distributor WebSocket up on `wsHost:wsPort` | `HIVEQ_API_KEY` + Data API endpoint (`baseUrl`) |
+
+### Path 1 — WebSocket publish (real-time / live)
+
+This is the **preferred publish mode for live / production** use cases. When a
+config section has a `topic`, `dd.save()` connects to the distributor's
+WebSocket and publishes each DataFrame row as a single message. The rows flow
+through the distributor message broker and are delivered instantly to any live
+subscriber on the same topic — the mirror image of the WebSocket subscribe path.
+
+The protocol follows the distributor's `examples/ws_publisher.py`:
+one `{"action":"publish", "topic":"<topic>", "key":"<key>", "data":{<row>}}`
+JSON frame per row. The transport opens a short-lived WebSocket connection, sends
+all rows sequentially, and checks the per-message ack from the distributor before
+moving on to the next row. A nack or timeout is logged as a warning; `dd.save()`
+returns `None` if any row fails.
+
+**Key resolution:** each row's partition key is derived from the `keyField`
+column in the DataFrame. If the row has a value in that column, it becomes the
+message key (e.g. the symbol). If `keyField` is not set or the column is missing,
+the static `key` property from config is used instead.
+
+**Config:**
+
+```ini
+[SignalsPub]
+primary = HiveQSignalsPub
+
+[HiveQSignalsPub]
+transport = HiveQ
+topic     = signals.khawk.quant_features   ; topic present ⇒ WebSocket publish
+keyField  = symbol                          ; per-row partition key (df column)
+wsHost    = localhost                        ; distributor host
+wsPort    = 8765                             ; distributor port
+```
+
+| Property | Required | Default | Description |
+|---|---|---|---|
+| `topic` | yes | — | Distributor topic to publish to. Presence of this property activates the WebSocket path. |
+| `keyField` | no | — | DataFrame column used as the per-row message key. If absent or the column is missing in a row, falls back to `key`. |
+| `key` | no | `""` | Static fallback key when `keyField` is not set. |
+| `wsHost` | no | `localhost` | Distributor WebSocket host. |
+| `wsPort` | no | `8765` | Distributor WebSocket port. |
+
+**Code:**
+
+```python
+import hiveq.driver as dd
+
+# The DataFrame columns ARE the published fields.
+# Shape the frame in pandas before saving — what you publish is what subscribers receive.
+dd.save('SignalsPub', df)   # one WS message per row, keyed by df['symbol']
+```
+
+**Subscribe side:** to consume the published messages live, configure a matching
+subscriber section on the same topic (see Subscription support (§8)):
+
+```ini
+; Publisher
+[SignalsPub]
+primary = HiveQSignalsPub
+
+[HiveQSignalsPub]
+transport = HiveQ
+topic     = signals.khawk.quant_features
+keyField  = symbol
+wsHost    = localhost
+wsPort    = 8765
+
+; Subscriber (same topic — receives the published rows)
+[SignalsSub]
+primary = HiveQSignalsSub
+
+[HiveQSignalsSub]
+transport = HiveQ
+topic     = signals.khawk.quant_features
+keyField  = sym
+wsHost    = localhost
+wsPort    = 8765
+```
+
+```python
+import collections, time
+import hiveq.driver as dd
+from hiveq import Cache
+
+# Publish
+dd.save('SignalsPub', signals_df)
+
+# Subscribe (another process or after a brief delay)
+Params = collections.namedtuple('Params', ['sym'])
+df = dd.load('SignalsSub', params_tuple=Params(['AAPL', 'MSFT']),
+             time_out=5000, cache=Cache.NO_CACHE)
+```
+
+See `examples/publish_signals.py` for a complete round-trip demo (publish then
+read back).
+
+### Path 2 — SDK / REST publish (batch / backtest)
+
+This is the **preferred publish mode for backtest, analytics, and bulk uploads**
+— any scenario where you are persisting data to the HiveQ Data API rather than
+streaming it to live subscribers. When the config section has **no `topic`** but
+has `publishSchema` (or `schema`) + `key`, `dd.save()` publishes through the
+`hiveq_data` SDK: `Publisher().publish(schema, data, key, operation)` →
+`POST /api/publish/v0/data`.
+
+The entire DataFrame is serialized as a list of row dicts and sent in a single
+HTTP request. This does **not** go through the distributor or message broker —
+live WebSocket subscribers will **not** see these rows.
+
+**Config:**
+
+```ini
+[BacktestOutput]
+primary = HiveQBacktestPub
+
+[HiveQBacktestPub]
+transport     = HiveQ
+publishSchema = signals_backtest       ; schema to publish into
+key           = bt_run_20251014        ; caller-supplied identifier for this batch
+operation     = add                    ; "add" (default) or "modify"
+async         = true                   ; async mode (default true)
+```
+
+| Property | Required | Default | Description |
+|---|---|---|---|
+| `publishSchema` | yes* | — | Schema to publish into. Falls back to `schema` if not set. |
+| `key` | yes | — | Caller-supplied identifier for the published batch. |
+| `operation` | no | `add` | `"add"` to insert new rows, `"modify"` to update existing rows by key. |
+| `async` | no | `true` | Whether the SDK publisher runs in async mode. |
+
+\* If `publishSchema` is not set, the transport falls back to `schema`.
+
+**Code:**
+
+```python
+import hiveq.driver as dd
+
+# Publish backtest results to the Data API (persisted, not live-streamed)
+dd.save('BacktestOutput', results_df)
+```
+
+**Credentials:** the SDK publish path requires `HIVEQ_API_KEY` and `baseUrl`,
+resolved the same way as the pull path (section → `[HiveQ]` → `[default]` →
+env). See Configuration (§2).
+
+### Saving output to CSV
+
+Add date patterns to the output filename to stamp the current date:
+
+```ini
+transport = CSV
+file      = csv/out/signals-{date:%Y.%m.%d}.csv
+```
+
+### Introducing HDF5 transport
+
+With CSV, dtype metadata is not preserved. HDF5 eliminates tracking column data
+types — just supply the `key` and the `store`.
+
+```ini
+[DailyBars]
+primary = HiveQBars1d
+cache   = HDF5DailyBars
+
+[HiveQBars1d]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1d
+
+[HDF5DailyBars]
+transport = HDF5
+store     = hdf5/dd.h5
+key       = bars_1d-{sym}-{date:%Y.%m.%d}
+```
+
+---
+
+## 10. Driver init support from code
+
+The API supports passing configuration from code instead of `dd-config.ini`.
+Auth is via `HIVEQ_API_KEY` env (no user/password in code), so init is used for
+config selection and storage paths.
+
+```python
+import os, collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+A = collections.namedtuple('A', ['date', 'sym'])
+a = A(DateRange('2025-10-13', '2025-10-17'), ['AAPL', 'MSFT'])
+
+dd.init(config='dd-config.json', storeBasePath=os.getcwd() + '/dd/')
+df = dd.load('EqBars', params_tuple=a, cache=Cache.NO_CACHE)
+```
+
+`config` accepts an inline dict, a `.py` file (defining `CONFIG`/`config`), a
+`.json` file, or a legacy `.ini` path.
+
+---
+
+## 11. Alerts
+
+```python
+import hiveq.driver as dd
+dd.alert(subject='Test', message='Starting to train model')
+```
+
+`level` and `channel` are optional. Alerts are recorded via the standard logging
+module (a Slack handler can be wired in via the `[slack]` extra).
+
+---
+
+## 12. Examples
+
+Common setup shared by the examples below (shown once — each example continues from this):
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+A = collections.namedtuple('A', ['date', 'sym'])
+```
+
+### Pulling data from the primary source
+
+```ini
+[Trades]
+primary = HiveQTrades
+cache   = cache_trades
+
+[HiveQTrades]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = eq_trades
+
+[cache_trades]
+transport = CSV
+file      = csv/trades/{sym}/{date:%Y.%m.%d}.csv
+```
+
+```python
+a = A(DateRange('2025-10-14', '2025-10-14'), 'AAPL')
+df = dd.load('Trades', params_tuple=a, cache=Cache.NO_CACHE)
+```
+
+### SplitSize DateRange example
+
+By default `splitSize=1` (one request per date). To pull a whole range in larger
+chunks, raise it:
+
+```ini
+[HiveQTrades]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = eq_trades
+splitSize = 1000
+```
+
+```python
+import datetime
+dt1 = datetime.datetime(2025, 10, 13)
+dt2 = datetime.datetime(2025, 10, 17)
+a = A(DateRange(dt1, dt2), ['AAPL'])
+df = dd.load('Trades', params_tuple=a, cache=Cache.NO_CACHE)
+```
+
+> `splitSize` chunks a `DateRange` into N-day requests that are concatenated.
+
+### Date range input as string
+
+```python
+a = A(DateRange('2025-10-13', '2025-10-17'), ['AAPL'])
+df = dd.load('Trades', params_tuple=a, cache=Cache.NO_CACHE)
+```
+
+### Cache force pull — always pull from source and update cache
+
+```python
+a = A(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+df = dd.load('Trades', params_tuple=a, cache=Cache.CACHE_FORCE_PULL)
+```
+
+### More input parameters
+
+```python
+A = collections.namedtuple('Input', ['date', 'sym', 'stime', 'etime'])   # rebinds A to a 4-field shape
+a = A(DateRange('2025-10-14', '2025-10-15'), 'AAPL',
+      TimeRange('09:30:00', '16:00:00'), None)
+dd.load('CombinedScoreTime', params_tuple=a, cache=Cache.PULL_UPDATE_CACHE)
+df = dd.load('CombinedScoreTime', params_tuple=a, cache=Cache.ONLY_CACHE)
+```
+
+```ini
+[CombinedScoreTime]
+primary = HiveQBars1m
+cache   = cache_combinedScore
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+
+[cache_combinedScore]
+transport = CSV
+file      = csv/score/{sym}/{date:%Y.%m.%d}.csv
+```
+
+### Init function — pass initialization values
+
+```python
+import os
+a = A(DateRange('2025-10-13', '2025-10-17'), ['AAPL', 'MSFT'])
+dd.init(storeBasePath=os.getcwd() + '/dd/')
+df = dd.load('Trades', params_tuple=a, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+### Saving data
+
+```python
+date_range_param = A(DateRange('2025-10-13', '2025-10-17'), 'AAPL')
+
+df = dd.load('DailyBars', params_tuple=date_range_param, cache=Cache.NO_CACHE)
+df = dd.save('TestSave', df, params_tuple=date_range_param)
+df = dd.load('TestSave', params_tuple=date_range_param, cache=Cache.ONLY_CACHE)
+```
+
+```ini
+[TestSave]
+primary = HiveQBars1d
+cache   = CSVSave
+
+[CSVSave]
+transport = CSV
+file      = csv/save/{sym}/csv_save-{date:%Y.%m.%d}.csv
+```
+
+---
+
+## 13. HDF5 Data driver
+
+By default compression is enabled (zlib, level 9). Change it per target section:
+
+```ini
+[DailyBarsHDF5]
+transport         = HDF5
+store             = hdf5/dd.h5
+key               = {sym}-{date}
+enableCompression = True
+compression       = zlib
+compression_level = 9
+```
+
+> Default pandas HDF5 stores can be larger than other formats; choose a
+> compression level/algorithm that suits your data.
+
+
+---
+
+## 14. CSV Data driver
+
+Use a base path to control where CSV data is stored:
+
+```ini
+[default]
+baseCSVPath = /data/dd
+```
+
+
+---
+
+## 15. Date Range
+
+`DateRange` supports a transform function to process/remove dates (e.g. drop
+weekends/holidays):
+
+```python
+import datetime
+import pandas as pd
+from hiveq.datetime import DateRange
+
+def transform_date_list(date_list):
+    start_date = datetime.datetime.strptime(date_list[0], '%Y.%m.%d')
+    end_date = datetime.datetime.strptime(date_list[-1], '%Y.%m.%d')
+    dd_dt = pd.date_range(start_date, end_date - datetime.timedelta(days=1), freq='B')
+    return dd_dt.strftime('%Y.%m.%d').values
+
+d = DateRange('2025-10-01', '2025-10-31', transform_date_list)
+print(d.date_list)
+```
+
+---
+
+## 16. Workflow Examples
+
+Common setup shared by "Multiple calls..." and "Subscription and pulls" below:
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+Params = collections.namedtuple('Params', ['date', 'sym'])
+```
+
+### Writing mode-agnostic code
+
+"Mode" is how you run a historical backtest vs. production. For backtest, data is
+already in a local cache and you filter by time/symbol; in production the config
+points at HiveQ. Write the code once; switch only the config.
+
+```python
+import hiveq.driver as dd
+if mode == 'prod':
+    dd.init(config='dd-config-prod.ini')
+else:
+    dd.init(config='dd-config-bt.ini')
+```
+
+### Multiple calls vs. a single call and filtering
+
+Always prefer a single call that batches symbols/filters in the params tuple,
+then filter the returned dataframe — rather than many calls:
+
+```python
+params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL', 'MSFT', 'NVDA'])
+data = dd.load('EqBars', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
+
+aapl = data[data['sym'] == 'AAPL']
+msft = data[data['sym'] == 'MSFT']
+nvda = data[data['sym'] == 'NVDA']
+```
+
+```ini
+[EqBars]
+primary = HiveQBars1m
+
+[HiveQBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+```
+
+### Subscription and pulls
+
+In production you often want startup (historical) data then realtime. Instead of
+exposing a separate subscriber API, configure the live source and keep using
+`dd.load(...)`. The HiveQ transport internally combines the initial pull with
+the live subscription and stitches them (via `pullDataSourceID`):
+
+```ini
+[tickData]
+primary = HiveQTradesSub
+
+[HiveQTradesSub]
+transport        = HiveQ
+topic            = market_data.equity.tbbo
+keyField         = sym
+pullDataSourceID = tickStartUp
+
+[tickStartUp]
+primary = HiveQTrades
+
+[HiveQTrades]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = eq_trades
+```
+
+```python
+params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+ddat = dd.load('tickData', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
+```
+
+> The historical pull seeds the buffer and is used throughout the lifetime of the
+> subscription; ensure the pull source returns columns matching the live topic.
+
+### Timeouts
+
+```python
+dd.load('TbboSub', params_tuple=params, time_out=10000)
+```
+
+1. Timeout values are in milliseconds.
+2. If data returns within 1 ms, `dd.load()` returns the pull-query data.
+3. If it takes more than 10000 ms, `dd.load` returns an empty dataframe.
+4. The timeout is ignored on all subsequent calls.
+
+### Dropping duplicates
+
+While stitching pull + subscription data, duplicate rows can appear. Supply the
+columns to dedupe on:
+
+```python
+df = dd.load('TbboSub', params_tuple=params, cache=Cache.NO_CACHE,
+             drop_duplicates=['sym', 'seqno'])
+```
+
+### In-memory support
+
+To avoid re-reading the cache on every `dd.load()`, keep the frame in memory:
+
+```python
+bars_df = dd.load('EqBars', params_tuple=params, cache=Cache.NO_CACHE, in_memory=True)
+```
+
+---
+
+## 17. Symbols
+
+Old-world continuous-futures notation `<ROOT><rank>!` maps to HiveQ
+`<root>.c.<rank-1>` (front month is `.c.0`): `ES1!`→`ES.c.0`, `NQ1!`→`NQ.c.0`,
+`ES2!`→`ES.c.1`. Equities (`AAPL`) and already-canonical symbols pass through.
+The `hiveq.dd` keyword facade translates automatically; with the section API call
+`hiveq.symbol.translate(...)` yourself when needed.
+
+```python
+from hiveq import symbol
+symbol.translate(['AAPL', 'ES1!'])   # ['AAPL', 'ES.c.0']
+```
+
+---
+
+## 18. General Guidelines
+
+1. When building a cache for the first time, use `CACHE_FORCE_PULL` (multi-symbol
+   / multi-day queries are batched and faster) with an appropriate `splitSize`.
+2. Once the cache exists and new symbols are added, use `PULL_UPDATE_CACHE` (it
+   pulls per missing symbol+date).
+3. To bulk-add many new symbols, use `CACHE_FORCE_PULL`.
+
+---
+
+## 19. FAQ
+
+**How do I run a range query?** By default `splitSize=1`, so a query runs once
+per date. Raise `splitSize` to pull the whole range in fewer requests.
+
+**"Driver not found. Configure transport in config"** — the section is missing
+the `transport` attribute. Each transport section needs `transport=HiveQ` (or
+`CSV` / `HDF5` / `KDB`).
+
+```ini
+[HiveQBars1m]
+transport = HiveQ
+```
+
+---
+
+## 20. Migrating from KDB
+
+The KDB transport is retained (`transport=KDB`) so existing kdb+ configs keep
+working. HiveQ is recommended — translate unless you must stay on kdb+. It is a
+**config** change, not a code change.
+
+| KDB-era config                  | HiveQ config |
+|---------------------------------|--------------|
+| `transport=KDB`                 | `transport=HiveQ` |
+| `KDBQuery=.foo.get_trades[...]` | `dataset=` + `schema=` (+ `columns`, `filterMode`) |
+| `KDBHost`/`KDBPort`             | none — endpoint is internal; auth via `HIVEQ_API_KEY` |
+| `.u.sub[...]`                   | `topic=...` |
+| `.u.pub` / save-to-KDB (live)   | `topic=` section (WebSocket → distributor message broker; preferred for live) |
+| `.u.pub` / save-to-KDB (batch) | `publishSchema`/`key` section (SDK → REST API; preferred for backtest) |
+| `pullDataSourceID`              | same property; HiveQ transport stitches history internally |
+| KDB heartbeat query/table       | none — WebSocket keepalive is internal |
+| `splitSize`                     | `splitSize` (DateRange chunking, days) |
+| `KDBUserName`/`KDBPassword`     | none — `HIVEQ_API_KEY` only |
+
+A `KDBQuery` does not mechanically map to a dataset/schema — **ask**, don't
+invent. Do not emit `KDB*` properties or q syntax for new code.
+
+> **qpython on modern stacks.** The original `qpython` 2.0.0 is Python-2 era and
+> breaks on modern numpy/pandas. The driver's KDB code is already fixed; install
+> the `[kdb]` extra — **`qpython3==1.0.1`** (same `qpython` import namespace, no
+> code change):
+>
+> ```sh
+> pip install '.[kdb]'
+> # qpython3's Cython ext links against numpy at build; if a cached wheel mismatches:
+> pip install numpy && pip install --no-binary qpython3 'qpython3==1.0.1'
+> ```
+>
+> numpy 2.x removed `numpy.string_`/`numpy.NaN`/`ndarray.tostring()`;
+> `hiveq/driver/_qpython_compat.py` shims them and is auto-imported before any
+> qpython import, so `transport=KDB` works on numpy 2.x. `qpython` is imported
+> only when `transport=KDB` is used.
+
+---
+
+## 21. Appendix — config-driven section properties
+
+A `data_source_id` section points at a `primary` (and optional `cache`) section;
+those sections carry a `transport` and its properties.
+
+**HiveQ — read/subscribe:** `dataset`, `schema` (required for reads), `splitSize`,
+`filterMode`, `columns`, `limit`, `timezone` (default `America/New_York`),
+`topic` (⇒ subscribe or WebSocket publish), `wsHost`/`wsPort` (default
+`localhost:8765`), `replay`/`replayTo`, `forceRefresh`, `keyField`,
+`pullDataSourceID`.
+**HiveQ — WebSocket publish (real-time, preferred for live):** `topic` (required,
+activates WS path), `keyField` (per-row key column), `key` (static fallback),
+`wsHost`/`wsPort`.
+**HiveQ — SDK publish (batch, preferred for backtest):** `publishSchema` (or
+`schema`), `key` (required), `operation` (`add`/`modify`), `async` (`true`/`false`).
+**CSV:** `file` (`{sym}`/`{date:%fmt}` templates), `append`, `filterMap`; root
+`[default] baseCSVPath`.
+**HDF5:** `store`, `key` (templated), `enableCompression`, `compression`,
+`compression_level`, `minSizeItems`; root `[default] storeBasePath`.
+
+### Cache modes (`hiveq.Cache`)
+
+`NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`
+(see Caching (§5)).
+
+### params_tuple convention
+
+Fields are identified **by type**: first `DateRange` → date window, first
+`TimeRange` → intraday window, remaining list/str → symbols. Field **names** drive
+`{date}`/`{sym}` templates and `filterMap`. Conventionally `date`, `time`, `sym`.
+
+### `hiveq.dd` keyword facade (HiveQ-specific, NOT transport-agnostic)
+
+For throwaway scripts only. `dd.load(dataset=, schema=, ...)` / `dd.save(schema=,
+key=)` bind code directly to the HiveQ API and cannot be flipped to CSV/KDB by
+config. Prefer the config-driven section API above.
+
+
+---
+
+# Part II — `hiveq_data` SDK reference
+
+This documents the part of the **`hiveq_data`** SDK (dist `hiveq-data`; repo
+<https://github.com/Khawk-LLC/hiveq-data-sdk>) that the data driver depends on to
+**pull market data**. The driver never calls the SDK directly in user code — the
+`transport=HiveQ` sections route through `hiveq/driver/hiveq_transport.py`, which
+calls the SDK for you. This file exists so an AI agent (or a human) extending the
+HiveQ transport knows the exact SDK surface, parameters, and config mapping.
+
+SDK version referenced: **0.2.4**. Endpoints are version `v0`.
+
+---
+
+## II.1 The two SDK calls the driver makes to read data
+
+```python
+import hiveq_data
+
+# (a) one-time credential/endpoint setup
+hiveq_data.configure(api_key=..., base_url=...)
+
+# (b) the actual historical pull
+client = hiveq_data.Historical(timezone='America/New_York')
+resp = client.get_data(dataset=..., schema=..., symbols=[...],
+                       start=..., end=..., limit=..., offset=..., filter_mode=...)
+```
+
+`get_data` issues `POST /api/read/v0/data` and returns a **JSON dict**:
+
+```json
+{ "data": [ { "<col>": <val>, ... }, ... ],
+  "meta": { "requestId": "...", "rowCount": N, "version": "v0", "total": N? },
+  "success": true }
+```
+
+The transport takes `resp["data"]` (a list of row dicts) and wraps it in a
+`pandas.DataFrame`. A response is capped at `limit` rows server-side, so the driver
+**paginates** with `offset` (see §II.5).
+
+---
+
+## II.2 `configure(...)` — credentials + endpoint
+
+```python
+def configure(api_key=None, base_url=None,
+              user_id=None, org_id=None, user_name=None) -> None
+```
+- **`api_key`** — required for any API access. Sent as the **`X-API-Key`** header;
+  the service derives user + org from the key.
+- **`base_url`** — the Data API root for your environment, set via the `baseUrl`
+  config prop — e.g. `https://vm.hiveq.ai` or `https://staging.hiveq.ai`. The
+  transport is endpoint-agnostic: change this URL and the driver pulls from that
+  environment (with a valid key for it). The SDK carries a built-in fallback string
+  `https://api.hiveq.com`, but that is **not** a live endpoint; always point it at the
+  real environment URL.
+- `user_id` / `org_id` / `user_name` — deprecated header overrides (`X-User-ID` /
+  `X-Org-ID` / `X-User-Name`); the driver does **not** send these.
+
+**How the driver resolves these (precedence, high → low):**
+- **api key** — saved credentials from `hiveq login`; advanced/manual overrides
+  may still set `apiKey` in the data-source section → `apiKey` in **`[HiveQ]`** →
+  `apiKey` in `[default]`.
+- **base url** — `baseUrl` in the section → **`[HiveQ]`** → `[default]` →
+  `https://staging.hiveq.ai` (driver default). Override per environment, e.g.
+  `https://vm.hiveq.ai` for production. The SDK's own
+  `https://api.hiveq.com` fallback is a placeholder, not a live endpoint.
+
+Run `hiveq login` once before using HiveQ API-backed data access. Put HiveQ-wide
+settings (`baseUrl`, `timezone`, `limit`, …) in a dedicated **`[HiveQ]`**
+section so they live in one place; a per-source section still wins.
+```ini
+[HiveQ]
+baseUrl = https://vm.hiveq.ai
+```
+**Exact names (they are case-sensitive):**
+- Section header is **`[HiveQ]`** — capital `H` and `Q`.
+- Manual credential property is **`apiKey`** (camelCase); endpoint is **`baseUrl`**.
+
+> The API key is a secret. Prefer `hiveq login`; use a manual `apiKey` override
+> only when you intentionally manage credentials outside the HiveQ login flow.
+
+**Read timeout:** each request uses a connect=10s / read=**300s** timeout, overridable
+via the **`HIVEQ_READ_TIMEOUT`** env var (seconds). Large pages of tick data take
+tens of seconds to serialize, so don't set this too low.
+
+---
+
+## II.3 `Historical(...)` — the read client
+
+```python
+Historical(api_key=None, base_url=None,
+           user_id=None, org_id=None, user_name=None,
+           timezone=None)   # timezone: IANA str or zoneinfo.ZoneInfo
+```
+- **`timezone`** — when set, naive `start`/`end` are interpreted in this TZ and
+  response `time` fields are converted from UTC back to it. The driver passes
+  `America/New_York` by default (`DEFAULT_TIMEZONE`); override per-section with a
+  `timezone` config prop (e.g. `UTC`).
+
+### `get_data(...)` — fetch historical rows
+
+```python
+def get_data(dataset, schema,
+             symbols=None, root=None, chains=None,
+             start=None, end=None,
+             limit=None, offset=None,
+             filter_mode=None, **kwargs) -> dict   # JSON {data, meta, success}
+```
+
+| Param | Meaning |
+|---|---|
+| `dataset` | dataset id — `HIVEQ_US_EQ` (equities), `HIVEQ_US_FUT` (futures), `HIVEQ_US_OPT` (options), `HIVEQ_US_IND` (indices). **Required.** |
+| `schema` | table within the dataset (see §II.4). **Required.** |
+| `symbols` | symbol or list. Equities: required (`['AAPL','MSFT']`). Futures: full contract syms (`['ESH25']`) — or use `root`. Options: full OCC syms — or use `chains`. |
+| `root` | futures root(s) (`['ES','NQ']`) — alternative to `symbols` for futures. |
+| `chains` | option underlying(s) (`['SPY']`) — alternative to `symbols` for options. |
+| `start`, `end` | window bounds. `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` (str/date/datetime). |
+| `limit` | max rows in **this** response (page size). |
+| `offset` | rows to skip — used for pagination. |
+| `filter_mode` | `"continuous"` (default) or `"session"` — see §II.4. |
+| `**kwargs` | `columns=[...]` (subset of columns); options-only: `expiration_date`, `strike`, `option_type` (`'C'`/`'P'`). |
+
+The driver passes `dataset`, `schema`, `symbols`, `columns`, `limit`, `offset`,
+`start`, `end`, and `filter_mode`. It does not currently use `root`/`chains`/the
+options kwargs — add them in `__load_historical` if a section needs them.
+
+---
+
+## II.4 Datasets, schemas, and filter modes
+
+**Datasets** (from the SDK docstrings): `HIVEQ_US_EQ`, `HIVEQ_US_FUT`,
+`HIVEQ_US_OPT`, `HIVEQ_US_IND`.
+
+**Schemas** seen in use / SDK examples: `bars_1s`, `bars_1m`, `bars_1d`,
+`eq_trades`, `trades`, `tbbo`, `snaps_1s`, `early_imbalance`, `indices_1m`.
+The authoritative, live list comes from the SDK's `Metadata` client
+(`Metadata().get_schemas(dataset=["*"])`) — not maintained here.
+
+**`filter_mode`:**
+- **`continuous`** (default) — a single time-range query that spans date
+  boundaries. Works on any table.
+- **`session`** — applies the same **intraday** time window (e.g. 09:30–16:00)
+  to **each day** in `[start, end]`. Requires the schema to have both a Date and a
+  DateTime filterable column. The driver auto-selects `session` when a section's
+  params include a `TimeRange` (intraday window) — see §II.6.
+
+---
+
+## II.5 Pagination (how the driver gets ALL rows)
+
+The API caps each response at `limit` rows (1000 if `limit` is omitted). The driver
+sets `limit = DEFAULT_LIMIT` (500,000, the API's `LIMIT_MAX`) and pages with `offset`:
+
+```
+offset = 0
+loop:
+    page = get_data(..., limit=PAGE, offset=offset)["data"]
+    accumulate(page)
+    if len(page) < PAGE:        # short page ⇒ end of data
+        break
+    offset += PAGE
+```
+A page that comes back **exactly full** (`len == limit`) means there may be more, so
+it fetches the next page; a short page ends the loop. Override the page size with a
+per-section `limit` config prop. (Bigger page = fewer requests but each is a larger,
+slower transfer — keep it within the `HIVEQ_READ_TIMEOUT`.)
+
+---
+
+## II.6 Config → SDK mapping (what `hiveq_transport` does)
+
+A `transport=HiveQ` section's properties map to `get_data` arguments. Every prop is
+resolved **data-source section → `[HiveQ]` → `[default]`**, so HiveQ-wide settings
+(`apiKey`, `baseUrl`, `timezone`, `limit`, …) can be set once in `[HiveQ]`:
+
+| Config prop | → `get_data` | Notes |
+|---|---|---|
+| `dataset` | `dataset` | required |
+| `schema` | `schema` | required |
+| `columns` | `columns` (kwarg) | comma-separated → list |
+| `limit` | `limit` (page size) | default 500,000 |
+| `filterMode` | `filter_mode` | else auto: `session` if a `TimeRange` is present |
+| `splitSize` | (windowing) | days-per-request; default `1` ⇒ **one request per day**, concatenated |
+| `timezone` | `Historical(timezone=)` | default `America/New_York` |
+| `apiKey` | `configure(api_key=)` | section → `[HiveQ]` → `[default]` |
+| `baseUrl` | `configure(base_url=)` | section → `[HiveQ]` → `[default]` → `https://staging.hiveq.ai` |
+
+The **`params_tuple`** passed to `dd.load(...)` supplies the runtime window/symbols
+(`hiveq_transport.__extract_params`):
+- first **`DateRange`** field → `start` / `end` (split into per-day windows by `splitSize`),
+- first **`TimeRange`** field → the intraday window (and switches `filter_mode` to `session`),
+- remaining list/str field(s) → `symbols`.
+
+Example section + call:
+```ini
+[AaplBars]
+primary = AaplBars1m
+[AaplBars1m]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = bars_1m
+```
+```python
+Params = collections.namedtuple('Params', ['date', 'time', 'sym'])
+p = Params(DateRange('2025-10-14','2025-10-14'),
+           TimeRange('09:30:00','16:00:00'), ['AAPL'])
+df = Driver().load('AaplBars', params_tuple=p)   # → get_data(HIVEQ_US_EQ, bars_1m, ['AAPL'], session)
+```
+
+---
+
+## II.7 Publish (the `save` path)
+
+The HiveQ transport has **two publish paths**. Only the SDK/REST path uses the
+`hiveq_data` SDK; the WebSocket path speaks directly to the distributor and does
+**not** use the SDK at all.
+
+### 7a. WebSocket publish — real-time (preferred for live)
+
+When a config section has a **`topic`**, `dd.save()` bypasses the SDK entirely
+and opens a WebSocket to the distributor message broker
+(`ws://<wsHost>:<wsPort>`). Each DataFrame row is sent as a single JSON frame:
+
+```json
+{"action": "publish", "topic": "<topic>", "key": "<key>", "data": {<row dict>}}
+```
+
+The transport waits for a per-message ack before sending the next row. Rows flow
+through the distributor to all live WebSocket subscribers on the same topic.
+
+This path does **not** call `hiveq_data` — no API key or `baseUrl` is needed.
+It only requires the distributor WebSocket to be reachable. Modelled on the
+distributor's `examples/ws_publisher.py`.
+
+**This is the preferred publish mode for live / production** — use it whenever
+rows should be delivered in real time to live subscribers.
+
+Config properties: `topic` (required), `keyField` (per-row key column),
+`key` (static fallback), `wsHost` (default `localhost`), `wsPort` (default `8765`).
+
+### 7b. SDK / REST publish — batch (preferred for backtest)
+
+When the config section has **no `topic`** but has `publishSchema` (or `schema`)
++ `key`, `dd.save()` uses the `hiveq_data` SDK:
+
+```python
+import hiveq_data
+publisher = hiveq_data.Publisher(async_mode=True)
+publisher.publish(schema=schema, data=records, key=key, operation=operation)
+```
+
+This issues `POST /api/publish/v0/data`. The entire DataFrame is serialized as a
+list of row dicts and sent in a single HTTP request.
+
+| Param | Meaning |
+|---|---|
+| `schema` | Target schema to publish into. Config: `publishSchema` (falls back to `schema`). |
+| `data` | List of row dicts (`df.to_dict('records')`). |
+| `key` | Caller-supplied identifier for the batch. Config: `key`. |
+| `operation` | `"add"` (insert, default) or `"modify"` (update by key). Config: `operation`. |
+
+`Publisher(async_mode=)` — when `True` (default), the SDK runs the publish
+asynchronously. Config: `async` (default `true`).
+
+This path requires `HIVEQ_API_KEY` + `baseUrl` (resolved the same way as the
+pull path: section → `[HiveQ]` → `[default]` → env). It does **not** go through
+the distributor — live WebSocket subscribers will **not** see these rows.
+
+**This is the preferred publish mode for backtest, analytics, and bulk uploads**
+— any scenario where data is persisted to the HiveQ Data API rather than streamed
+to live consumers.
+
+---
+
+## II.8 Errors
+
+SDK calls raise **`hiveq_data.HiveQAPIError`** on non-2xx responses, carrying
+`status_code`, `response_text`, `response_json`, `request_url`, `request_method`.
+The transport logs and re-raises; a `403` typically means the API key/IP is not
+permitted, a `400` usually means a missing/invalid filter (e.g. no `start`/`end`).

@@ -1,16 +1,43 @@
 <!--
 CANONICAL MACHINE-READABLE API SPEC FOR HIVEQ FLOW.
-Audience: code-generation agents AND human developers.
-Every signature, type, enum value, and dict key below is verified against source.
-If you are unsure of a value, use the documented dataset/schema codes in §9 rather than guessing — the platform fetches the data at run time (this thin client has no local data access).
+Audience: HiveQ SDK users (human or AI agent).
+Every signature, type, enum value, and dict key in this file is verified against source.
+If you are unsure of a value, use the documented dataset/schema codes in §9 / the Data
+Reference appendix rather than guessing — the platform fetches the data at run time
+(this thin client has no local data access).
 -->
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.5`
+- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.6`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
-- **how to read this**: this is a reference spec, not a tutorial. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped.
+- **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
+
+| § | What's in it |
+|---|---|
+| 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades). |
+| 1 | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
+| 2 | Entry points (module `hiveq.flow`) — `run_backtest`, engine config via `**kwargs`, the function registry / remote functions. |
+| 3 | Credentials — first-run sign-in flow, what NOT to do when generating deliverable code. |
+| 4 | Strategy contract — the class shape (`__init__`/`on_start`/`on_bar`/`on_order`/...), lifecycle facts (init-once, on_start-per-calendar-day). |
+| 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION). Largest section — by far the most common single lookup. |
+| 6 | The `Event` object — the small wrapper every callback receives. |
+| 7 | Event payloads — what `event.data()` returns, per `event.type`. The field tables (SigmaBar, SigmaPosition, SigmaOrder, SigmaFill, SigmaTradeTick, SigmaQuoteTick, SigmaSnapData, TimerEventData, SigmaCustomData, SigmaInstrument, IndexPrice, Rollover, EXECUTOR_EVENT/SECURITY_EVENT). |
+| 8 | Portfolio API — `SigmaPortfolio` / `SigmaGlobalPortfolio` shared surface. |
+| 9 | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers. |
+| 10 | Results — `Run` handle, `report()`, `positions()`/`trades()`/`tearsheet()`/`event_logs()`/`logs()`, quantstats, phantom-PnL canary checks. |
+| 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`. |
+| 12 | Enums — exact members and `.value` strings. |
+| 13 | Config dataclasses (`BacktestConfig`, `StrategyConfig`, `EngineConfig`, ...). |
+| 14 | Imports cheat-sheet, incl. §14.1 ancillary data packages shipped as stubs with the SDK. |
+| 15 | Common pitfalls (accurate) — short, worth reading alongside §0. |
+| 16 | Authoring patterns — idioms for capabilities without a built-in helper (e.g. multi-bar executor state machines). |
+
+Related, outside this file:
+- the **Data Reference appendix** at the end of this file — the dataset/schema catalog referenced by §9.
+- the **data-driver reference** — `docs/data_driver/llms.txt` in the repo, `data_driver/llms.txt` next to this file in the installed wheel (`hiveq docs` prints both paths) — the data driver config DSL and the lower-level `hiveq_data` SDK client (separate tool, not part of this spec).
+
 
 ---
 
@@ -35,6 +62,44 @@ R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, o
 R8  A HiveQ API key is the only credential required (§3); auth is fully automatic via browser sign-in. On the FIRST run with no key, sign-in opens a browser and BLOCKS ~5 min waiting for the user — this is expected, NOT a hang. The user's whole experience is "a browser opens, I sign in, done"; tell them only that, and (if the browser didn't open) the bare link. NEVER show the user internal commands (`hf.login()`, `hiveq-login`), env vars, or file paths; NEVER bisect, kill the process, or fall back to a manual/`export HIVEQ_API_KEY` key (§3.1). Trigger sign-in invisibly on the user's behalf; never put it in deliverable code.
 R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
     across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
+R10 Every strategy MUST include logging via the HiveQ logger throughout all callbacks and decision
+    branches. This is MANDATORY — not optional. Use logger.debug(...) for per-bar state, condition
+    checks, and intermediate values; logger.info(...) for milestone events (signal triggered, order
+    placed, pattern detected). The engine default level is WARNING (§2.1), so BOTH debug and info
+    lines are silent in a normal run — a healthy run produces an essentially empty log, by design.
+    The instrumentation costs nothing until it's needed: when the strategy misbehaves (or the user
+    asks to investigate), re-run with hiveq_log_level='DEBUG' or 'INFO' (§2.1) and all context
+    surfaces immediately — no code changes needed. Do NOT pass a log level on a normal run, and
+    NEVER leave a hiveq_log_level override in delivered strategy/example code — it is a temporary
+    investigation tool; strip it before presenting. Durable observability belongs in
+    ctx.add_event_log(...) (readable via run.event_logs() at any log level).
+
+    Import and instantiate at module level (NOT inside the class):
+        from hiveq.flow.logger import logger as _get_logger
+        logger = _get_logger()
+
+    DO NOT use logging.getLogger(__name__) or logging.basicConfig — those are silenced by the
+    executor and do not respond to hiveq_log_level (§5.9.1).
+
+    Minimum logging required in every strategy:
+    - on_start:  log what was subscribed and any initial config values
+    - on_bar:    log bar time, close, and key state variables at DEBUG level every bar
+    - every signal/condition check: log the values being compared and the outcome at DEBUG
+    - every order placement: log symbol, side, quantity, and the reason at INFO
+    - on_order:  log the order status and fill price at INFO
+R11 Run-output discipline: run_backtest deploys and returns the Run immediately (silent=True is
+    the default). Block with run.wait(progress=False) — NEVER with the live progress bar in a
+    scripted/agent run — then read run.report(). On a healthy run, run.report() is the ONLY
+    output you need: do not poll run.status() in a loop, do not stream progress/PnL, and do not
+    pull run.logs() or run.event_logs() (the default WARNING level means the log is essentially
+    empty anyway). Escalate to §11.5 (DEBUG re-run + run.logs()) only when the run misbehaves or
+    the user asks to investigate.
+R12 A backtest that completes with 0 trades is NOT a deliverable. Design entry conditions so the
+    strategy trades realistically within the requested window (thresholds/tolerances wide enough
+    to actually trigger on real data — validate mentally against the symbols and date range before
+    running). After every run, check report.return_stats["Total Trades"]: if it is 0 (or wildly
+    below the strategy's natural frequency), treat the iteration as FAILED — diagnose via §11.5,
+    loosen/fix the conditions, and re-run until it trades — before presenting any results.
 ```
 
 ---
@@ -45,6 +110,9 @@ R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.globa
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
+from hiveq.flow.logger import logger as _get_logger
+
+logger = _get_logger()   # module-level — REQUIRED in every strategy (R10)
 
 class BuyAndHold:
     def __init__(self):
@@ -53,19 +121,23 @@ class BuyAndHold:
     # PER-EVENT CALLBACKS (default contract). One focused method per event type.
     def on_start(self, ctx: hf.Context, event):
         ctx.subscribe_bars(ctx.strategy_config.symbols, asset_type=AssetType.EQUITY, interval='1m')
+        logger.info(f"[START] subscribed 1m bars for {ctx.strategy_config.symbols}")
 
     def on_bar(self, ctx, event):
         bar = event.data()                           # -> SigmaBar (§7.1)
+        logger.debug(f"[BAR] {bar.symbol} {bar.time} close={bar.close:.2f} bought={self.bought}")
         if not self.bought and ctx.is_flat(bar.symbol):
+            logger.info(f"[ENTRY] buying 100 {bar.symbol} at {bar.close:.2f}")
             ctx.buy_order(bar.symbol, quantity=100)
             self.bought = True
 
     def on_order(self, ctx, event):                  # NOT on_order_filled — fills come here
         order = event.data()                         # -> SigmaOrder (§7.3)
+        logger.info(f"[ORDER] {order.symbol} status={order.status} filled={order.is_filled}")
         if order.is_filled:
             fill = order.last_fill                   # -> SigmaFill (§7.4)
 
-# run_backtest returns a Run HANDLE (§10.0), not a PerformanceReport directly.
+# run_backtest returns a Run HANDLE (§10.0) immediately, not a PerformanceReport.
 run = hf.run_backtest(
     strategy_configs=[StrategyConfig(name='BuyAndHold', type='BuyAndHold')],
     symbols=['AAPL'],
@@ -73,6 +145,7 @@ run = hf.run_backtest(
     end_date='2025-08-02',
     data_configs=[{'type': 'hiveq_historical', 'dataset': 'HIVEQ_US_EQ', 'schema': ['bars_1m']}],
 )
+run.wait(progress=False)                             # block quietly until done (R11)
 report = run.report()                                # -> PerformanceReport (§10.1)
 print(report.return_stats.to_string())
 ```
@@ -92,12 +165,15 @@ run_backtest(
     data_configs: Optional[list[dict]] = None, # §9
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
-    silent: bool = False,                       # True -> deploy + return Run immediately (no blocking)
+    requirements: Optional[list[str]] = None,   # accepted for future orchestrator package installs
+    silent: bool = True,                        # default: deploy + return Run immediately (no blocking)
     **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
-#   silent=False (default): deploy to platform, block w/ live progress, return the finished Run.
-#   silent=True           : deploy and return the Run immediately (run.run_id / run.task_id).
+#   silent=True (default) : deploy and return the Run immediately (run.run_id / run.task_id).
+#   silent=False          : block inside the call w/ a live progress bar until done (interactive use).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
+#   requirements: accepted for API compatibility; currently not sent by the
+#                 SDK backtest wrapper until orchestrator support lands.
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
@@ -108,6 +184,18 @@ login(*, timeout=300.0, open_browser=True) -> str   # Internal plumbing: browser
 ```
 
 **Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
+
+**Canonical run pattern (R11)** — deploy, block quietly, read the report. This is the whole loop; nothing else needs to be printed or pulled on a healthy run:
+
+```python
+run = hf.run_backtest(...)                    # returns immediately (silent by default)
+print(f"run {run.run_id} task {run.task_id}") # keep the ids (re-attach later via hf.get_run)
+run.wait(progress=False)                      # block quietly until terminal — no progress bar
+report = run.report()                         # the deliverable (§10.1)
+print(report.return_stats.to_string())
+```
+
+`run.wait()` without `progress=False` renders a live tqdm progress bar (day count / PnL / return) — right for a human watching a terminal or notebook, wrong for a scripted or agent-driven run, where the repeated bar redraws land in captured output. Only reach for `run.status()`, `run.logs()`, or `run.event_logs()` when debugging (§11.5).
 
 ### 2.1 Engine configuration (via `**kwargs`)
 
@@ -127,13 +215,21 @@ Recognized keys (all optional; sensible defaults apply):
 
 | key | type | default | purpose |
 |---|---|---|---|
-| `hiveq_log_level` | str | `'INFO'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Use `DEBUG`, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). |
+| `hiveq_log_level` | str | `'WARNING'` | Executor log verbosity: `DEBUG` / `INFO` / `WARNING` / `ERROR`. Controls the HiveQ strategy logger (`from hiveq.flow.logger import logger as _get_logger` — §5.9.1). The `WARNING` default is intentional: a healthy run logs essentially nothing, so there is nothing to pull. Set `'DEBUG'` (or `'INFO'`) **only when investigating**, then read the full executor log (incl. tracebacks) with `run.logs()` (§10.0). See the debugging workflow in §11.5. |
 | `oms_console_log` | bool | `False` | Echo order-management-system activity to the executor console. |
 | `futures_datasets` | list[str] | `['HIVEQ_US_FUT']` | Datasets treated as futures (enables contract resolution + rollover events, §7.12). |
 | `signals_datasets` | list[str] | `['HIVEQ_QUANT_SIGNALS']` | Datasets that key off `config['symbols']` rather than the run's symbol universe. |
 | `hiveq_data_page_size` | int | `100_000` | Max records per data request (raise for very dense schemas, e.g. options). |
 
 Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§3) and are intentionally not part of the engine config you pass.
+
+> ⚠️ **The `WARNING` default means `logger.info(...)` is silent by design.** An
+> empty (or near-empty) `run.logs()` on a normal run does **not** mean the
+> strategy didn't run — the executor deliberately suppresses `debug`/`info`
+> output so healthy runs stay quiet and cheap. Never conclude "the strategy
+> isn't running" from a quiet log, and never pass `'INFO'` on a normal run just
+> to see milestone lines. To investigate behavior, re-run with
+> `config={'hiveq_log_level': 'DEBUG'}` (§11.5).
 
 ### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
 
@@ -187,13 +283,23 @@ hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> va
 
 > **TBD — access control.** Function-level ACLs (who can read/run a function, fine-grained sharing across namespaces) are **not fully implemented yet**. Today: functions live in your own namespace by default; `namespace="default"` is the shared/public namespace. Treat cross-namespace permissions as subject to change.
 
+> **Need a non-blocking deploy, or a recurring schedule?** `run_function` always blocks and returns a value. For a fetch/compute/publish script you want to deploy and walk away from (optionally on a recurring `Schedule`), use `deploy_job` instead — §11.6.
+
 ---
 
 ## 3. Credentials
 
-A **HiveQ API key** is the only credential required, and the SDK provisions it **automatically** — the user never sets, exports, or manages it by hand. Identity (user, org) is resolved from the key server-side.
+A **HiveQ API key** is the only credential required, and the SDK provisions it through browser sign-in — the user never creates, copies, exports, or manages a key by hand. Identity (user, org) is resolved from the key server-side.
 
-How it actually works: the **first** `run_backtest` (any deploy) calls the SDK's init, which looks for a key in the environment / `~/.hiveq/.env`. If none is found, it opens a browser sign-in (loopback), mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run** — no prompt, no env var, no code. There is no "set up your key first" step.
+How it actually works: the SDK looks for a key in the environment / `~/.hiveq/.env`. If none is found, browser sign-in opens, mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run**.
+
+Users have two supported paths:
+
+```bash
+hiveq login
+```
+
+or simply run a backtest/deploy; the **first** `run_backtest`/`deploy_job` triggers the same sign-in automatically. `hiveq login` is useful before using direct data tools such as `hiveq_data` / the data driver, where there may be no backtest call to trigger sign-in.
 
 ### 3.1 First run — the sign-in you will see, and what to do (AI agents: READ THIS)
 
@@ -211,20 +317,20 @@ When you (the AI) run anything that initializes the client with no key saved yet
 ────────────────────────────────────────────────────────────────
 ```
 
-A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the redirect, writes the key to `~/.hiveq/.env`, prints `✓ Signed in.`, and the run continues. **This wait is expected and correct** — it is not a hang, a crash, a missing dependency, or a bug to debug.
+A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the redirect, writes the key to `~/.hiveq/.env`, prints `Signed in as <email-or-name>` (or `Signed in to HiveQ` if the host does not return a profile label), and the run continues. **This wait is expected and correct** — it is not a hang, a crash, a missing dependency, or a bug to debug.
 
-**The whole experience the user should have is:** *a browser opens, they sign in (or sign up), and their key is saved.* That is it. Internal command names (`hf.login()`, `hiveq-login`, `python -c …`), file paths like `~/.hiveq/.env`, env vars, and the loopback mechanics are **plumbing — never show them to the user.** They cannot act on them and they make a one-click flow look like a chore.
+**The whole experience the user should have is:** *they run `hiveq login` or start their first backtest, a browser opens, they sign in (or sign up), and their key is saved.* That is it. Do not ask them to copy/export a key or hand-edit files.
 
 **What you MUST do:**
-1. **Trigger the sign-in for the user** — silently, on their behalf. Run the first backtest (init signs in automatically), or run a sign-in step in the background so the ~5-min wait doesn't block your tool call. *How* you trigger it is yours to manage; the user never needs to know the command.
+1. **Trigger the sign-in for the user**. For backtests, just run the first backtest (init signs in automatically). For direct data-driver work, use `hiveq login` first.
 2. **Tell the user only the human part, in plain words.** A browser window is opening for them to sign in; once they're signed in, they're all set. If the browser didn't open on its own, give them just the bare sign-in link to click:
    > 👉 **A browser will open so you can sign in to HiveQ.** (If it doesn't open, click here: `<url>`) Once you've signed in, you're all set — nothing else to do.
-3. **Wait** for it to complete (the process prints `✓ Signed in.` once the key is written), then continue. Every later run reuses the saved key automatically — sign-in happens **once**.
+3. **Wait** for it to complete (the process prints `Signed in as <email-or-name>` once the key is written), then continue. Every later run reuses the saved key automatically — sign-in happens **once**.
 
 **What you MUST NOT do** (the real failure modes):
 - Treat the wait as a hang, kill the process, and start bisecting / debugging the SDK.
 - Conclude the key is "missing" and tell the user to create, paste, or `export` a key, or hand-edit a file.
-- Show the user internal commands (`hf.login()`, `hiveq-login`, etc.), env vars, or file paths and ask them to run/set anything.
+- Ask the user to run `hiveq-login`, `hf.login()`, manual Python snippets, env exports, or file edits. Use the public `hiveq login` command when an explicit login step is needed.
 - Retry the run in a loop or downgrade to a "manual API-key setup" workaround. Signup IS the browser flow — there is no manual key.
 
 > `HIVEQ_AUTH_URL` defaults to `https://staging.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
@@ -234,9 +340,9 @@ A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the red
 - add `hf.login()` to a strategy/backtest script — `run_backtest` already signs in on first use, and you handle first-run sign-in invisibly per §3.1;
 - add hedging comments like `# if not already saved via hf.login()` or `# make sure your API key is set`;
 - hard-code, print, or ask the user to paste a key;
-- surface `hf.login()` / `hiveq-login` to the user as something they should run.
+- surface `hf.login()` / `hiveq-login` to the user as something they should run. Use `hiveq login` only as a one-time terminal setup command, never inside strategy/backtest code.
 
-`hf.login()` / `hiveq-login` is **internal plumbing you may invoke on the user's behalf** (§3.1) or use to pre-authenticate a headless/CI box. It must **never** appear inside generated strategy/backtest code, nor be presented to the user as a step — a finished script must be runnable as-is, with **zero** credential setup mentioned to the user.
+`hf.login()` / `hiveq-login` is internal plumbing. The user-facing command is `hiveq login`. A finished strategy/backtest script must still be runnable as-is, with **zero** credential code inside it.
 
 ---
 
@@ -265,17 +371,26 @@ class MyStrategy:
 | `on_trade` | `TRADE` | `SigmaTradeTick` (§7.5) |
 | `on_quote` | `QUOTE` | `SigmaQuoteTick` (§7.6) |
 | `on_snap` | `SNAP` | `SigmaSnapData` (§7.7) |
-| `on_order` | `ORDER`, `ORDER_SUBMITTED/ACCEPTED/REJECTED/FILLED/CANCELED` | `SigmaOrder` (§7.3) |
+| `on_order` | `ORDER`, `ORDER_SUBMITTED/ACCEPTED/REJECTED/FILLED/CANCELED/CANCEL_REJECTED/MODIFY_REJECTED` | `SigmaOrder` (§7.3) |
 | `on_position` | `POSITION`, `POSITION_OPENED/CHANGED/CLOSED` | `SigmaPosition` (§7.2) |
 | `on_timer` | `TIMER` | `TimerEventData` (§7.8) |
 | `on_custom_data` | `CUSTOM_DATA` | `SigmaCustomData` (§7.9) |
 | `on_index_price` (alias `on_index`) | `INDEX_PRICE` | `IndexPrice` (§7.11) |
+| `on_imbalance` | `IMBALANCE` | `ImbalanceData` (§7.14) — auction imbalance feed; needs the `early_imbalance` schema in `data_configs` |
 | `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
 | `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
 | `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
 
 - **There is NO `on_order_filled`.** Fills are delivered to **`on_order`**; check `order.is_filled` / `order.status` / `order.last_fill`.
+- **Order lifecycle contract (FIX-style: status ≠ events).** `order.status` is the order's state; events are the history. Terminal statuses (`FILLED`/`CANCELED`/`REJECTED`) are **sticky** — later request-level events never change them. The canonical race: you cancel a resting order, but a fill lands while the cancel is in flight. You then receive **`ORDER_FILLED` first (with the fill — never lost), followed by `ORDER_CANCEL_REJECTED`** ("too late to cancel"). The order's `status` reads `FILLED` on both events. Handle it as:
+  - Act on fills from the `ORDER_FILLED` event, using the cumulative `filled_qty`/`leaves_qty` (idempotent).
+  - Treat `ORDER_CANCEL_REJECTED` / `ORDER_MODIFY_REJECTED` as informational no-ops when `order.is_filled` — the position was already handled by the fill; do **not** count them toward reject/error limits.
+  - `ORDER_REJECTED` is reserved for the order itself being rejected (entry rejects); it never fires for cancel/replace request rejections.
+  - An order canceled after a **partial** fill ends `CANCELED` with `filled_qty > 0` — account for the partial from its fill events.
+  - Never infer an order's disposition from its *last event*; use `order.status` / `filled_qty`.
 - **`on_stop` / `EventType.STOP`**: fires after the engine has STOPPED. Do **not** place orders in STOP — they are rejected.
+- **`__init__` fires exactly ONCE per backtest run**, and the same instance receives every subsequent callback. There is no per-session re-instantiation for the strategies covered here. Use `self.*` state normally in `__init__`; no module-level containers are required.
+- **`on_start` fires ONCE per CALENDAR day**, on the same instance, **including Saturdays, Sundays, and market holidays.** Empirically verified over a 90-calendar-day daily-bar backtest: `on_start` was called exactly 90 times. Do not put one-time-only setup in `on_start` unguarded — it re-runs every calendar day. Guard with a `self._started` boolean if you need "only the very first call." Repeated identical `ctx.subscribe_bars(...)` calls are safe — the engine dedupes them internally.
 - **Global single-dispatch (opt-in, NOT default):** if you specifically want one method, branch on `event.type` (EventType → payload map in §7.0) in a single `on_hiveq_event`. Two equivalent forms: (a) a **class** with `on_hiveq_event(self, ctx, event)` deployed via `StrategyConfig(name=..., type='YourClass')`; or (b) a **module-level** `def on_hiveq_event(ctx, event):` deployed with `run_backtest(strategy_configs=[], ...)` — the engine auto-discovers the captured function. (Empty `strategy_configs` is accepted *only* for this global form; otherwise it errors.) Use this only on explicit request — per-event callbacks are the default.
 
 ---
@@ -304,6 +419,10 @@ ctx.subscribe_futures_bars(symbols: Optional[List[str]] = None, root: Optional[s
                            interval: str = "1m")
 ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional[str] = None,
                              contract: Optional[str] = None, continuous: Optional[str] = None)
+#   NOTE: there is NO subscribe_futures_quotes. Bars and trades have dedicated
+#   futures convenience methods; quotes do not. For futures NBBO/tbbo quotes,
+#   use subscribe_quotes with the futures symbol string and asset_type=FUTURES:
+#     ctx.subscribe_quotes(['ES.c.0'], asset_type=AssetType.FUTURES)
 #   The futures symbol string encodes the contract:
 #     "ES.c.0" — continuous, calendar/front-month roll, front (rank 0)
 #     "ES.v.0" — continuous, volume roll, front
@@ -337,6 +456,50 @@ ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
 - **`market_center`** (opt): venue routing — `"NYSE"`/`"NASDAQ"`/`"ARCA"`/… or a MIC alias (`"XNYS"`/`"XNAS"`/…). Mainly for auction orders (§5.2.1); auction orders default to `"NASDAQ"` when omitted.
 - **`close_position`** flattens the net position in one offsetting order (no-op if flat); **`order_to_target`** trades the delta to reach a signed target; **`flatten_all`** closes every open position in the strategy. These wrap `net_position` + `buy_order`/`sell_order` — see §16.1.
 - **Transactional / idempotent:** all three **skip (return `None`) if a working order already exists for the symbol** (`has_open_order`). `net_position` reflects only *filled* quantity, so re-issuing while an order is in flight would double-trade — the guard prevents that. Safe to call every bar: they converge one fill at a time. To replace a resting order, `cancel_all_orders(symbol)` first.
+- **The base `buy_order` / `sell_order` / `short_order` do NOT have the `has_open_order` skip guard** — only the three sizing helpers above (`close_position`, `order_to_target`, `flatten_all`) skip. If you need to force a trade even while another order is working on the same symbol, call the base methods directly.
+
+> ⚠️ **Cancel + close race (silent no-op — READ THIS).** The natural intuition
+> ```python
+> ctx.cancel_all_orders(sym)      # bar N
+> ctx.close_position(sym)         # bar N — silently returns None
+> ```
+> **does not work.** `cancel_all_orders` only *requests* the cancel; the resting
+> orders are still `has_open_order` == True for the rest of that bar. On the very
+> next line, `close_position` sees a working order, hits the idempotency guard,
+> returns `None`, and **the position is not closed**. Symptoms downstream:
+> `positions` table shows `avg_px_close == 0`, `trades` has `exit_ts == 1970-01-01`,
+> `Total Trades == 0` in `return_stats`, and any P&L in the report comes from
+> end-of-backtest liquidation of the stuck position — not from your strategy.
+>
+> **Correct pattern — two-phase exit across bars (mirrors a real OMS):**
+> ```python
+> # Bar N — request cancel and mark the intent
+> if condition_to_exit and not state[sym].get('exit_pending'):
+>     ctx.cancel_all_orders(sym)
+>     state[sym]['exit_pending'] = True
+>     return
+>
+> # Bar N+1+ — verify cancel propagated, THEN send the close order
+> if state[sym].get('exit_pending'):
+>     if ctx.has_open_order(sym):
+>         return                                             # still waiting
+>     qty = ctx.net_position(sym)
+>     if qty != 0:
+>         (ctx.sell_order if qty > 0 else ctx.buy_order)(sym, quantity=abs(qty))
+>     state[sym]['exit_pending'] = False
+> ```
+> Since the base `sell_order` / `buy_order` bypass the idempotency guard, they
+> will fire even if a working order is still lingering — but you should still
+> wait for `has_open_order == False` so you don't cross your own sibling.
+
+> ⚠️ **`time_in_force` on LIMIT/STOP — pass `"GTC"` explicitly for brackets.**
+> Although the documented auto-TIF says LIMIT/STOP default to `"GTC"` when
+> `time_in_force=None`, live runs have shown the engine tagging bracket-child
+> LIMIT and STOP orders with `"DAY"` in the `orders` table. A `DAY` bracket
+> child expires at end of the entry session, leaving the position unprotected.
+> When placing bracket children (or any order meant to persist past today's
+> session), pass `time_in_force="GTC"` explicitly rather than relying on the
+> documented default.
 
 > **⚠️ Tick-size rounding — round your OWN `limit_price`/`stop_price` to the instrument tick.** Exchanges reject prices that aren't on the instrument's tick grid (e.g. a computed `123.4567` on a `0.01` grid). When you place orders yourself with an explicit price, round it with `adjust_tick_size`:
 > ```python
@@ -356,7 +519,7 @@ Auction orders participate in an exchange's opening or closing cross/auction, no
 
 **Two ways to send an auction order:**
 
-1. **Direct order** — `ctx.buy_order(sym, qty, order_type=OrderType.MOC, market_center='NYSE')` (or `MOO`/`LOO`/`LOC`; `LOO`/`LOC` need `limit_price`). Pass `market_center` to route to a venue; when omitted, auction orders default to **NASDAQ**. The backtest applies a single global cutoff pair — **open `09:28` ET / close `15:55` ET** (`MarketSessionDefaults`), which match Nasdaq's MOO/MOC entry cutoffs. ⚠️ Per-venue cutoff enforcement (NYSE's earlier `15:50` vs Nasdaq) is not yet keyed off `market_center` in the backtest fill model — routing is honored but model to the Nasdaq close (`15:55`) / be conservative (submit before `15:50`) until that lands (`docs/ENGINE_GAPS_PLAN.md` G9 #3).
+1. **Direct order** — `ctx.buy_order(sym, qty, order_type=OrderType.MOC, market_center='NYSE')` (or `MOO`/`LOO`/`LOC`; `LOO`/`LOC` need `limit_price`). Pass `market_center` to route to a venue; when omitted, auction orders default to **NASDAQ**. The backtest applies a single global cutoff pair — **open `09:28` ET / close `15:55` ET** (`MarketSessionDefaults`), which match Nasdaq's MOO/MOC entry cutoffs; to be safe across venues (NYSE's close cutoff is earlier), submit closing-auction orders before `15:50`.
 
 2. **Auction executor** — the institutional path; build an `AUCTION` executor and let the OMS work it:
 ```python
@@ -443,6 +606,29 @@ ctx.add_event_log(message: str, sub_event_type: Optional[str] = None,
 ctx.log_parameter_change(param_name: str, old_value, new_value, symbol: Optional[str] = None)
 ```
 
+### 5.9.1 Strategy logger
+
+Use the HiveQ logger — **not** the standard Python `logging` module — so your output is controlled by `hiveq_log_level` (§2.1):
+
+```python
+from hiveq.flow.logger import logger as _get_logger
+
+logger = _get_logger()   # module-level; call once per strategy file
+```
+
+The executor sets all non-HiveQ loggers to `WARNING` by default, and `logging.basicConfig` is a no-op once the executor has already installed handlers — so `logging.getLogger(__name__)` is silent regardless of level. The HiveQ logger is the only one controlled by `hiveq_log_level`.
+
+```python
+logger.debug("...")    # visible only when hiveq_log_level='DEBUG'
+logger.info("...")     # visible at INFO and below — NOT at the WARNING default
+logger.warning("...")  # visible at the default level
+logger.error("...")
+```
+
+**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the engine default level is `WARNING` (§2.1), both `debug` and `info` lines are silent in normal runs and add zero noise — a healthy run's log is essentially empty, by design. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all instrumentation surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
+
+`ctx.add_event_log(...)` (above) is complementary: it writes a structured, queryable row into the event-log table (readable via `run.event_logs()`). Use it for milestone events (pattern detected, target set, regime change) rather than for fine-grained per-bar diagnostics. Use `logger.debug` for everything else.
+
 ### 5.10 Executors — managed order working  (POV / TWAP / VWAP / AUCTION …)
 
 An executor is a server-side execution algo that owns the *entire* order lifecycle for a target — it slices the parent quantity into child orders, places them, **modifies/replaces and cancels** as the market moves, aggregates fills, and guarantees order-state consistency even when a downstream provider misbehaves (chasing/re-pricing, repeated replaces). It is well-tested and shared across strategies. You hand it a target (qty/side/type/limits) and it works toward it, keeping **one executor handle per target** instead of you re-sending orders every bar.
@@ -518,16 +704,19 @@ event.time_utc    -> Optional[datetime] # UTC
 | `TIMER` | `TimerEventData` | 7.8 |
 | `INDEX_PRICE` | `IndexPrice` | 7.11 |
 | `ROLLOVER` | `Rollover` | 7.12 |
+| `IMBALANCE` | `ImbalanceData` | 7.14 |
 | `EXECUTOR_EVENT` | executor lifecycle payload (opaque) | 7.13 |
 | `SECURITY_EVENT` | security/reference payload (opaque) | 7.13 |
 
 ### 7.1 SigmaBar
-`symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str` · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
+`symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str`(human-readable: `'1d'` / `'1m'` / `'1s'` — matches the available bar schemas; no `'1h'`) · `interval_millis:int`(`86400000` / `60000` / `1000`) · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.2 SigmaPosition
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
 
 ### 7.3 SigmaOrder
+`status` is the order's **state** (sticky once terminal — FIX OrdStatus semantics); `event.type` is what just **happened**. A cancel racing a fill delivers `ORDER_FILLED` then `ORDER_CANCEL_REJECTED`, with `status == FILLED` on both — see the "Order lifecycle contract" in §4.
+
 `symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.4 SigmaFill  (via `order.last_fill`)
@@ -563,6 +752,10 @@ event.time_utc    -> Optional[datetime] # UTC
 ### 7.12 Rollover
 `continuous_symbol:str`("ES.c.0") · `prev_contract:str`("ESZ5") · `current_contract:str`("ESH6") · `ts_event:int`
 
+### 7.14 ImbalanceData
+Auction imbalance record (NYSE/Arca/Nasdaq imbalance feed; `early_imbalance` schema, HIVEQ_US_EQ). Venue-specific fields are `None` when the publishing venue does not provide them.
+`symbol:str` · `side:str`('B'/'S') · `imbalance:float`(shares) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C', Nasdaq) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
+
 ### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
 These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
 
@@ -597,11 +790,18 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 ## 9. `data_configs` schema  (list of dicts)
 
 ### 9.1 `type='hiveq_historical'`
+
+> **Full data catalog — datasets, schemas, coverage caveats — lives in
+> the **Data Reference appendix** at the end of this file.** That file is the single source
+> of truth for "what data exists"; keep this section limited to the
+> `data_configs` dict shape. If a dataset/schema code isn't in
+> the Data Reference appendix, don't guess — it doesn't exist.
+
 | key | type | notes |
 |---|---|---|
 | `type` | str | `'hiveq_historical'` |
-| `dataset` | str | dataset code: `HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_US_OPT`, `HIVEQ_US_IND`, `HIVEQ_US_ETF`, `HIVEQ_QUANT_SIGNALS`, `HIVEQ_ECON`. (`HIVEQ_STRAT` holds published run *results* — an output you read after a run, not a strategy input.) |
-| `schema` | list[str] \| str | one or more exact schema codes, e.g. `bars_1m`, `bars_1s`, `bars_1d`, `tbbo`, `eq_trades`, `fut_trades`, `snaps_1s`, `signals`. Bar data exists only at `bars_1s` / `bars_1m` / `bars_1d` per asset class — there is **no** `bars_5m` / `bars_1h`. **Trade prints** (incl. the opening/closing **auction** prints that MOO/MOC fill against, §5.2.1) come from `eq_trades` (equities) / `fut_trades` (futures); `tbbo` is **quotes** (bid/ask) and `bars_*` are aggregated — neither carries trade/auction prints. **Executors** (POV/TWAP/VWAP…, §5.10) also need a tick stream — **prefer `eq_trades`/`fut_trades`** (`tbbo` quotes work too but have limited coverage); never `bars_*`. |
+| `dataset` | str | dataset code — see §A.1 in the Data Reference appendix for the full list (`HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_QUANT_SIGNALS`, …). |
+| `schema` | list[str] \| str | one or more exact schema codes — see §A.2 in the Data Reference appendix for the full list (`bars_1m`, `eq_trades`, `fut_trades`, `tbbo`, …) and coverage caveats (bar granularities, auction prints, executor tick-stream requirement). |
 | `id` | str (opt) | identifier referenced by `ctx.subscribe_data(data_id=...)` for signal/custom sources |
 | `enabled` | bool (opt) | default `True` |
 
@@ -616,19 +816,43 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
  'id':'mysignals','symbols':['My_Signal_Name']}
 ```
 
-**`HIVEQ_QUANT_SIGNALS`** delivers platform-hosted signal data to `on_custom_data`. Each row has a `signal_json` column containing a JSON-encoded payload with the signal fields. Parse it in your strategy:
-```python
-def on_custom_data(self, ctx, event):
-    data = event.data()
-    sig = json.loads(data.column_data("signal_json"))
-    value = sig.get("my_field")
-```
-
-The `symbols` key in `data_configs` selects which signal stream to subscribe to. The `id` field must match the `data_id` argument in `ctx.subscribe_data(data_id=...)`.
+**`HIVEQ_QUANT_SIGNALS`** delivers platform-hosted signal data to `on_custom_data` — see §A.3 in the Data Reference appendix for the `signal_json` payload format.
 
 > **Backtest with your own signals?** Use a CSV custom data source instead (§9.2) — it fires the same `on_custom_data` callback. Put your signal fields as columns in the CSV and read them with `column_data()`. No `signal_json` wrapping needed.
 
+#### `data_type='custom'` + `filters` (query a ClickHouse-backed table directly)
+
+A `hiveq_historical` entry can also route through `HiveQUserDataAdapter`
+instead of the default signal path, by adding `data_type: 'custom'` and a
+`filters` dict. `filters` is flattened verbatim into `<id>.<key>` config
+read by the adapter — every key is optional except `adapter`/`dataset`/
+`schema`, and omitting a key keeps that setting at its default (no effect
+on existing configs).
+
+| key | type | notes |
+|---|---|---|
+| `adapter` | str | Must be `'HiveQUserDataAdapter'`. |
+| `dataset` | str | Dataset code to query, e.g. `'HIVEQ_QUANT_CLUSTERS'`. |
+| `schema` | str | Schema code to query, e.g. `'clusters'`. |
+| `symbols` | str, comma-separated | Symbol/identifier filter values, e.g. `'ES.c.0'` or `'ES.c.0,NQ.c.0'`. Opaque by default (signal name, zone tag, etc.) unless a resolution mode below is set. |
+| `symbolFilterKey` | str | The request-body field name `symbols` is sent under — dataset-dependent (`'symbol'` for `HIVEQ_QUANT_SIGNALS`, `'sym'` for `HIVEQ_QUANT_CLUSTERS`/`_MODES`). **Not** a list — one field name applies to the whole `symbols` array. |
+| `symbolsAreFuturesContracts` | bool | Legacy flag. `True`/`'true'` resolves `symbols` as `<ROOT>.c.<N>` continuous contracts (dated contract + Nanex translation, re-resolved per backtest day). Superseded by `symbolResolutionMode` below when both are set. |
+| `symbolResolutionMode` | str | `'continuous_contract'` (same as `symbolsAreFuturesContracts: True`), `'root_symbol'` (strip the `.c.<N>` suffix, use the bare root, no per-date lookup or Nanex translation), or `'option'` (reserved — logs a warning and falls back to unresolved symbols). Unset defaults to `continuous_contract`/`none` based on `symbolsAreFuturesContracts`. |
+| `timestampColumn` | str | Overrides the row column used as the event timestamp. Default (unset) guesses from `ts_event` > `db_event` > `time`, in that preference order. Set this when a table's timestamp column doesn't match any of those three names. |
+| `extraFilters` | str, comma-separated `col=val` pairs | Arbitrary hardcoded column=value literal filters merged into the query alongside `symbols`, e.g. `'exchange=CME,session=RTH'`. No built-in equivalent before this key — use it for any column/value constraint beyond symbol and date range. |
+
 ```python
+{'type': 'hiveq_historical', 'dataset': 'HIVEQ_QUANT_CLUSTERS', 'data_type': 'custom',
+ 'id': 'es_mm_zones', 'filters': {
+     'adapter': 'HiveQUserDataAdapter',
+     'dataset': 'HIVEQ_QUANT_CLUSTERS',
+     'schema': 'clusters',
+     'symbols': 'ES.c.0',
+     'symbolFilterKey': 'sym',
+     'symbolResolutionMode': 'continuous_contract',
+     'timestampColumn': 'time',
+     'extraFilters': 'tag=ON',
+ }}
 ```
 
 ### 9.2 `type='csv'`
@@ -774,9 +998,7 @@ hiveq-data -l signals
 ```
 
 ### 9.3 Behavior derived from schema/dataset
-- schema containing `bar` → bar-based fills; schema with `trade`/`tbbo` → tick-based fills.
-- `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
-- `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
+See §A.4 in the Data Reference appendix (fill mode, futures session defaults, options snapshot handling).
 
 ---
 
@@ -789,7 +1011,7 @@ hiveq-data -l signals
 run.run_id -> str
 run.task_id -> Optional[str]
 run.is_local -> bool
-run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until terminal; returns self (chainable)
+run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until terminal; returns self (chainable). Use progress=False in scripted/agent runs (R11) — progress=True renders a live tqdm bar for humans.
 run.status() -> dict                       # {'status': 'PENDING'|'RUNNING'|'DONE'|'FAILED'|..., ...}
 run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
 run.positions() / run.orders() / run.trades() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
@@ -799,9 +1021,9 @@ run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats tears
 run.logs() -> list[str]                    # the COMPLETE remote executor log (stdout/strategy errors), by task_id
 run.download_logs(path: str) -> str        # stream the full gzipped executor log to `path` (.gz); returns path
 ```
-- Default `run_backtest()` already blocked until done, so `run.report()` is ready immediately.
-- **`hf.get_run(run_id, task_id=None)`** re-attaches to a run that was already submitted and returns its `Run` handle. `run_backtest` runs on the platform, so its results outlive your Python process — `get_run` is how you reconnect later (a new session, a different machine, or after a `silent=True` deploy) to check status or pull results without re-running anything. Pass the `run_id` from an earlier `run.run_id`. Typical use: `hf.get_run(run_id).wait().report()`.
-- **`event_logs()` vs `logs()`**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing; `download_logs(path)` for very large logs.
+- `run_backtest()` returns the `Run` **immediately** (silent by default) — call `run.wait(progress=False)` before `run.report()`. Reading the report on an unfinished run logs a warning and may return empty/partial results.
+- **`hf.get_run(run_id, task_id=None)`** re-attaches to a run that was already submitted and returns its `Run` handle. `run_backtest` runs on the platform, so its results outlive your Python process — `get_run` is how you reconnect later (a new session or a different machine) to check status or pull results without re-running anything. Pass the `run_id` from an earlier `run.run_id`. Typical use: `hf.get_run(run_id).wait(progress=False).report()`.
+- **`event_logs()` vs `logs()`** — both are **debugging tools, not part of a normal run's output (R11)**: `event_logs()` is the strategy's structured event-log table from the runs REST API (`ctx.add_event_log(...)` rows, keyed by run_id). `logs()` is the raw executor **stdout** — `print(...)` output and strategy-callback crashes (e.g. `STRATEGY_CALLBACK_ERROR`) that never reach `event_logs()` — fetched as the whole gzip log by **task_id** (`run_id != task_id`). Use `logs()` to debug a run that produced nothing (at the default `WARNING` level a healthy run's log is essentially empty anyway); `download_logs(path)` for very large logs.
 
 ### 10.1 `PerformanceReport` (obtained via `run.report()`)
 | attribute | type |
@@ -823,19 +1045,42 @@ run.download_logs(path: str) -> str        # stream the full gzipped executor lo
 
 DataFrame attrs may be `None`/empty — always guard (`if report.fills is not None and not report.fills.empty`).
 
+> ⚠️ **Phantom PnL from stuck-open positions.** At end-of-backtest the engine
+> liquidates any still-open position and books the mark-to-market difference as
+> **realized** PnL in `total_realized_pnl` / `net_pnl`. If your exit logic
+> silently failed (e.g. the cancel + close race in §5.2), the report will show
+> a plausible-looking positive/negative PnL that is *not from your strategy* —
+> it's from the underlying's price move between your intended exit date and
+> the last day of the backtest. **Canary checks to catch this:**
+> - `return_stats["Total Trades"] == 0` alongside `net_pnl != 0` is the loudest
+>   signal — "Total Trades" counts completed round-trips, not fills.
+> - `report.positions` (or `run.positions()`) row with `avg_px_close == 0`
+>   means that position never closed cleanly during the run.
+> - `report.trades` row with `exit_ts == '1970-01-01'` (null sentinel) means
+>   the round-trip was never completed.
+> Always eyeball these three columns before trusting the top-line PnL.
+> And independent of phantom PnL: `Total Trades == 0` on its own means the
+> strategy never traded — that is a failed iteration, not a result (R12).
+> Diagnose via §11.5 and adjust before presenting anything.
+
 **Tearsheet / metrics (quantstats).** `create_tearsheet()` and `summary_stats()` are powered by **quantstats**, which ships with the SDK (no extra install). Both read `report.returns_series`, so they need a run that produced returns; on missing/empty returns `create_tearsheet()` returns a small "no data" HTML page and `summary_stats()` returns `None`.
 
+> **To write a tearsheet FILE, always call `run.tearsheet()` — never `report.create_tearsheet()`.** `run.tearsheet()` **defaults to PDF** (no `output=` needed). `create_tearsheet()` is a *different, notebook-only* method: it returns an HTML/text string for inline display and is not a way to produce a saved report — do not take its return value and write it to `my_report.html` yourself; that is not "the tearsheet defaulting to HTML", that is calling the wrong method. If you want a file on disk, `output=` is optional and PDF is the default; pass `output='x.html'` only if you deliberately want HTML instead.
+
 ```python
-report = run.report()                 # or hf.get_run(run_id).wait().report()
+report = run.report()                 # or hf.get_run(run_id).wait(progress=False).report()
 
-# Tearsheet file on disk (equity curve, drawdowns, monthly returns, risk metrics).
-# run.tearsheet() is the single entry point; the format is chosen from the output
-# extension — `.html` writes a standalone HTML file, anything else writes a PDF.
-path = run.tearsheet()                       # -> '<task_name|run_id>.pdf' in the cwd
+# Tearsheet FILE on disk (equity curve, drawdowns, monthly returns, risk metrics).
+# run.tearsheet() is the single entry point for this — the format is chosen from
+# the output extension: `.html` writes standalone HTML, anything else (including
+# no output= at all) writes a PDF. PDF is the default.
+path = run.tearsheet()                       # -> '<task_name|run_id>.pdf' in the cwd (PDF, default)
 path = run.tearsheet(output='my_report.pdf')
-path = run.tearsheet(output='my_report.html')
+path = run.tearsheet(output='my_report.html')  # explicit opt-in to HTML
 
-# Only when you need the HTML *string* to render inline in a notebook:
+# report.create_tearsheet() is NOT a file-saving method — it returns an HTML/text
+# STRING for inline rendering inside a notebook cell only. Never use it to produce
+# your tearsheet artifact.
 html = report.create_tearsheet()
 # In a Marimo notebook:
 import marimo as mo; mo.md(html)
@@ -868,16 +1113,15 @@ from hiveq.flow.jobs import (
 ```
 
 ### 11.1 Deploy a backtest (high-level)
-Prefer **`hf.run_backtest(..., silent=True)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`). Observe via the Run (`run.wait()`, `run.status()`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
+Prefer **`hf.run_backtest(...)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`; silent deploy is the default). Observe via the Run (`run.wait(progress=False)`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
 
 ```python
 run = hf.run_backtest(strategy_configs=[...], symbols=['AAPL'],
                       start_date='2025-08-01', end_date='2025-08-02',
-                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}],
-                      silent=True)
-report = run.wait().report()                    # block to completion, then read results
+                      data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}])
+report = run.wait(progress=False).report()      # block quietly to completion, then read results
 ```
-For the common backtest case use `run_backtest(..., silent=True)` above; the `jobs` API below remains valid for any job type and for low-level control.
+For the common backtest case use `run_backtest(...)` above; the `jobs` API below remains valid for any job type and for low-level control.
 
 ### 11.2 Generic submit
 ```python
@@ -899,22 +1143,142 @@ get_client() -> _Client                         # low-level transport handle (ad
 ```
 - The platform `GET /logs` accepts `task_id` | `run_id` | `task_name` (one required), plus `limit` / `offset` / `tail` / `format` (`json` default, or `gz` for the whole gzipped log). `get_logs(...)` returns the JSON tail; `get_logs_gz(...)` returns the **complete** log text (or, with `dest`, streams the `.gz` to that path). Prefer the `Run` handle — `run.logs()` / `run.download_logs(path)` (§10.0) — which key off the run's `task_id` for you.
 
-### 11.4 Recommended observe loop (poll status + pull logs)
+### 11.4 Recommended observe pattern
 ```python
-from hiveq.flow.jobs import get_logs
-
 # Preferred: deploy and observe via the Run handle (§10.0).
 run = hf.run_backtest(strategy_configs=[...], symbols=['ES.c.0'],
                       start_date='2024-01-01', end_date='2024-03-01',
                       data_configs=[{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT',
-                                     'schema':['bars_1m']}],
-                      silent=True)
-run.wait()                                       # blocks w/ live progress until terminal
-print('status:', run.status()['status'])
-logs = get_logs(task_id=run.task_id, limit=500)  # for debugging / course-correction
+                                     'schema':['bars_1m']}])
+run.wait(progress=False)                         # block quietly until terminal (R11)
 report = run.report()                            # PerformanceReport on success (§10.1)
 ```
-> Incremental mid-run P&L is not streamed today; status transitions are PENDING→RUNNING→DONE, with the report available on completion. Use `get_logs` for in-flight diagnostics.
+> That is the whole loop for a healthy run — do **not** add a status-polling loop or a log pull to it (R11). If the run failed or misbehaved, switch to the debugging workflow in §11.5 (`run.logs()` / `get_logs(task_id=..., limit=...)` belong there). `run.wait()` with no args renders a live progress bar — for a human at a terminal only.
+
+### 11.5 Debugging strategies
+
+This is the **opt-in escalation path** — reach for it when a run misbehaves (0 trades → R12, crashes, wrong fills) or when the user asks to investigate (e.g. "enable debug/info logging"). Do not run any of it preemptively on healthy runs (R11). Workflow:
+
+**Step 1 — Instrument the strategy with logs before you run it.** Every callback and decision branch should have a `logger.debug(...)` call (§5.9.1). Milestone events (pattern detected, signal set, position opened) also warrant a `ctx.add_event_log(...)` row. If logging is sparse, add it now — re-running is cheaper than guessing.
+
+**Step 2 — Re-run with DEBUG level and OMS echoing on:**
+```python
+run = hf.run_backtest(
+    ...,
+    config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True},
+)
+```
+
+**Step 3 — Guard `run_backtest` so the executor doesn't recurse.** The executor re-imports your script to restore the strategy class. Any unguarded `run_backtest(...)` at module level fires again inside the executor with no data, producing 0 bars. Wrap it:
+```python
+import os
+if __name__ == "__main__" and os.environ.get("HIVEQ_SDK_CLIENT_RUN") == "1":
+    run = hf.run_backtest(...)
+```
+
+**Step 4 — Read the raw executor log** (includes all `logger.*` output and any tracebacks):
+```python
+logs = run.logs()                       # list[str] — the complete executor stdout
+# OR via jobs API (larger limit):
+from hiveq.flow.jobs import get_logs
+logs = get_logs(task_id=run.task_id, limit=5000)
+for entry in logs.get('logs', []):
+    print(entry)
+```
+
+**Step 5 — Read structured event logs** (milestone events written with `ctx.add_event_log`):
+```python
+df = run.event_logs()    # pandas DataFrame; columns: time, symbol, message, …
+print(df[['time','symbol','message']])
+```
+
+**Common root causes checklist:**
+- `on_bar` fires but no orders: the strategy has logging but no actual `ctx.buy_order(...)` call on the signal path — trace with `logger.debug` to confirm the entry condition is reached.
+- 0 bars received: unguarded `run_backtest` at module level (Step 3 above).
+- `logger.debug` silent: using `logging.getLogger(__name__)` instead of the HiveQ logger (§5.9.1).
+- **`logger.info` silent**: expected — the executor default level is `WARNING` (§2.1), so `debug` and `info` lines never appear in a normal run's log. An empty log does NOT mean the strategy didn't run. When debugging, pass `config={'hiveq_log_level': 'DEBUG'}` explicitly (Step 2).
+- Pattern detected but no trade: detection fires on the last bar of the backtest — extend the date range so there are subsequent bars on which to act.
+- **Duplicate `on_bar` deliveries (framework bug, fix pending)**: over multi-week runs the engine has been observed firing `on_bar` 2×–3× for the same daily bar (identical `ts_event`, identical OHLCV, back-to-back within one tick). This is **NOT** caused by per-session re-init (`__init__` runs once — see §16.2) and **NOT** caused by subscription accumulation (`on_start` re-subscribes are deduped internally). It is a framework bug currently pending a fix. Symptoms: rolling deques and SMAs silently drift; strategies that produced trades in a short backtest produce different (or no) trades over longer windows. **Do not** add a permanent `ts_event` dedup to production strategy code; if you must work around it while the fix is in flight, mark it clearly as a temporary local workaround.
+- **Silent stuck position → phantom PnL**: `return_stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.
+
+### 11.6 Deploy an arbitrary script/job (`QUANT_SCRIPTS`) — `deploy_job`
+
+For a plain fetch/compute/publish script (not a `hiveq.flow` strategy) — e.g. pull data with `hiveq.dd.load(...)` and push a signal with `hiveq.dd.save(...)`. This is the `QUANT_SCRIPTS` counterpart to `run_backtest`: same cloudpickle-and-REST capture, no platform-internal package. Unlike `run_function` (§2.2, which blocks and returns the function's value), `deploy_job` is a **stub like `deploy_backtest`** — it submits and returns a handle immediately (`wait=False` is the default).
+
+> **When this is the right tool.** `deploy_job` is for *after* the script's logic is written and working, not for developing it. Write and iterate on the function itself first — call it directly, inspect its output, fix bugs — the ordinary way you develop any Python function, using `hiveq_data` (§14.1) for any data access you need to exercise while iterating (`hiveq.dd`, by contrast, is a stub client-side; its `load`/`save` only do real work once the function is actually running on the platform executor, §14.1). Reach for `deploy_job` once the function is correct and you're ready to run it on the platform itself — either as a one-off to validate it under real platform conditions (sandboxed execution, real data access, real credentials) before committing to a schedule, or to put it into production as a one-off or recurring (`schedule`d) job. It is not a development loop — each call is a full platform round-trip (submit → sandbox → logs), much slower than local iteration.
+
+> **Config: `HIVEQ_API_KEY` only — nothing else.** Exactly like `run_backtest`, identity and data access resolve **server-side** from the API key alone (§3). Do **not** generate code that sets `HIVEQ_DATA_URL`, `HIVEQ_USER_ID`, `HIVEQ_ORG_ID`, or `HIVEQ_USER_NAME` for a `deploy_job` call — none of them are read anywhere on this path. `HIVEQ_DATA_URL` in particular is a `run_backtest`-only concern (it gets baked into the `EngineConfig` the backtest payload carries); `deploy_job` never builds an `EngineConfig`, and the executor gets its own `HIVEQ_DATA_URL` injected server-side regardless of what the client sends. `HIVEQ_BASE_URL` only needs to be set to target a non-default platform host, exactly as with `run_backtest` — not something specific to `deploy_job`.
+
+```python
+from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency
+
+deploy_job(
+    func: Callable, *,
+    task_name: str = None,              # defaults to 'job-<func name>-<short id>'
+    args: tuple = None, kwargs: dict = None,
+    requirements: list[str] = None,     # pip specs installed in the sandbox — best-effort (see caveat below)
+    schedule: Schedule | dict = None,   # recurring execution instead of a one-off run
+    job_type: str = None,
+    metadata: dict = None,
+    wait: bool = False,                 # True -> block for a terminal result before returning
+    allow_duplicate: bool = True, duplicate_action: str = 'override',
+) -> Job
+
+class Job:                              # lighter than Run (§10.0) — no metrics/positions/trades
+    task_id: str; task_name: str
+    status() -> dict                    # full status; falls back to get_result() if the
+                                         # ClickHouse-backed /status route has no row yet
+                                         # (e.g. a schedule that hasn't fired its first run)
+    result() -> dict                    # GET /result/{task_id}
+    logs(limit: int = 1000) -> dict     # tail
+    download_logs(dest: str = None) -> str   # full gzipped log
+    wait(timeout=None, poll_interval=2.0) -> dict   # block for terminal state (not meaningful
+                                         # for a recurring `schedule` job — it never reaches one)
+    terminate() -> dict                 # cancels the schedule too, if any
+```
+
+```python
+import hiveq.flow as hf   # credentials: fully automatic, see §3 — do not add any setup for this
+
+def fetch_aapl():
+    from hiveq import dd
+    from hiveq.dd import DateRange
+
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"],
+                 date=DateRange("2025-08-01", "2025-08-08"))
+    print(f"Fetched {len(df)} rows for AAPL")
+    print(df.to_string())     # ends up in job.logs() / job.download_logs()
+    return {"rows": len(df)}  # ends up in job.result()['result']
+
+# One-off, blocks until it finishes (wait=True), then inspect result + logs:
+job = hf.deploy_job(fetch_aapl, task_name="fetch-aapl-once", wait=True)
+job.result()   # -> {'status': 'completed', 'result': {'rows': 6}, ...}
+job.logs()     # -> the printed DataFrame, exactly as it ran on the executor
+
+# Recurring — fires every day at 16:05 US/Eastern, non-blocking (the default):
+job = hf.deploy_job(
+    fetch_aapl,
+    task_name="fetch-aapl-scheduled",
+    schedule=hf.Schedule(frequency=hf.ScheduleFrequency.DAILY, start_time="16:05",
+                         timezone="US/Eastern"),
+)
+job.status()   # -> {'status': 'scheduled', ...} — check back later; won't reach a terminal state itself
+
+# A fetch + publish version follows the same shape:
+def fetch_and_publish(multiplier=2):
+    from hiveq import dd
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"])
+    dd.save(df, schema="quant_features", key="my_signal")
+    return {"rows": len(df)}
+
+job = hf.deploy_job(fetch_and_publish, task_name="daily-signal", requirements=["pandas"])
+```
+
+`Schedule` fields: `frequency` (`ScheduleFrequency`, §12), `start_time` (`"HH:MM"`/`"HH:MM:SS"`), `timezone` (default `"UTC"`), `days_of_week` (list of `0`=Mon..`6`=Sun, for `WEEKLY`/`INTERVAL`), `day_of_month` (for `MONTHLY`), `end_time`/`interval_minutes` (for `INTERVAL`), `end_date` (`"YYYY-MM-DD"`, stops the schedule entirely), `enabled` (default `True`). A plain dict with the same keys works too — `Schedule` is a convenience dataclass with `.to_dict()`.
+
+> **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them. Whether the install **succeeds** depends on the sandbox's package index being reachable for what you ask for; treat actual installation as environment-dependent rather than guaranteed by the SDK itself.
+
+> **`status()` fallback.** `GET /status/{task_id}` is backed by a task-history pipeline that may not have a row yet for every deployment target — `Job.status()` falls back to `get_result()` automatically in that case, so this is transparent in normal use; it's only worth knowing if you drop to the low-level `get_status()` directly (§11.3).
 
 ---
 
@@ -947,6 +1311,10 @@ from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCe
 
 **time_in_force** (valid strings): `"DAY" "GTC" "IOC" "FOK" "GTX" "GTD" "OPG" "ATC"`
 
+**TaskType** (`from hiveq.flow.jobs import TaskType`; `.value` == name): `QUANT_SCRIPTS HIVEQ_FLOW_BT HIVEQ_FLOW_LIVE_SIM HIVEQ_FLOW_PROD HIVEQ_ALPHA_AI HIVEQ_DEV_OPS_SCRIPTS`
+
+**ScheduleFrequency** (`from hiveq.flow.jobs import ScheduleFrequency`; `.value` == name; §11.6): `ONCE DAILY WEEKDAYS WEEKENDS WEEKLY MONTHLY INTERVAL`
+
 ---
 
 ## 13. Config dataclasses
@@ -962,6 +1330,25 @@ from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig
 | `type` | str | (required — class name, R2) |
 | `symbols` | Optional[List[str]] | None |
 | `params` | Dict[str, Any] | {} |
+
+`params` also recognizes rollover-tuning keys, read only when `BacktestConfig(enable_auto_rollover=True)` (§9.1, §15) — they change how the engine rolls a held futures position, not whether it rolls:
+
+| key | type | default | purpose |
+|---|---|---|---|
+| `rolloverExecutorType` | str | `'POV'` | Executor algo used to exit the old contract / enter the new one: `'POV'` or `'TWAP'`. |
+| `useAutoRollOverNotional` | bool | `False` | `True` sizes the new-contract entry to match the dollar notional of the old position instead of carrying the same contract count. |
+| `rolloverPovMinOrderQty` / `rolloverPovMaxOrderQty` | long | `10` / `100` | POV child-order size bounds (`rolloverExecutorType='POV'` only). |
+| `rolloverPovUpdateIntervalMillis` | long | `20000` | POV re-quote interval (ms). |
+| `rolloverPovVolParticipationPct` | float | `2.0` | POV target participation, % of market volume. |
+| `rolloverPovAggressivePriceMultiplier` | long | `10` | POV aggressive-price tick multiplier. |
+| `rolloverPovTimeDeltaMinutes` | long | `60` | POV executor time budget (minutes). |
+| `rolloverTwapMinOrderQty` / `rolloverTwapMaxOrderQty` | long | `1` / `10` | TWAP child-order size bounds (`rolloverExecutorType='TWAP'` only). |
+| `rolloverTwapUpdateIntervalMillis` | long | `60000` | TWAP re-quote interval (ms). |
+| `rolloverTwapAggressivePriceMultiplier` | long | `1` | TWAP aggressive-price tick multiplier. |
+| `rolloverTwapVolParticipationPct` | float | `0.0` | `0` = pure time-based TWAP; `>0` caps slices by % of market volume. |
+| `rolloverTwapTimeDeltaMinutes` | long | `60` | TWAP executor time budget (minutes). |
+
+e.g. `StrategyConfig(name=..., type=..., params={'rolloverExecutorType': 'TWAP', 'useAutoRollOverNotional': True})`.
 
 **BacktestConfig** (key fields)
 | field | type | default |
@@ -981,6 +1368,7 @@ from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig
 | `crypto_fee` | float | 0.00005 |
 | `session_start` / `session_end` | Optional[str] | None (ET "HH:MM", R6) |
 | `enable_auto_rollover` | bool | False |
+| `auto_flatten_at_close` | bool | False (§15 — force-closes non-option positions at session close; options always settle automatically regardless) |
 | `enable_tca` | bool | False |
 | `export_orders_csv` | bool | False |
 | `extra_config` | Dict[str, Any] | {} |
@@ -1008,6 +1396,7 @@ from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCe
 from hiveq.flow.trading.price_utils import adjust_tick_size, get_min_tick   # round your own limit/stop prices (§5.2)
 from hiveq.flow.utils.date_calendar import TradingCalendar   # trading-day / session helpers (US-only today)
 from hiveq.flow.jobs import submit, poll_result, get_status, get_logs, get_logs_gz, get_result, get_client, TaskType
+from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency, terminate   # arbitrary script deploy + scheduling (§11.6)
 
 # Ancillary: data facade (§14.1 — only when clearly the right tool or user-requested)
 from hiveq import dd                           # keyword-style data load/save/subscribe
@@ -1125,7 +1514,8 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 
 - **Use per-event callbacks** (`on_start`/`on_bar`/`on_order`/…), not a single `on_hiveq_event` — that global form is opt-in only (§4).
 - **There is no `on_order_filled` callback** — handle fills in `on_order` and check `order.is_filled`.
-- **`run_backtest(...)` returns a `Run`, not a `PerformanceReport`** — call `run.report()` (§10.0). For non-blocking deploy use `run_backtest(..., silent=True)`.
+- **`run_backtest(...)` returns a `Run` immediately, not a `PerformanceReport`** — the deploy is non-blocking by default (`silent=True`). Call `run.wait(progress=False)` first, then `run.report()` (§10.0, R11). Reading the report before the run finishes yields empty/partial results (a warning is logged).
+- **A quiet `run.logs()` is normal, and 0 trades is not a result.** The executor log level defaults to `WARNING` (§2.1) so healthy runs log nothing — don't pull logs on a run that behaved (R11). Conversely, a report with `Total Trades == 0` is a failed iteration: debug (§11.5) and fix the entry conditions before presenting anything (R12).
 - **No built-in indicators or rolling-history accessor** — maintain your own `collections.deque` windows and compute with `numpy`/`pandas` (§16). `ctx.instrument(symbol).last_bar` is the only built-in "latest price" accessor.
 - **Sizing helpers exist** (`ctx.close_position`/`order_to_target`/`flatten_all`, §5.2/§16.1) but **percent-of-equity sizing and native brackets do not** — build stop-loss/take-profit as explicit child orders (§16.4).
 - **Match the order mechanism to the need:** a single immediate market order or a signal backtest → direct `buy_order`/`sell_order` (§5.2). Sizeable/sliced orders, live order-chasing/replaces, or auction routing → an **executor** (§5.10/§16.6), which owns slicing/replaces/cancels/fill-aggregation. Don't wrap a one-shot order in an executor; don't hand-roll replace/retry logic when one fits. With executors, hold one handle per target and `replace_executor_params_by_id` to re-target — never `add_executor` a duplicate.
@@ -1133,8 +1523,12 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
 - Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
 - `report.*` DataFrames can be `None`/empty — guard before use.
-- For futures, subscribe by the continuous symbol string in `symbols=`, e.g. `subscribe_futures_bars(symbols=['ES.c.0'])` (or `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES)`). For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it.
+- For futures, subscribe by the continuous symbol string in `symbols=`, e.g. `subscribe_futures_bars(symbols=['ES.c.0'])` (or `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES)`). For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
+- **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.c.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.c.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.c.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.
+- **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`/TBBO), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
+- **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.
 - Set `symbols`/`start_date`/`end_date` in one place (top-level args OR `BacktestConfig`), not both.
+- **A tearsheet file defaults to PDF, not HTML — via `run.tearsheet()`, with no `output=` needed.** Don't reach for `report.create_tearsheet()` to produce a saved report: that method returns an HTML/text *string* meant for inline notebook display (§10.0), and writing that string to a `.html` file yourself is not "the default," it's calling the wrong API. If you actually want an HTML file, pass `run.tearsheet(output='report.html')` explicitly.
 
 ---
 
@@ -1151,7 +1545,7 @@ ctx.order_to_target(symbol, -50)
 ctx.flatten_all()                         # close every open position in this strategy
 ```
 These wrap `net_position` + `buy_order`/`sell_order`; the manual equivalent is `delta = target - ctx.net_position(symbol)` then a buy/sell for `abs(delta)`. **They are transactional** — each skips (returns `None`) when a working order already exists for that symbol, so calling them on every bar will not stack duplicate orders (it converges one fill at a time). If you need to re-price a resting order, `ctx.cancel_all_orders(symbol)` first.
-> Percent-of-equity sizing (`order_target_percent`) is **not available yet** — the portfolio API exposes P&L/exposure but not cash/equity/buying-power (planned; see `docs/ENGINE_GAPS_PLAN.md` G2). Size in fixed quantity, or off `initial_capital` and a price you track yourself.
+> There is **no percent-of-equity sizing** (no `order_target_percent`) — the portfolio API exposes P&L/exposure, not cash/equity/buying-power. Size in fixed quantity, or off `initial_capital` and a price you track yourself.
 
 ### 16.2 Rolling history / lookback (no `ctx.history()`)
 Maintain your own window in strategy state; there is no engine-side history buffer.
@@ -1168,6 +1562,55 @@ class MA:
             sma20 = sum(w) / len(w)
 ```
 `ctx.instrument(symbol).last_bar` returns the most recent bar if you only need the latest price.
+
+#### State across session boundaries
+
+**`__init__` runs once per backtest run** and the same strategy instance
+receives every subsequent `on_start`, `on_bar`, `on_order`, `on_position`,
+and `on_stop`. Use per-instance `self.*` state normally — there is no
+per-session re-instantiation to defend against.
+
+```python
+from collections import deque
+
+
+class DailyMeanReversion:
+    def __init__(self):
+        # __init__ fires ONCE for the whole backtest — all state lives here.
+        self.daily_closes = {}     # symbol -> deque[float]
+        self.current_day = {}      # symbol -> current trading day
+        self.current_day_close = {}
+
+    def on_start(self, ctx, event):
+        # on_start fires once per CALENDAR day (§4), same instance —
+        # ctx.subscribe_* dedupes internally, so re-subscribing is safe.
+        ctx.subscribe_bars(ctx.strategy_config.symbols,
+                           asset_type=AssetType.EQUITY,
+                           interval="1m")
+
+    def on_bar(self, ctx, event):
+        bar = event.data()
+        day = ctx.trading_day
+        if self.current_day.get(bar.symbol) != day:
+            prior_close = self.current_day_close.get(bar.symbol)
+            if prior_close is not None:
+                self.daily_closes.setdefault(
+                    bar.symbol, deque(maxlen=20)
+                ).append(prior_close)
+            self.current_day[bar.symbol] = day
+        self.current_day_close[bar.symbol] = bar.close
+```
+
+State on `self` is run-local process memory: it persists throughout one
+backtest run, but not across separate backtest submissions or separate
+executor containers. For state that must survive across runs, persist it
+through an external store or input data source.
+
+> **Earlier versions of this doc** recommended module-level containers on
+> the grounds that `__init__` re-runs per session. That claim is
+> **retracted** — treat `__init__` as running exactly once per run. If
+> you're on an older executor where you observe repeated `__init__`
+> calls, that's a framework bug, not the documented contract.
 
 ### 16.3 Indicators (no built-in TA library)
 Compute with `numpy`/`pandas` (both are dependencies). Examples over a `deque`/`np.array` of closes:
@@ -1245,3 +1688,105 @@ class ExecAlgo:
 ```
 
 **Key pattern:** keep **one executor per (symbol, slot)** where slots are **`entry` / `exit` / `risk`**. Check `executor_state` before (re)starting a slot, and replace params rather than stacking. Auction exits (`exit=MOC`/`MOO`) map to the `AUCTION` executor with venue routing (§5.2.1).
+
+
+---
+
+# Appendix — HiveQ Flow Data Reference (dataset/schema catalog, referenced by §9)
+
+Use the SDK to print the datasets and schemas available to your account:
+
+```bash
+hiveq datasets
+```
+
+The command reads the HiveQ data API metadata service, backed by the platform's
+table schema metadata. It is not a frozen list in the wheel.
+
+For machine-readable output:
+
+```bash
+hiveq datasets --json
+```
+
+To inspect fields for a dataset/schema pair:
+
+```bash
+hiveq datasets fields HIVEQ_US_EQ bars_1m
+```
+
+To view a small sample:
+
+```bash
+hiveq datasets sample HIVEQ_US_EQ bars_1m --limit 5
+hiveq datasets sample HIVEQ_US_EQ bars_1m --filters '{"symbol":"AAPL"}' --start 2026-06-01 --end 2026-06-01
+```
+
+When `--filters`, `--start`, or `--end` are omitted, the sample command derives
+the minimal required filters from metadata and returns the first non-empty
+sample it can find. Pass explicit filters when you need a specific symbol or
+date range.
+
+Use `--base-url` only when you need to point at a non-default HiveQ data API
+host. The default resolves from `HIVEQ_DATA_URL`, `HIVEQ_BASE_URL`,
+`HIVEQ_AUTH_URL`, then `https://staging.hiveq.ai`.
+
+See §9 for
+the `data_configs` shape used by strategy backtests.
+
+## A.1 Choosing schemas
+
+The exact available datasets, schemas, fields, and sample rows come from
+`hiveq datasets`, `hiveq datasets fields`, and `hiveq datasets sample`.
+
+**Bars vs. trades — coverage matters for correctness:**
+- `bars_*` (aggregated) carry **no trade/auction print** — an
+  auction order (`MOO`/`MOC`/`LOO`/`LOC`) will never fill against them.
+- **Auction orders and auction/POV/TWAP/VWAP executors need a tick-by-tick trade
+  stream** — subscribe with `ctx.subscribe_trades(...)` using `eq_trades`
+  (equities) or `fut_trades` (futures). Never `bars_*`.
+
+## A.2 Published signal and analytics payloads
+
+Rows from signal, cluster, zone, and other analytics schemas arrive at
+`on_custom_data` when wired as custom data. Signal rows may include a
+`signal_json` column with a JSON-encoded payload. Confirm the actual fields with
+`hiveq datasets fields <DATASET> <SCHEMA>`.
+
+```python
+def on_custom_data(self, ctx, event):
+    data = event.data()
+    sig = json.loads(data.column_data("signal_json"))
+    value = sig.get("my_field")
+```
+
+The `symbols` key in the `data_configs` entry selects which stream to subscribe
+to; the entry's `id` must match `ctx.subscribe_data(data_id=...)`.
+
+> Backtesting with your **own** signals? Use a CSV custom data source instead
+> (§9 §9.2) — it fires the same `on_custom_data` callback
+> without the `signal_json` wrapping.
+
+## A.3 Behavior derived from dataset/schema
+
+- schema containing `bar` → bar-based fills; schema with `trade` → tick-based fills.
+- `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
+- `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
+
+## A.4 Examples
+
+```python
+# equities 1-minute bars
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}
+# futures (subscribe to a continuous symbol like 'ES.c.0')
+{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT','schema':['bars_1m']}
+# tick trades for auction fills / executors
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['eq_trades']}
+{'type':'hiveq_historical','dataset':'HIVEQ_US_FUT','schema':['fut_trades']}
+# quant signals (subscribe via ctx.subscribe_data(data_id=...))
+{'type':'hiveq_historical','dataset':'HIVEQ_QUANT_SIGNALS','schema':['signals'],
+ 'id':'mysignals','symbols':['My_Signal_Name']}
+# quant analytics
+{'type':'hiveq_historical','dataset':'HIVEQ_QUANT_CLUSTERS','schema':['clusters'],
+ 'id':'clusters','symbols':['ES.c.0']}
+```

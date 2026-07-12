@@ -1,0 +1,4 @@
+# Canonical docs must ride along in the sdist so wheels built from it
+# can bundle them (see setup.py).
+recursive-include docs *.txt
+recursive-include docs *.md
