@@ -13,6 +13,7 @@
 | `TIMER` | `TimerEventData` | 7.8 |
 | `INDEX_PRICE` | `IndexPrice` | 7.11 |
 | `ROLLOVER` | `Rollover` | 7.12 |
+| `IMBALANCE` | `ImbalanceData` | 7.14 |
 | `EXECUTOR_EVENT` | executor lifecycle payload (opaque) | 7.13 |
 | `SECURITY_EVENT` | security/reference payload (opaque) | 7.13 |
 
@@ -59,6 +60,10 @@
 
 ### 7.12 Rollover
 `continuous_symbol:str`("ES.c.0") · `prev_contract:str`("ESZ5") · `current_contract:str`("ESH6") · `ts_event:int`
+
+### 7.14 ImbalanceData
+Auction imbalance record (NYSE/Arca/Nasdaq imbalance feed; `early_imbalance` schema, HIVEQ_US_EQ). Venue-specific fields are `None` when the publishing venue does not provide them.
+`symbol:str` · `side:str`('B'/'S') · `imbalance:float`(shares) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C', Nasdaq) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
 These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.

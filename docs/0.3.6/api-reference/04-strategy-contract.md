@@ -28,6 +28,7 @@ class MyStrategy:
 | `on_timer` | `TIMER` | `TimerEventData` (§7.8) |
 | `on_custom_data` | `CUSTOM_DATA` | `SigmaCustomData` (§7.9) |
 | `on_index_price` (alias `on_index`) | `INDEX_PRICE` | `IndexPrice` (§7.11) |
+| `on_imbalance` | `IMBALANCE` | `ImbalanceData` (§7.14) — auction imbalance feed; needs the `early_imbalance` schema in `data_configs` |
 | `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
 | `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
 | `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
