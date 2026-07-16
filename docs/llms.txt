@@ -431,6 +431,8 @@ ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional
 #   and handle on_rollover (§7.12) — nothing extra in data_configs.
 ```
 
+> ⚠️ **`bar.symbol` on a continuous-futures subscription is the RESOLVED outright contract** (e.g. `"ESZ5"`), **never** the continuous alias you subscribed with (`"ES.c.0"`). `if bar.symbol != "ES.c.0": return` silently drops every bar — the comparison always fails, `on_bar` runs on nothing, and `Total Trades == 0` with no other error (R12). Do **not** filter with `!=` against the continuous string: either don’t filter at all (if only one instrument is subscribed — every bar you receive is yours), or compare against `ctx.instrument("ES.c.0").current_contract` (§7.10), which tracks the resolved contract across rolls. Full pitfall + workarounds in §15.
+
 ### 5.2 Order placement  (return `Optional[SigmaOrder]`; §7.3)
 ```python
 ctx.buy_order(symbol: str, quantity: float, order_type: OrderType = None,
