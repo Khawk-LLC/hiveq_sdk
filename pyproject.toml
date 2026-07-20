@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,8 +8,14 @@ version = "0.3.7"
 description = "Thin HiveQ Flow client SDK — author strategies and deploy backtests to the HiveQ platform. Ships type stubs + the deploy/observe client only (no engine)."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "HiveQ" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 
 # Thin client deps only — no engine, no polars.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
