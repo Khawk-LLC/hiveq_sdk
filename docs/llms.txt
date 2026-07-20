@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.6`
+- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.7`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
