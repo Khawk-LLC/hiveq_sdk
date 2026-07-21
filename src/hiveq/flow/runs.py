@@ -342,36 +342,43 @@ class Run:
                 from hiveq.flow import jobs
 
                 report = PerformanceReport.from_task_result(jobs.get_result(self.task_id))
-                return self._backfill_orders_and_fills(report)
+                return self._backfill_tabular(report)
             except Exception as e:
                 logger.debug(f"platform result fallback failed: {e}")
 
-        return self._backfill_orders_and_fills(PerformanceReport.from_rest(payload))
+        return self._backfill_tabular(PerformanceReport.from_rest(payload))
 
-    def _backfill_orders_and_fills(self, report):
-        """Populate ``report.orders`` / ``report.fills`` for a remote report.
+    def _backfill_tabular(self, report):
+        """Populate the tabular resources the ``/report`` payload omits.
 
-        The ``GET /runs/{id}/report`` payload carries the summary, returns and
-        PnL scalars but NOT the tabular order resource — orders live at their
-        own ``GET /runs/{id}/orders`` endpoint. Without this, ``report.orders``
-        is empty on remote runs and any fills derived from it come back empty
-        (the bug behind ``run.fills()`` returning nothing). So backfill orders
-        from that endpoint and derive fills from them, making ``report.fills``
-        and :meth:`fills` return identical rows. Best-effort: any REST failure
-        leaves the report as-is.
+        ``GET /runs/{id}/report`` carries the summary, returns and PnL scalars
+        but NOT the per-resource tables — ``orders`` / ``positions`` /
+        ``trades`` each live at their own endpoint. Without this those frames
+        are empty on remote runs (and fills derived from empty orders come back
+        empty — the bug behind ``run.fills()`` returning nothing). So backfill
+        each missing table from its dedicated endpoint, then derive ``fills``
+        from the orders. This keeps ``report.positions`` / ``report.orders`` /
+        ``report.trades`` / ``report.fills`` in lockstep with the ``run.*()``
+        accessors. Best-effort per resource: a REST failure on one leaves that
+        frame as-is.
         """
-        from hiveq.flow.metrics.report import _fills_from_orders
-
-        try:
-            if report.orders is None or self._as_df(report.orders).empty:
-                orders_df = pd.DataFrame(self._reader.orders(self.run_id) or [])
-                if not orders_df.empty:
-                    report.orders = orders_df
-        except Exception as e:
-            logger.debug(f"orders backfill failed: {e}")
+        for attr, fetch in (
+            ("orders", self._reader.orders),
+            ("positions", self._reader.positions),
+            ("trades", self._reader.trades),
+        ):
+            try:
+                if getattr(report, attr, None) is None or self._as_df(getattr(report, attr)).empty:
+                    df = pd.DataFrame(fetch(self.run_id) or [])
+                    if not df.empty:
+                        setattr(report, attr, df)
+            except Exception as e:
+                logger.debug(f"{attr} backfill failed: {e}")
 
         try:
             if report.fills is None or self._as_df(report.fills).empty:
+                from hiveq.flow.metrics.report import _fills_from_orders
+
                 derived = _fills_from_orders(report.orders)
                 if derived is not None:
                     report.fills = derived

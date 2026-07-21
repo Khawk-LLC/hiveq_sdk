@@ -122,11 +122,16 @@ def _rest_orders_real_schema():
 
 
 class _RemoteReaderStub:
-    """Mirrors the platform split: /report has NO orders; /orders does."""
+    """Mirrors the platform split: /report carries no tables; each table has
+    its own endpoint (/orders, /positions, /trades)."""
     def report(self, run_id, include=None):
-        return {"summary": {"Sharpe": 1.1}}          # NO 'orders' key — the real bug
+        return {"summary": {"Sharpe": 1.1}}          # NO tables — the real bug
     def orders(self, run_id, **kw):
         return _rest_orders_real_schema()
+    def positions(self, run_id, **kw):
+        return [{"symbol": "ES.n.0", "quantity": 1, "avg_px_open": 5000.0}]
+    def trades(self, run_id, **kw):
+        return [{"symbol": "ES.n.0", "entry_price": 5000.0, "exit_price": 5010.0, "realized_pnl": 10.0}]
     def status(self, run_id):
         return {"status": "completed", "is_final": True}
 
@@ -149,6 +154,24 @@ def test_run_fills_and_report_fills_are_identical_remote():
     b = run._as_df(run.report().fills)
     assert len(a) == 284 and len(b) == 284
     pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+
+def test_remote_report_tables_consistent_with_run_accessors():
+    # report.{positions,orders,trades,fills} must equal run.{...}() — no gaps.
+    run = Run(run_id="7c45968c")
+    run._reader = _RemoteReaderStub()
+    report = run.report()
+    for attr, method in (
+        ("positions", run.positions),
+        ("orders", run.orders),
+        ("trades", run.trades),
+        ("fills", run.fills),
+    ):
+        rep_df = run._as_df(getattr(report, attr)).reset_index(drop=True)
+        run_df = method().reset_index(drop=True)
+        assert not rep_df.empty, f"report.{attr} is empty"
+        assert not run_df.empty, f"run.{attr}() is empty"
+        pd.testing.assert_frame_equal(rep_df, run_df, obj=f"{attr}")
 
 
 def test_remote_run_fills_derives_from_report(monkeypatch):
