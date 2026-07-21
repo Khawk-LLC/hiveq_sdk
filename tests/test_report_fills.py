@@ -110,6 +110,47 @@ def test_fills_from_orders_by_qty_when_no_status_column():
     assert out.iloc[0]["order_id"] == "1"
 
 
+def _rest_orders_real_schema():
+    # The actual GET /runs/{id}/orders payload schema (lowercase snake_case,
+    # status == "FILLED"), captured from a live platform run.
+    return [
+        {"order_id": str(i), "symbol": "ES.n.0", "side": "BUY" if i % 2 else "SELL",
+         "quantity": 1, "filled_qty": 1, "leaves_qty": 0, "avg_px": 5000.0 + i,
+         "status": "FILLED", "commissions": 0.5}
+        for i in range(284)
+    ]
+
+
+class _RemoteReaderStub:
+    """Mirrors the platform split: /report has NO orders; /orders does."""
+    def report(self, run_id, include=None):
+        return {"summary": {"Sharpe": 1.1}}          # NO 'orders' key — the real bug
+    def orders(self, run_id, **kw):
+        return _rest_orders_real_schema()
+    def status(self, run_id):
+        return {"status": "completed", "is_final": True}
+
+
+def test_remote_report_backfills_orders_and_fills():
+    # Reproduces the .164 bug: /report omits orders, so report.orders/fills were
+    # empty even though /orders had 284 rows. report() must backfill + derive.
+    run = Run(run_id="7c45968c")
+    run._reader = _RemoteReaderStub()
+    report = run.report()
+    assert len(run._as_df(report.orders)) == 284
+    assert report.fills is not None and len(report.fills) == 284
+
+
+def test_run_fills_and_report_fills_are_identical_remote():
+    # The explicit requirement: run.fills() == run.report().fills.
+    run = Run(run_id="7c45968c")
+    run._reader = _RemoteReaderStub()
+    a = run.fills()
+    b = run._as_df(run.report().fills)
+    assert len(a) == 284 and len(b) == 284
+    pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+
 def test_remote_run_fills_derives_from_report(monkeypatch):
     # Remote runs have no /fills REST endpoint: run.fills() must read off
     # report().fills. Stub report() so the test stays offline.

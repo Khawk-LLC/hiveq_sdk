@@ -341,11 +341,44 @@ class Run:
             try:
                 from hiveq.flow import jobs
 
-                return PerformanceReport.from_task_result(jobs.get_result(self.task_id))
+                report = PerformanceReport.from_task_result(jobs.get_result(self.task_id))
+                return self._backfill_orders_and_fills(report)
             except Exception as e:
                 logger.debug(f"platform result fallback failed: {e}")
 
-        return PerformanceReport.from_rest(payload)
+        return self._backfill_orders_and_fills(PerformanceReport.from_rest(payload))
+
+    def _backfill_orders_and_fills(self, report):
+        """Populate ``report.orders`` / ``report.fills`` for a remote report.
+
+        The ``GET /runs/{id}/report`` payload carries the summary, returns and
+        PnL scalars but NOT the tabular order resource — orders live at their
+        own ``GET /runs/{id}/orders`` endpoint. Without this, ``report.orders``
+        is empty on remote runs and any fills derived from it come back empty
+        (the bug behind ``run.fills()`` returning nothing). So backfill orders
+        from that endpoint and derive fills from them, making ``report.fills``
+        and :meth:`fills` return identical rows. Best-effort: any REST failure
+        leaves the report as-is.
+        """
+        from hiveq.flow.metrics.report import _fills_from_orders
+
+        try:
+            if report.orders is None or self._as_df(report.orders).empty:
+                orders_df = pd.DataFrame(self._reader.orders(self.run_id) or [])
+                if not orders_df.empty:
+                    report.orders = orders_df
+        except Exception as e:
+            logger.debug(f"orders backfill failed: {e}")
+
+        try:
+            if report.fills is None or self._as_df(report.fills).empty:
+                derived = _fills_from_orders(report.orders)
+                if derived is not None:
+                    report.fills = derived
+        except Exception as e:
+            logger.debug(f"fills derivation failed: {e}")
+
+        return report
 
     def tearsheet(self, output: Optional[str] = None) -> str:
         """Render the performance tearsheet for this run to a file.
@@ -420,13 +453,13 @@ class Run:
     def fills(self) -> pd.DataFrame:
         """Order fills for this run as a DataFrame (empty if none).
 
-        Unlike positions/orders/trades there is no dedicated ``/fills`` REST
-        resource — each order already carries its cumulative fill state. So
-        fills are read off the run's ``PerformanceReport.fills`` and, when that
-        is empty, derived by filtering the orders frame down to the ones that
-        actually executed (see ``metrics.report._fills_from_orders``). ``report``
-        is the in-process report for local runs, the ``GET /runs/{id}/report``
-        payload for remote runs.
+        Returns exactly the same rows as ``run.report().fills``. There is no
+        dedicated ``/fills`` REST resource — each order already carries its
+        fill state — so fills are the executed subset of the orders, derived by
+        filtering (see ``metrics.report._fills_from_orders``). For remote runs
+        :meth:`report` backfills orders from the ``/orders`` endpoint and derives
+        fills there; for local runs the in-process report supplies them (with the
+        same derivation as a fallback).
         """
         from hiveq.flow.metrics.report import _fills_from_orders
 
