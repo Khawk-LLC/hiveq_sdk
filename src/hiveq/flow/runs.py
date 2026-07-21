@@ -6,7 +6,7 @@ REST endpoints so the SDK "feels like" the API:
 
     run = hf.run_backtest(...)        # blocks with a live progress line, returns Run
     run.report()                      # GET /runs/{id}/report  -> PerformanceReport
-    run.positions(); run.orders(); run.trades()
+    run.positions(); run.orders(); run.trades(); run.fills()
     run.daily_returns(); run.equity_curve(); run.metrics(); run.summary()
     run.tearsheet()                   # quantstats HTML tearsheet
     run.status(); run.event_logs(); run.logs(); run.wait()
@@ -416,6 +416,19 @@ class Run:
         if self.is_local:
             return self._as_df(self._local_report.orders)
         return pd.DataFrame(self._reader.orders(self.run_id, **kw) or [])
+
+    def fills(self) -> pd.DataFrame:
+        """Order fills for this run as a DataFrame (empty if none).
+
+        Unlike positions/orders/trades there is no dedicated ``/fills`` REST
+        resource, so fills are read off the run's ``PerformanceReport.fills``:
+        the in-process report for local runs, the ``GET /runs/{id}/report``
+        payload for remote runs. Use ``run.orders()`` for the per-order view
+        (each order carries its cumulative ``filled_qty``).
+        """
+        if self.is_local:
+            return self._as_df(self._local_report.fills)
+        return self._as_df(self.report().fills)
 
     def trades(self, **kw) -> pd.DataFrame:
         if self.is_local:

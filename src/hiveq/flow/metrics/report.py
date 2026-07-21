@@ -402,6 +402,7 @@ class PerformanceReport:
             return_stats=return_stats,
             returns_series=returns_series,
             positions=_df(payload.get("positions")),
+            fills=_df(payload.get("fills")),
             trades=_df(payload.get("trades")),
             orders=_df(payload.get("orders")),
             daily_returns=daily_df,
