@@ -132,34 +132,33 @@ def logger(show_logo: bool = True) -> logging.Logger:
             for line in logo_lines:
                 hiveq_logger.info(line)
 
-            # Version of whichever distribution provides this package. Try the
-            # full engine ("hiveq-flow") first, then the thin client
-            # ("hiveq-sdk") explicitly -- both may be present. Only fall back to
-            # "whichever distribution shares the `hiveq` namespace" as a last
-            # resort: other unrelated packages (HiveQDataDriver, hiveq-orchestrator)
-            # also install files under `hiveq/`, so grabbing the first one blindly
-            # can print an unrelated package's version (observed: HiveQDataDriver's
-            # "1.0.0" shown instead of hiveq-sdk's own version when both share an
-            # environment).
-            flow_version = None
+            # This is the thin client, so report the CLIENT (hiveq-sdk) version.
+            # Try "hiveq-sdk" first, then the full engine "hiveq-flow" as a
+            # fallback for engine-side installs. Only fall back to "whichever
+            # distribution shares the `hiveq` namespace" as a last resort: other
+            # unrelated packages (HiveQDataDriver, hiveq-orchestrator) also install
+            # files under `hiveq/`, so grabbing the first one blindly can print an
+            # unrelated package's version (observed: HiveQDataDriver's "1.0.0"
+            # shown instead of the client's own version when both share an env).
+            client_version = None
             try:
                 from importlib.metadata import version, PackageNotFoundError, packages_distributions
-                for _known in ("hiveq-flow", "hiveq-sdk"):
+                for _known in ("hiveq-sdk", "hiveq-flow"):
                     try:
-                        flow_version = version(_known)
+                        client_version = version(_known)
                         break
                     except PackageNotFoundError:
                         continue
-                if flow_version is None:
+                if client_version is None:
                     for _dist in packages_distributions().get("hiveq", []):
                         try:
-                            flow_version = version(_dist)
+                            client_version = version(_dist)
                             break
                         except PackageNotFoundError:
                             continue
             except Exception:
                 pass
-            hiveq_logger.info(f"         HiveQ Flow v{flow_version or '0.1.0'}               ")
+            hiveq_logger.info(f"         HIVEQ Client {client_version or '1.0.0'}               ")
             hiveq_logger.info("==========================================")
 
             _logo_displayed = True

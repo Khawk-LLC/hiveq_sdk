@@ -421,14 +421,22 @@ class Run:
         """Order fills for this run as a DataFrame (empty if none).
 
         Unlike positions/orders/trades there is no dedicated ``/fills`` REST
-        resource, so fills are read off the run's ``PerformanceReport.fills``:
-        the in-process report for local runs, the ``GET /runs/{id}/report``
-        payload for remote runs. Use ``run.orders()`` for the per-order view
-        (each order carries its cumulative ``filled_qty``).
+        resource — each order already carries its cumulative fill state. So
+        fills are read off the run's ``PerformanceReport.fills`` and, when that
+        is empty, derived by filtering the orders frame down to the ones that
+        actually executed (see ``metrics.report._fills_from_orders``). ``report``
+        is the in-process report for local runs, the ``GET /runs/{id}/report``
+        payload for remote runs.
         """
-        if self.is_local:
-            return self._as_df(self._local_report.fills)
-        return self._as_df(self.report().fills)
+        from hiveq.flow.metrics.report import _fills_from_orders
+
+        report = self._local_report if self.is_local else self.report()
+        fills = self._as_df(getattr(report, "fills", None))
+        if fills.empty:
+            derived = _fills_from_orders(self._as_df(getattr(report, "orders", None)))
+            if derived is not None and not derived.empty:
+                return derived
+        return fills
 
     def trades(self, **kw) -> pd.DataFrame:
         if self.is_local:

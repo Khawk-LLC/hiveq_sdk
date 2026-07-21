@@ -209,6 +209,52 @@ def _create_no_data_html(title: str = "Strategy Performance Report", message: st
 </html>"""
 
 
+def _first_col(df: pd.DataFrame, candidates) -> Optional[str]:
+    """Return the first of ``candidates`` present in ``df`` (case-insensitive)."""
+    lower = {c.lower(): c for c in df.columns}
+    for name in candidates:
+        if name in lower:
+            return lower[name]
+    return None
+
+
+def _fills_from_orders(orders) -> Optional[pd.DataFrame]:
+    """Derive an executed-fills view by filtering the orders frame.
+
+    The platform exposes no dedicated fills resource — each order row already
+    carries its cumulative fill state (``SigmaOrder``: ``filled_qty``,
+    ``avg_px``, ``status`` …). "Fills" is therefore the subset of orders that
+    actually executed (``status`` FILLED / PARTIALLY_FILLED, else
+    ``is_filled``, else ``filled_qty > 0``). Column names are matched
+    case-insensitively against known REST variants. Returns ``None`` when
+    there are no orders or no recognizable fill signal; an empty frame when
+    orders exist but nothing executed.
+    """
+    if not isinstance(orders, pd.DataFrame) or orders.empty:
+        return None
+
+    status_col = _first_col(orders, ("status", "order_status", "ord_status"))
+    flag_col = _first_col(orders, ("is_filled",))
+    qty_col = _first_col(
+        orders,
+        ("filled_qty", "filled_quantity", "cum_qty", "cumulative_qty", "last_qty"),
+    )
+
+    if status_col is not None:
+        # FILLED and PARTIALLY_FILLED both executed; REJECTED/CANCELED (no
+        # partial) did not. Substring match tolerates enum prefixes/casing.
+        mask = orders[status_col].astype(str).str.upper().str.contains("FILL")
+    elif flag_col is not None:
+        mask = orders[flag_col].astype(bool)
+    elif qty_col is not None:
+        mask = pd.to_numeric(orders[qty_col], errors="coerce").fillna(0) > 0
+    else:
+        logging.debug("orders frame has no fill-signal column; cannot derive fills")
+        return None
+
+    return orders[mask].reset_index(drop=True)
+
+
 @dataclass
 class PerformanceReport:
     """Backtest performance report containing metrics, returns, and trade history.
@@ -398,13 +444,21 @@ class PerformanceReport:
         total_fees_val = _strat_sum("total_commission") or _strat_sum("fees")
         net_pnl_val = _strat_sum("total_pnl")
 
+        # Fills have no dedicated REST resource: prefer an explicit ``fills``
+        # payload if the platform ever sends one, else derive the executed
+        # subset from the orders frame (see _fills_from_orders).
+        orders_df = _df(payload.get("orders"))
+        fills_df = _df(payload.get("fills"))
+        if fills_df is None or fills_df.empty:
+            fills_df = _fills_from_orders(orders_df)
+
         return cls(
             return_stats=return_stats,
             returns_series=returns_series,
             positions=_df(payload.get("positions")),
-            fills=_df(payload.get("fills")),
+            fills=fills_df,
             trades=_df(payload.get("trades")),
-            orders=_df(payload.get("orders")),
+            orders=orders_df,
             daily_returns=daily_df,
             strategy_stats=strat_df,
             run_info=_df([payload.get("config")] if payload.get("config") else None),

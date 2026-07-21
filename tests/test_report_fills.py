@@ -52,6 +52,64 @@ def test_local_run_fills_none_yields_empty_frame():
     assert out.empty
 
 
+def _platform_orders():
+    # Mirrors the SigmaOrder REST shape (docs §7.3): a mix of executed and
+    # non-executed orders, like a real /report orders payload.
+    return [
+        {"order_id": "1", "symbol": "AAPL", "side": "BUY", "status": "FILLED",
+         "filled_qty": 100, "avg_px": 190.0, "commission": 0.11},
+        {"order_id": "2", "symbol": "AAPL", "side": "SELL", "status": "PARTIALLY_FILLED",
+         "filled_qty": 50, "avg_px": 191.0, "commission": 0.06},
+        {"order_id": "3", "symbol": "AAPL", "side": "BUY", "status": "CANCELED",
+         "filled_qty": 0, "avg_px": None, "commission": 0.0},
+        {"order_id": "4", "symbol": "AAPL", "side": "BUY", "status": "REJECTED",
+         "filled_qty": 0, "avg_px": None, "commission": 0.0},
+    ]
+
+
+def test_from_rest_derives_fills_from_orders_when_no_fills_key():
+    # The real platform case: orders come through, no `fills` key -> derive.
+    report = PerformanceReport.from_rest({"orders": _platform_orders()})
+    assert report.orders is not None and len(report.orders) == 4
+    assert report.fills is not None
+    # Only FILLED + PARTIALLY_FILLED executed.
+    assert len(report.fills) == 2
+    assert set(report.fills["status"]) == {"FILLED", "PARTIALLY_FILLED"}
+
+
+def test_explicit_fills_payload_takes_precedence_over_orders():
+    payload = {
+        "orders": _platform_orders(),
+        "fills": [{"execution_id": "e1", "symbol": "AAPL", "last_qty": 100, "last_px": 190.0}],
+    }
+    report = PerformanceReport.from_rest(payload)
+    assert "execution_id" in report.fills.columns
+    assert len(report.fills) == 1
+
+
+def test_run_fills_derives_when_report_fills_empty():
+    # Local report with orders but no fills attr set -> run.fills() derives.
+    orders = pd.DataFrame(_platform_orders())
+    report = PerformanceReport(orders=orders)  # fills defaults to None
+    run = Run(run_id="local-derive", report=report)
+    out = run.fills()
+    assert len(out) == 2
+    assert set(out["status"]) == {"FILLED", "PARTIALLY_FILLED"}
+
+
+def test_fills_from_orders_by_qty_when_no_status_column():
+    # Fallback path: no status/is_filled column, filter on filled_qty > 0.
+    orders = pd.DataFrame([
+        {"order_id": "1", "filled_qty": 10},
+        {"order_id": "2", "filled_qty": 0},
+    ])
+    report = PerformanceReport(orders=orders)
+    run = Run(run_id="local-qty", report=report)
+    out = run.fills()
+    assert len(out) == 1
+    assert out.iloc[0]["order_id"] == "1"
+
+
 def test_remote_run_fills_derives_from_report(monkeypatch):
     # Remote runs have no /fills REST endpoint: run.fills() must read off
     # report().fills. Stub report() so the test stays offline.

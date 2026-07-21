@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `0.3.8`
+- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `1.0.0`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -1017,7 +1017,7 @@ run.wait(timeout=None, poll_interval=1.0, progress=True) -> Run   # block until 
 run.status() -> dict                       # {'status': 'PENDING'|'RUNNING'|'DONE'|'FAILED'|..., ...}
 run.report(include: Optional[list[str]] = None) -> PerformanceReport   # §10.1
 run.positions() / run.orders() / run.trades() / run.fills() / run.daily_returns() / run.equity_curve() / run.metrics() / run.event_logs() -> pandas.DataFrame
-#   run.fills() has no dedicated REST resource — it is read off run.report().fills. Use run.orders() for the per-order view (cumulative filled_qty).
+#   run.fills() has no dedicated REST resource — fills are derived in the SDK by filtering run.orders() down to the executed orders (status FILLED/PARTIALLY_FILLED). Same rows as run.report().fills.
 run.summary() -> dict
 run.overview() -> dict
 run.tearsheet(output: Optional[str] = None) -> str   # writes a quantstats tearsheet file; returns the path. Format from extension: .html -> HTML, anything else -> PDF. Default name: <task_name|run_id>.pdf
