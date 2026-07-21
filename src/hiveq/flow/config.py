@@ -246,10 +246,15 @@ class MarketSessionDefaults:
     All times are in the configured timezone (default: America/New_York / EST).
     These are used internally by OMS adapters for proper market simulation.
     """
-    # Equity order acceptance window (pre-market to after-hours)
-    # Starts at pre-market open so orders placed during pre-market are held in book
+    # Equity order acceptance window (pre-market open through early after-hours).
+    # Starts at pre-market open so orders placed during pre-market are held in
+    # book; ends at 18:30 — comfortably past the 16:00 close so resting
+    # MOC / closing-cross orders survive to fill against the official close
+    # print (~16:00:00.1x ET) rather than being cancelled at session end.
+    # Users can narrow or widen this via BacktestConfig(session_start=...,
+    # session_end=...).
     equity_session_start: str = "04:00"
-    equity_session_end: str = "20:00"
+    equity_session_end: str = "18:30"
 
     # Equity extended hours
     equity_pre_market_start: str = "04:00"

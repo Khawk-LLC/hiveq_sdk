@@ -1369,7 +1369,7 @@ e.g. `StrategyConfig(name=..., type=..., params={'rolloverExecutorType': 'TWAP',
 | `equity_fee` | float | 0.0011 (per share) |
 | `futures_fee` | float | 0.5 (per contract) |
 | `crypto_fee` | float | 0.00005 |
-| `session_start` / `session_end` | Optional[str] | None (ET "HH:MM", R6) |
+| `session_start` / `session_end` | Optional[str] | None → applies asset defaults: equity **04:00–18:30 ET**, futures **18:00–17:00 ET**. Override with these (ET "HH:MM", R6). Keep `session_end` past 16:00 for equities so MOC/closing-cross orders fill. |
 | `enable_auto_rollover` | bool | False |
 | `auto_flatten_at_close` | bool | False (§15 — force-closes non-option positions at session close; options always settle automatically regardless) |
 | `enable_tca` | bool | False |
@@ -1773,6 +1773,7 @@ to; the entry's `id` must match `ctx.subscribe_data(data_id=...)`.
 ## A.3 Behavior derived from dataset/schema
 
 - schema containing `bar` → bar-based fills; schema with `trade` → tick-based fills.
+- `dataset='HIVEQ_US_EQ'` → equity session defaults (**04:00–18:30 ET**) applied automatically. The window opens at pre-market and runs past the 16:00 close **on purpose**: a resting MOC / closing-cross order fills against the official close print (`MCOfficialClose`, ~16:00:00.1x ET) instead of being cancelled at session end. Narrow or widen it via `BacktestConfig(session_start=..., session_end=...)`.
 - `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
 - `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
 
