@@ -252,6 +252,51 @@ The data is now available in `csv/bars/AAPL/2025.10.14.csv` (under the configure
 Ensure that the dataframe column names match the names passed in as the named
 tuple. The cache driver uses those column names to filter and store data.
 
+### Filtering the result (`filter_columns` + `filterMap`)
+
+Both `dd.load()` and `dd.save()` accept **`filter_columns`** (default `False`).
+When set `True`, the driver filters the frame down to the values in your
+`params_tuple` — useful when a cache file holds a whole day/symbol set but you
+only want the requested window.
+
+Matching is by **field type**, mirroring the params_tuple convention:
+
+- a `DateRange` field → keep rows within `[start, end]`
+- a `TimeRange` field → keep rows within the intraday window
+- a list → `isin(...)`; a scalar → equality
+
+By default each params_tuple **field name** must match a DataFrame column. When
+they differ, map them with **`filterMap`** — semicolon-separated
+`paramField=dfColumn` pairs (params-tuple field on the left, actual column on
+the right):
+
+```ini
+[EqBars]
+primary   = HiveQBars1m
+cache     = EqBarsCSV
+
+[EqBarsCSV]
+transport = CSV
+file      = csv/bars/{date:%Y.%m.%d}.csv
+filterMap = sym=symbol;date=trade_date   ; params field → df column
+```
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq import Cache
+from hiveq.datetime import DateRange
+
+Params = collections.namedtuple('Params', ['date', 'sym'])
+params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL', 'MSFT'])
+
+# returns only AAPL/MSFT rows for 2025-10-14, matched to df columns via filterMap
+df = dd.load('EqBars', params_tuple=params, cache=Cache.ONLY_CACHE, filter_columns=True)
+```
+
+> A params field whose (mapped) column is absent from the frame is skipped with
+> a warning — filtering never empties the frame just because a column is missing.
+
 ---
 
 ## 7. Better parameter handling — passing params as a list
@@ -612,6 +657,64 @@ dd.save('BacktestOutput', results_df)
 **Credentials:** the SDK publish path requires `HIVEQ_API_KEY` and `baseUrl`,
 resolved the same way as the pull path (section → `[HiveQ]` → `[default]` →
 env). See Configuration (§2).
+
+### Save-time column mapping (`outputColumns` / `columnMap`)
+
+When a target (`primary`/`cache`) section declares **`outputColumns`**,
+`dd.save()` reshapes the DataFrame into a fixed destination schema *before*
+handing it to the transport. This runs for **any** transport (CSV, HDF5, HiveQ,
+KDB) — the mapping happens in the driver, not the backend. Without
+`outputColumns`, `save` writes the frame through unchanged (direct mapping).
+
+Two properties drive it:
+
+- **`outputColumns`** — comma-separated `name=type` pairs declaring the
+  destination columns and their types. Any declared column not supplied by the
+  frame is filled with a default: `str`/`symbol` → empty string, anything else
+  → `NaN`.
+- **`columnMap`** — semicolon-separated `dest=source` pairs mapping each
+  destination column to the source DataFrame column it comes from. Every
+  `source` must exist in the frame, or `save` raises `Column not found`.
+
+The driver also stamps a few standard fields:
+
+| Field | Source |
+|---|---|
+| `sym` | the section's **`name`** property (required, non-empty), or the frame's `name` column if present |
+| `ticker`, `norm_ticker` | the section's **`symbol`** property (required when the frame has no `ticker` column) |
+| `root` | the section's `root` property (optional) |
+| `time` | current `HH:MM:SS` if not mapped |
+| `recv_time` | current `HH:MM:SS` |
+
+**`requiredFields`** (optional, comma-separated) validates the shaped frame: if
+any listed field is missing or contains nulls, `save` fires an error alert and
+returns `None` (the batch is rejected).
+
+```ini
+[ModelOutput]
+cache = MappedCSV
+
+[MappedCSV]
+transport      = CSV
+name           = my_model            ; required — becomes the `sym` column
+symbol         = ES.c.0              ; required when the frame has no `ticker`
+outputColumns  = signal1=float,signal2=float,flag=str
+columnMap      = signal1=sig1;signal2=sig2;flag=state
+requiredFields = signal1,signal2
+file           = csv/out/{date:%Y.%m.%d}.csv
+```
+
+```python
+import hiveq.driver as dd
+# frame has columns sig1, sig2, state → written as signal1, signal2, flag
+# (plus the stamped sym, ticker, time, recv_time, …)
+dd.save('ModelOutput', model_df)
+```
+
+> This is a legacy output-shaping path (originally used to map model output onto
+> a fixed kdb+ schema). For live streaming or plain persistence prefer the
+> WebSocket or SDK/REST publish paths above; reach for `columnMap` when you must
+> land a frame in a specific pre-defined column layout.
 
 ### Saving output to CSV
 
@@ -1079,6 +1182,19 @@ activates WS path), `keyField` (per-row key column), `key` (static fallback),
 `[default] baseCSVPath`.
 **HDF5:** `store`, `key` (templated), `enableCompression`, `compression`,
 `compression_level`, `minSizeItems`; root `[default] storeBasePath`.
+**Output shaping (`save`, any transport):** `outputColumns` (`name=type`,…),
+`columnMap` (`dest=source`;…), `name`, `symbol`, `root`, `ticker`,
+`requiredFields`. See Save-time column mapping (§9).
+**Result filtering (any transport):** `filterMap` (`paramField=dfColumn`;…),
+applied when `load`/`save` is called with `filter_columns=True` (§6).
+
+### `load` / `save` arguments
+
+`dd.load(data_source_id, params_tuple=, cache=, time_out=, filter_columns=,
+drop_duplicates=, in_memory=)` and `dd.save(data_source_id, df, params_tuple=,
+append=, filter_columns=, in_memory=)`. `filter_columns` applies the section's
+`filterMap` (§6); `drop_duplicates` takes a column list; `append` appends to
+file transports; `in_memory` keeps the frame in process memory.
 
 ### Cache modes (`hiveq.Cache`)
 
