@@ -14,14 +14,15 @@ The feed (examples/userdata/user_signals.csv) has columns
 
 Run:  python custom_data.py
 """
-from pathlib import Path
-
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
 
 DATA_ID = "UserData"             # must match data_configs 'id' + subscribe_data(data_id=...)
-CSV_PATH = str(Path(__file__).resolve().parent / "userdata" / "user_signals.csv")
+# Platform object-storage path. Upload from the examples directory with:
+#   cd userdata && hiveq-data -u user_signals.csv
+# Absolute local paths do not exist inside the remote executor.
+CSV_PATH = "user_signals.csv"
 
 
 class CustomData:

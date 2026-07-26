@@ -406,7 +406,10 @@ ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = Asset
 ctx.subscribe_trades(symbols: List[str], asset_type: AssetType = AssetType.EQUITY)  # trades; with the `tbbo` schema, quotes arrive too (on_quote)
 ctx.subscribe_data(data_id: str, signals: List[str] = None)               # custom / signal data → on_custom_data
 #   data_id must match the 'id' field in data_configs (CSV or HIVEQ_QUANT_SIGNALS).
-#   signals: optional list of signal names to filter; None subscribes to all.
+#   For historical HIVEQ_QUANT_SIGNALS filtering, put signal names in the
+#   matching data_configs entry's 'symbols' list. The optional signals argument
+#   is a subscription hint used by runtimes that support dynamic prefetch; do
+#   not rely on it as the only historical server-side filter.
 ctx.subscribe_index(symbols: List[str])                                   # spot index value
 ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
 ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C'|'P'|'CALL'|'PUT'
@@ -743,7 +746,15 @@ event.time_utc    -> Optional[datetime] # UTC
 
 **CSV custom data** (`data_type='custom'`): every column in your CSV is accessible by name via `column_data()`. The engine uses `date` + `time` columns (or a `timestamp` column) to determine when each row fires during the backtest; all other columns are user-defined.
 
-**HIVEQ_QUANT_SIGNALS**: rows arrive with a `signal_json` column containing a JSON-encoded string. Parse it with `json.loads(data.column_data("signal_json"))` to access signal fields.
+**HIVEQ_QUANT_SIGNALS**: rows arrive with a `signal_json` column containing a
+JSON-encoded string. The current Sigma CSV bridge may escape quotes and replace
+commas inside a column value with `|`; normalize both forms before parsing:
+
+```python
+raw = data.column_data("signal_json")
+normalized = raw.replace(r'\"', '"').replace('|', ',')
+signal = json.loads(normalized)
+```
 
 ### 7.10 SigmaInstrument  (`ctx.instrument(symbol)`)
 `symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume`)
@@ -805,6 +816,7 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 | `dataset` | str | dataset code — see §A.1 in the Data Reference appendix for the full list (`HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_QUANT_SIGNALS`, …). |
 | `schema` | list[str] \| str | one or more exact schema codes — see §A.2 in the Data Reference appendix for the full list (`bars_1m`, `eq_trades`, `fut_trades`, `tbbo`, …) and coverage caveats (bar granularities, auction prints, executor tick-stream requirement). |
 | `id` | str (opt) | identifier referenced by `ctx.subscribe_data(data_id=...)` for signal/custom sources |
+| `symbols` | list[str] (opt) | dataset row selectors. For `HIVEQ_QUANT_SIGNALS`, these are signal names such as `Prillach_MC_ES`, not the logical `id`. The dataset registry determines the physical filter column. |
 | `enabled` | bool (opt) | default `True` |
 
 ```python
@@ -819,6 +831,19 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 ```
 
 **`HIVEQ_QUANT_SIGNALS`** delivers platform-hosted signal data to `on_custom_data` — see §A.3 in the Data Reference appendix for the `signal_json` payload format.
+
+Keep the source name and the selected signal names distinct:
+
+```text
+id       = user-chosen logical source name; referenced by ctx.subscribe_data()
+symbols  = existing signal names selected from the historical dataset
+key      = live transport topic key; normally supplied by deployment metadata
+```
+
+For example, `id='my_signals'` names the configured source, while
+`symbols=['Prillach_MC_ES']` selects rows whose signal symbol is
+`Prillach_MC_ES`. Avoid giving `id` and a selected signal the same value in
+examples because that hides their different roles.
 
 > **Backtest with your own signals?** Use a CSV custom data source instead (§9.2) — it fires the same `on_custom_data` callback. Put your signal fields as columns in the CSV and read them with `column_data()`. No `signal_json` wrapping needed.
 
@@ -837,10 +862,10 @@ on existing configs).
 | `dataset` | str | Dataset code to query, e.g. `'HIVEQ_QUANT_CLUSTERS'`. |
 | `schema` | str | Schema code to query, e.g. `'clusters'`. |
 | `symbols` | str, comma-separated | Symbol/identifier filter values, e.g. `'ES.c.0'` or `'ES.c.0,NQ.c.0'`. Opaque by default (signal name, zone tag, etc.) unless a resolution mode below is set. |
-| `symbolFilterKey` | str | The request-body field name `symbols` is sent under — dataset-dependent (`'symbol'` for `HIVEQ_QUANT_SIGNALS`, `'sym'` for `HIVEQ_QUANT_CLUSTERS`/`_MODES`). **Not** a list — one field name applies to the whole `symbols` array. |
+| `symbolFilterKey` | str | The request-body field name `symbols` is sent under — dataset-dependent (`'symbol'` for `HIVEQ_QUANT_SIGNALS` and `HIVEQ_QUANT_CLUSTERS_MODES`; `'sym'` for `HIVEQ_QUANT_CLUSTERS`). **Not** a list — one field name applies to the whole `symbols` array. |
 | `symbolsAreFuturesContracts` | bool | Legacy flag. `True`/`'true'` resolves `symbols` as `<ROOT>.c.<N>` continuous contracts (dated contract + Nanex translation, re-resolved per backtest day). Superseded by `symbolResolutionMode` below when both are set. |
 | `symbolResolutionMode` | str | `'continuous_contract'` (same as `symbolsAreFuturesContracts: True`), `'root_symbol'` (strip the `.c.<N>` suffix, use the bare root, no per-date lookup or Nanex translation), or `'option'` (reserved — logs a warning and falls back to unresolved symbols). Unset defaults to `continuous_contract`/`none` based on `symbolsAreFuturesContracts`. |
-| `timestampColumn` | str | Overrides the row column used as the event timestamp. Default (unset) guesses from `ts_event` > `db_event` > `time`, in that preference order. Set this when a table's timestamp column doesn't match any of those three names. |
+| `timestampColumn` | str | Overrides the row column used as the event timestamp. Default (unset) guesses from `ts_event` > `db_event` > `time`, in that preference order. Set this when a table uses another name. For example, `clusters_v1` exposes `time`, `recv_event_ts`, and `db_event_ts`; choose `db_event_ts` explicitly when delivery/arrival time is intended. |
 | `extraFilters` | str, comma-separated `col=val` pairs | Arbitrary hardcoded column=value literal filters merged into the query alongside `symbols`, e.g. `'exchange=CME,session=RTH'`. No built-in equivalent before this key — use it for any column/value constraint beyond symbol and date range. |
 
 ```python
@@ -1759,12 +1784,40 @@ Rows from signal, cluster, zone, and other analytics schemas arrive at
 ```python
 def on_custom_data(self, ctx, event):
     data = event.data()
-    sig = json.loads(data.column_data("signal_json"))
+    raw = data.column_data("signal_json")
+    normalized = raw.replace(r'\"', '"').replace('|', ',')
+    sig = json.loads(normalized)
     value = sig.get("my_field")
 ```
 
 The `symbols` key in the `data_configs` entry selects which stream to subscribe
 to; the entry's `id` must match `ctx.subscribe_data(data_id=...)`.
+
+These names are separate and are not interchangeable:
+
+| role | example | used by |
+|---|---|---|
+| logical source `id` | `SignalTest`, `es_mm_zones` | `ctx.subscribe_data(id)` or a strategy's `zoneSignalDataId` |
+| historical selector | `Prillach_MC_ES`, `intraday_ES_zones_2_v1`, or `ES.c.0` | `data_configs[].symbols` |
+| dataset/schema | `HIVEQ_QUANT_SIGNALS` / `signals` | chooses the registered data source |
+| live transport key/topic | deployment-specific | live distributor metadata; normally not configured by a historical backtest user |
+
+The analytics sources are also distinct:
+
+| purpose | dataset / schema | selector column/meaning |
+|---|---|---|
+| hosted signals | `HIVEQ_QUANT_SIGNALS` / `signals` | registered signal name, e.g. `Prillach_MC_ES` |
+| `clusters_v1` analytics | `HIVEQ_QUANT_CLUSTERS` / `clusters` | `sym`; use `symbolFilterKey='sym'` and contract resolution for `ES.c.0` |
+| MM zone snapshots | `HIVEQ_QUANT_CLUSTER_ZONE` / `cluster_zone` | analytics stream name such as `intraday_ES_zones_2_v1` |
+| MM grid modes | `HIVEQ_QUANT_CLUSTERS_MODES` / `clusters_modes` | analytics stream name such as `intraday_ES_zones_2_v1` |
+| quant features | `HIVEQ_QUANT_FEATURES_V3` / `quant_features_v3` | dataset-defined symbol selector |
+
+`clusters_v1` is the physical table behind the `clusters` schema; it is not a
+symbol and it is not the same feed as the MM strategy's `cluster_zone` source.
+Before selecting a date range, run `hiveq datasets fields` and `hiveq datasets
+sample` for the exact dataset/schema. A catalog entry describes the contract,
+but does not guarantee that the currently selected QA environment has a
+populated physical table for that date.
 
 > Backtesting with your **own** signals? Use a CSV custom data source instead
 > (§9 §9.2) — it fires the same `on_custom_data` callback

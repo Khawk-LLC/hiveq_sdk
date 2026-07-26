@@ -21,8 +21,15 @@ import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
 
-SIGNAL_ID = "mysignals"          # must match data_configs 'id' + subscribe_data(data_id=...)
+SIGNAL_ID = "SignalTest"         # stable source ID; must match data_configs 'id'
+SIGNAL_KEY = "Prillach_MC_ES"    # signal key stored in HIVEQ_QUANT_SIGNALS
 MIN_WEIGHT = 0.7                 # only act on high-conviction signals
+
+
+def decode_signal_json(raw):
+    """Decode either plain JSON or the current Sigma CSV-escaped form."""
+    normalized = raw.replace(r'\"', '"').replace("|", ",")
+    return json.loads(normalized)
 
 
 class QuantSignals:
@@ -30,18 +37,23 @@ class QuantSignals:
         # bars init the venue so orders are routable
         ctx.subscribe_bars(ctx.strategy_config.symbols,
                             asset_type=AssetType.EQUITY, interval="1m")
-        ctx.subscribe_data(data_id=SIGNAL_ID)                # quant-signal feed (§5.1)
+        ctx.subscribe_data(data_id=SIGNAL_ID)
         ctx.add_event_log("subscribed to quant signals", sub_event_type="INIT")
 
     def on_custom_data(self, ctx, event):
         data = event.data()                                  # -> SigmaCustomData (§7.9)
-        symbol = data.column_data("symbol", default="UNKNOWN")
+        symbol = data.column_data("sym", default="UNKNOWN")
 
         signal_json = data.column_data("signal_json", default=None)
+        ctx.add_event_log(
+            f"custom data received symbol={symbol} signal_json={signal_json!r}",
+            sub_event_type="CUSTOM_DATA_RECEIVED",
+            symbol=str(symbol),
+        )
         if not signal_json:
             return
         try:
-            sig = json.loads(signal_json)
+            sig = decode_signal_json(signal_json)
         except (json.JSONDecodeError, TypeError):
             ctx.add_event_log("bad signal_json", sub_event_type="ERROR", symbol=symbol)
             return
@@ -71,11 +83,11 @@ if __name__ == "__main__":
         strategy_configs=[StrategyConfig(name="QuantSignals", type="QuantSignals")],
         symbols=["AAPL"],
         start_date="2024-08-27",
-        end_date="2024-08-27",
+        end_date="2025-12-17",
         data_configs=[
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]},
             {"type": "hiveq_historical", "dataset": "HIVEQ_QUANT_SIGNALS",
-             "schema": ["signals"], "id": SIGNAL_ID, "symbols": ["Prillach_MC_ES"]},
+             "schema": ["signals"], "id": SIGNAL_ID, "symbols": [SIGNAL_KEY]},
         ],
     )
     run.wait()  # deploy returns immediately; block (progress bar) until done

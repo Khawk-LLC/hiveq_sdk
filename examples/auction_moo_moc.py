@@ -35,8 +35,11 @@ MOC_OPEN, MOC_CUTOFF = dtime(15, 30), dtime(15, 50)  # ET: place MOC in [15:30, 
 
 class AuctionMooMoc:
     def __init__(self):
-        self.moo_done = False
-        self.moc_done = False
+        # A strategy instance spans the full backtest range. Track each auction
+        # by trading date and symbol so every session gets an order while
+        # repeated ticks inside the same submission window do not duplicate it.
+        self.moo_submitted = set()
+        self.moc_submitted = set()
 
     def on_start(self, ctx, event):                              # subscribe in START (R3)
         # Trade ticks (eq_trades) carry the auction prints MOO/MOC fill against.
@@ -47,18 +50,19 @@ class AuctionMooMoc:
         if tick.time is None:
             return
         sym = tick.symbol
+        auction_key = (tick.time.date(), sym)
         t = tick.time.time()                                     # ET wall-clock (R5) — no tz math
 
         # MOO and MOC are placed INDEPENDENTLY — a missing/empty pre-open window
         # must NOT suppress the closing auction (and vice versa).
-        if not self.moo_done and MOO_OPEN <= t < MOO_CUTOFF:
+        if auction_key not in self.moo_submitted and MOO_OPEN <= t < MOO_CUTOFF:
             ctx.buy_order(sym, quantity=100, order_type=OrderType.MOO)    # fills at the 09:30 open cross
-            self.moo_done = True
+            self.moo_submitted.add(auction_key)
             ctx.add_event_log(f"MOO buy 100 {sym} placed {t:%H:%M} (fills at open)", symbol=sym)
 
-        if not self.moc_done and MOC_OPEN <= t < MOC_CUTOFF:
+        if auction_key not in self.moc_submitted and MOC_OPEN <= t < MOC_CUTOFF:
             ctx.sell_order(sym, quantity=100, order_type=OrderType.MOC)   # fills at the 16:00 close cross
-            self.moc_done = True
+            self.moc_submitted.add(auction_key)
             ctx.add_event_log(f"MOC sell 100 {sym} placed {t:%H:%M} (fills at close)", symbol=sym)
 
     def on_order(self, ctx, event):                              # auction fills arrive here
