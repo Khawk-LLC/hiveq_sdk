@@ -6,7 +6,8 @@ Demonstrates (every ctx call verified against the SDK type surface):
     17:00 ET (T). With ``dataset='HIVEQ_US_FUT'`` those session defaults are
     applied automatically; you can also pin them with ``BacktestConfig
     session_start='18:00' / session_end='17:00'`` (§9.3, doc §16.5/R6).
-  - ``ctx.subscribe_futures_bars(symbols=['ES.v.0'], interval=...)`` — subscribe by
+  - ``ctx.subscribe_bars(symbols=['ES.v.0'], asset_type=AssetType.FUTURES,
+    interval=...)`` — subscribe by
     the futures SYMBOL STRING. ``ES.v.0`` = volume-roll front continuous; ``ES.c.0``
     = calendar/front; ``ES.H25`` = a dated contract (§5.1).
   - TIME IS EST/EDT: ``ctx.now()`` is already ET; never convert UTC (R5/R6).
@@ -16,7 +17,7 @@ Shape: a single momentum-vs-open lean on ES, flat by the 16:30 ET halt.
 Run:  python futures_session.py
 """
 import hiveq.flow as hf
-from hiveq.flow import StrategyConfig, BacktestConfig
+from hiveq.flow import StrategyConfig, BacktestConfig, AssetType
 
 SYMBOL = "ES.v.0"            # ROOT.roll.rank: ES, volume-roll (v), front (0). 'ES.c.0' = calendar/front. (§5.1)
 HALT_BY = (16, 15)           # ET: flatten before the 16:15-16:30 trading halt
@@ -28,7 +29,7 @@ class FuturesSession:
 
     def on_start(self, ctx, event):                          # subscribe in START (R3)
         # Subscribe by the futures symbol string.
-        ctx.subscribe_futures_bars(symbols=[SYMBOL], interval="1m")
+        ctx.subscribe_bars(symbols=[SYMBOL], asset_type=AssetType.FUTURES, interval="1m")
         ctx.add_event_log(f"futures session start {SYMBOL}", sub_event_type="INIT")
 
     def on_bar(self, ctx, event):

@@ -416,14 +416,21 @@ ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C
                            strike: Optional[float] = None,
                            expiration_type: Optional[Union[str, datetime]] = None,  # '0dte' | 'YYYY-MM-DD' | datetime
                            underlying: Optional[str] = None, interval: str = "1s")
-# Futures: subscribe by SYMBOL STRING in `symbols=` (the clear, single way):
-ctx.subscribe_futures_bars(symbols: Optional[List[str]] = None, root: Optional[str] = None,
-                           contract: Optional[str] = None, continuous: Optional[str] = None,
-                           interval: str = "1m")
+# Futures bars use the same unambiguous symbols + interval API. A symbol may
+# be continuous ("ES.c.0", "ES.v.0") or dated ("ES.H25"). Do not pass a
+# separate root/contract/continuous selector:
+ctx.subscribe_bars(symbols: List[str], asset_type=AssetType.FUTURES,
+                   interval: str = "1m")
+# Multiple intervals: make one explicit call per interval. Each call may carry
+# multiple symbols. Repeating an identical symbols/interval request is safe;
+# the runtime deduplicates it and emits one callback per symbol/bar boundary.
+ctx.subscribe_bars(["ES.c.0", "NQ.c.0"], asset_type=AssetType.FUTURES,
+                   interval="1s")
+ctx.subscribe_bars(["ES.c.0", "NQ.c.0"], asset_type=AssetType.FUTURES,
+                   interval="1m")
 ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional[str] = None,
                              contract: Optional[str] = None, continuous: Optional[str] = None)
-#   NOTE: there is NO subscribe_futures_quotes. Bars and trades have dedicated
-#   futures convenience methods; quotes do not. For futures NBBO/tbbo quotes,
+#   NOTE: there is NO subscribe_futures_quotes. For futures NBBO/tbbo quotes,
 #   use subscribe_quotes with the futures symbol string and asset_type=FUTURES:
 #     ctx.subscribe_quotes(['ES.c.0'], asset_type=AssetType.FUTURES)
 #   The futures symbol string encodes the contract:
@@ -1551,7 +1558,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
 - Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
 - `report.*` DataFrames can be `None`/empty — guard before use.
-- For futures, subscribe by the continuous symbol string in `symbols=`, e.g. `subscribe_futures_bars(symbols=['ES.c.0'])` (or `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES)`). For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
+- For futures bars, use the complete symbol string with the canonical API, e.g. `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES, interval='1m')`. Make one call per interval; each call may include multiple symbols, and identical requests are deduplicated. For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
 - **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.c.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.c.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.c.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.
 - **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`/TBBO), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
 - **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.

@@ -170,6 +170,29 @@ The same handle works for any past run — `hf.get_run(run_id)` reattaches to it
 Equities, futures (including continuous contracts with automatic rollover),
 and options — plus your own custom data feeds, all tradable in one backtest.
 
+Futures bars use the same explicit API: pass the complete futures symbols and
+the interval. The symbol itself identifies a continuous or dated contract;
+there is no separate root selector on this path.
+
+```python
+ctx.subscribe_bars(
+    symbols=["ES.c.0", "NQ.c.0"],
+    asset_type=AssetType.FUTURES,
+    interval="1s",
+)
+
+# Subscribe the same symbols at another interval with a second explicit call.
+ctx.subscribe_bars(
+    symbols=["ES.c.0", "NQ.c.0"],
+    asset_type=AssetType.FUTURES,
+    interval="1m",
+)
+```
+
+Each call defines one symbol-list/interval subscription. Multiple symbols and
+multiple intervals may be combined freely; repeated identical requests are
+deduplicated by the runtime and do not produce duplicate callbacks.
+
 ## Learn more
 
 - **[`examples/`](examples/)** — complete, runnable strategies: intraday

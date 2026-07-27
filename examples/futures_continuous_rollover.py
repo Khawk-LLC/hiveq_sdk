@@ -3,7 +3,7 @@
 
 Demonstrates (verified against the SDK surface):
   - subscribing to a CONTINUOUS futures series by its SYMBOL STRING via
-    ``ctx.subscribe_futures_bars(symbols=['ES.c.0'])`` (§5.1).
+    ``ctx.subscribe_bars(symbols=['ES.c.0'], asset_type=AssetType.FUTURES)`` (§5.1).
   - ``BacktestConfig(enable_auto_rollover=True)``: this is what turns on
     continuous-contract rollover — the engine rolls the position when the contract
     rolls and you observe each roll in ``on_rollover``. No ``data_configs`` flag.
@@ -16,7 +16,7 @@ Run:  python futures_continuous_rollover.py
 from collections import deque
 
 import hiveq.flow as hf
-from hiveq.flow import BacktestConfig, StrategyConfig
+from hiveq.flow import AssetType, BacktestConfig, StrategyConfig
 
 CONT = "ES.c.0"              # front continuous ES
 LOOKBACK = 30                # bars for the breakout channel
@@ -27,7 +27,7 @@ class FuturesBreakout:
         self.win = {}                                        # symbol -> deque[float] of closes
 
     def on_start(self, ctx, event):
-        ctx.subscribe_futures_bars(symbols=[CONT], interval="1m")
+        ctx.subscribe_bars(symbols=[CONT], asset_type=AssetType.FUTURES, interval="1m")
 
     def on_bar(self, ctx, event):
         bar = event.data()                                   # -> SigmaBar (§7.1)
