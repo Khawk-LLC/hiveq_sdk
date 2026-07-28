@@ -1,0 +1,91 @@
+"""{{TEST_NAME}}: {{ONE_LINE_SUMMARY}}.
+
+{{WHY_THIS_EXISTS}}
+
+Grounded in docs/llms.txt §{{SPEC_SECTIONS}}.
+Prompted by: {{COMMITS}}
+
+Asserted:
+{{ASSERTION_LIST}}
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+
+from agent_qa.core import backtest
+from agent_qa.core.probe import Probe
+from agent_qa.core.profiles import FIXTURES
+from agent_qa.core.result import Checks, install_crash_handler
+
+NAME = "{{TEST_NAME}}"
+SURFACE = "{{SURFACE_ID}}"
+DAY = FIXTURES.equity_day
+SYMBOL = FIXTURES.equity_symbol
+
+probe = Probe()
+
+
+class {{STRATEGY_CLASS}}:
+    """{{STRATEGY_DOC}}"""
+
+    def on_start(self, ctx, event):
+        from hiveq.flow.config import AssetType
+
+        probe.bump("start")
+        ctx.subscribe_bars([SYMBOL], asset_type=AssetType.EQUITY, interval="1m")
+
+    def on_bar(self, ctx, event):
+        bar = event.data()
+        probe.bump("bar")
+        # Keep per-event work cheap: bump counters, sample only the first few.
+        if probe.counters["bar"] == 1:
+            probe.sample("bar", symbol=bar.symbol, close=bar.close, ts=event.ts_event)
+        # Record contract violations rather than raising — an exception here
+        # loses every other observation in the run.
+        # if <violation>:
+        #     probe.error("...")
+
+    def on_stop(self, ctx, event):
+        probe.bump("stop")
+        # REQUIRED: without this the remote engine has no evidence channel and
+        # probe.collect() comes back empty.
+        probe.flush(ctx)
+
+
+def main():
+    # REQUIRED: turns an uncaught exception into a RESULT: ERROR line carrying
+    # the cause, instead of a contentless rc=1.
+    install_crash_handler(NAME, SURFACE)
+
+    from hiveq.flow import BacktestConfig, StrategyConfig
+
+    run = backtest.run(
+        [StrategyConfig(name=NAME, type="{{STRATEGY_CLASS}}", symbols=[SYMBOL],
+                        params={"initial_capital": FIXTURES.initial_capital})],
+        symbols=[SYMBOL],
+        start_date=DAY,
+        end_date=DAY,
+        data_configs=[backtest.historical(FIXTURES.dataset_equity, "bars_1m")],
+        backtest_config=BacktestConfig(start_date=DAY, end_date=DAY,
+                                       session_start="09:30", session_end="10:30"),
+    )
+
+    data = probe.collect(run)
+
+    c = Checks()
+    c.note(f"evidence via {data.source}")
+    c.add("run_completed", backtest.completed_ok(run), f"status={backtest.status_of(run)}")
+    c.add("no_callback_crash", not backtest.crash_lines(run),
+          "; ".join(backtest.crash_lines(run)[:2]))
+    c.add("data_delivered", data.count("bar") > 0, f"n={data.count('bar')}")
+    c.add("no_contract_errors", not data.errors, f"errors={data.errors[:3]}")
+
+    # {{SPECIFIC_ASSERTIONS}}
+
+    c.finish(NAME, surface=SURFACE, extra=f"bars={data.count('bar')}")
+
+
+if __name__ == "__main__":
+    main()

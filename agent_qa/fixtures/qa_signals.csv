@@ -1,0 +1,6 @@
+date,time,sym,signal,zone_prob,label,note
+2025-06-02,09:35:00,AAPL,1,0.72,alpha,plain
+2025-06-02,09:45:00,AAPL,-1,0.31,beta,has|comma
+2025-06-02,10:00:00,AAPL,1,0.88,gamma,plain
+2025-06-02,10:15:00,MSFT,1,0.55,delta,plain
+2025-06-02,10:30:00,AAPL,0,0.10,epsilon,plain

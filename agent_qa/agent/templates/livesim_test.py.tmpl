@@ -1,0 +1,81 @@
+"""{{TEST_NAME}}: {{ONE_LINE_SUMMARY}}.
+
+{{WHY_THIS_EXISTS}}
+
+Grounded in docs/llms.txt §{{SPEC_SECTIONS}} and the orchestrator routes in
+apps/orchestrator-service/src/hiveq_orchestrator/server/server.py.
+Prompted by: {{COMMITS}}
+
+Asserted:
+{{ASSERTION_LIST}}
+
+Safety rules for every livesim test:
+  * read-only and dry_run paths always run; anything that consumes fleet
+    capacity is gated behind AGENT_QA_ALLOW_DEPLOY=1.
+  * every created container/deployment is torn down in a `finally` — a leaked
+    container silently eats capacity for every later run.
+  * assert specific status codes, not just "not an error". Several of these
+    routes are supposed to REFUSE (403 on the promotion ACL), and a test that
+    accepts any 2xx-or-4xx would pass while the guard fell open.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+
+from agent_qa.core import observe
+from agent_qa.core.guards import require_remote
+from agent_qa.core.livesim_client import LivesimClient
+from agent_qa.core.result import Checks, install_crash_handler
+
+NAME = "{{TEST_NAME}}"
+SURFACE = "{{SURFACE_ID}}"
+
+ALLOW_DEPLOY = os.environ.get("AGENT_QA_ALLOW_DEPLOY") == "1"
+
+
+def main():
+    install_crash_handler(NAME, SURFACE)
+    # Livesim is reachable only through the thin SDK's REST client.
+    require_remote(NAME)
+
+    c = Checks()
+    client = LivesimClient(timeout=60.0)
+    c.note(f"base_url={client.base_url}, allow_deploy={ALLOW_DEPLOY}")
+
+    # Fail fast and unambiguously on auth: otherwise every assertion below is
+    # refused for the wrong reason and the verdict is misleading.
+    _, status = client.list_deployments()
+    if status in (401, 403):
+        c.add("authenticated", False, f"GET /livesim/deployments -> {status}; see l0_01")
+        c.finish(NAME, surface=SURFACE)
+        return
+    c.add("authenticated", True)
+
+    # --- read-only / dry_run assertions (always run) ---
+    # {{READONLY_ASSERTIONS}}
+
+    if not ALLOW_DEPLOY:
+        c.note("mutating steps skipped; set AGENT_QA_ALLOW_DEPLOY=1 to run them")
+        c.finish(NAME, surface=SURFACE)
+        return
+
+    deployment_id = ""
+    try:
+        # --- mutating assertions ---
+        # {{MUTATING_ASSERTIONS}}
+        pass
+    finally:
+        if deployment_id:
+            body, status = client.cancel_deployment(deployment_id)
+            c.add("teardown_cancel_ok", status in (200, 202, 204, 404),
+                  f"cancel -> {status}: {str(body)[:200]}")
+            gone = observe.wait_for_deployment_gone(client, deployment_id, timeout=120)
+            c.note(f"deployment cleared: {bool(gone)}")
+
+    c.finish(NAME, surface=SURFACE)
+
+
+if __name__ == "__main__":
+    main()

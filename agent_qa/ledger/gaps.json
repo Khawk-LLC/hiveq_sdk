@@ -1,0 +1,51 @@
+{
+  "l1.data:early_imbalance": {
+    "commit": "",
+    "first_seen": "2026-07-28T00:00:00",
+    "last_seen": "2026-07-28T00:00:00",
+    "reason": "on_imbalance / EventType.IMBALANCE are wired end-to-end (PySigma onImbalance -> bridge -> dispatcher), but the local cluster's early_imbalance table has no rows on any probed date, so live delivery cannot be asserted. Validated synthetically in hiveq-flow/qa_validation/t11 until data lands.",
+    "test": ""
+  },
+  "l1.data:equity_tbbo": {
+    "commit": "",
+    "first_seen": "2026-07-28T00:00:00",
+    "last_seen": "2026-07-28T00:00:00",
+    "reason": "No equity tbbo rows locally; futures tbbo has data and is covered instead.",
+    "test": "l1_01_equity_streams"
+  },
+  "l2.callbacks:market_state_and_econ_calendar": {
+    "commit": "",
+    "first_seen": "2026-07-28T00:00:00",
+    "last_seen": "2026-07-28T00:00:00",
+    "reason": "PySigma's onMarketStateEvent and onEconomicCalendarEvent are DELIBERATELY not bridged into the Python strategy surface. Do not wire them and do not write tests expecting them.",
+    "test": ""
+  },
+  "l6.eventlogs:local_event_logs_empty": {
+    "commit": "",
+    "first_seen": "2026-07-28T00:00:00",
+    "last_seen": "2026-07-28T00:00:00",
+    "reason": "run.event_logs() returns an empty DataFrame for local runs by design (runs.py: if self.is_local). Event logs are persisted only for platform runs. This is asserted AS behaviour in l6_01, not treated as a defect.",
+    "test": "l6_01_event_logs"
+  },
+  "l6.eventlogs:on_stop_add_event_log_dropped": {
+    "commit": "",
+    "first_seen": "2026-07-28T02:43:56",
+    "last_seen": "2026-07-28T02:43:56",
+    "reason": "PRODUCT BUG (not a data gap): ctx.add_event_log() issued from on_stop is never persisted. Measured on vm.hiveq.ai 2026-07-28: 60s of polling across run.event_logs(), hf.event_logs() and hf.get_run(run_id).event_logs() - the row never appears, while identical calls from on_start and on_bar land immediately. Plausible mechanism: on_stop fires AFTER the engine has STOPPED (docs S4), so the event-log writer is likely torn down with it - same reason orders placed in on_stop are rejected. stdout from on_stop DOES survive into run.logs(), which is why Probe uses the executor log as its primary channel. Remove this entry and re-point Probe at event_logs if the writer is fixed.",
+    "test": "l6_01_event_logs"
+  },
+  "l7.metrics:fills_empty_RESOLVED": {
+    "commit": "",
+    "first_seen": "2026-07-28T03:17:22",
+    "last_seen": "2026-07-28T03:17:22",
+    "reason": "RESOLVED 2026-07-28 - run.fills() returned 0 rows on remote across several runs, making net_pnl unverifiable. Root cause was an incorrect/stale SDK package on the EXECUTOR side, not client code (the client tree matched the repo source exactly, 689-line runs.py both). After that was corrected l7_01 passes: recomputed=-67.0 vs report net_pnl=-67.22, inside the 1 dollar tolerance. Kept as a record because the INCONCLUSIVE gating is what surfaced it at all - before gating, the test reported PASS while silently skipping the recomputation.",
+    "test": "l7_01_metrics_identities"
+  },
+  "l8.oms:cancel_finding_RETRACTED": {
+    "commit": "",
+    "first_seen": "2026-07-28T03:12:22",
+    "last_seen": "2026-07-28T03:12:22",
+    "reason": "RETRACTED 2026-07-28 - this was a TEST bug, not a platform bug. cancel_all_orders works correctly: l8_02_passive_limit_cancel observes statuses [CANCELED, SUBMITTED], cancels=1, fills=0, has_open_order False after cancel. The original false positive had two causes: (1) order_type was passed as the STRING \"LIMIT\" instead of OrderType.LIMIT, so the intended passive limit was not placed as a limit; (2) cancel was exercised in a frame containing already-filled market orders, where cancelling is a no-op. Lesson kept deliberately: test cancel with a passive limit IN ISOLATION, and gate the cancel assertion on has_open_order being True first.",
+    "test": "l8_02_passive_limit_cancel"
+  }
+}

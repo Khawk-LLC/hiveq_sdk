@@ -1,0 +1,3 @@
+# agent_qa needs almost nothing beyond what the SDK already pulls in.
+# pandas / requests arrive with hiveq-sdk; only the surface-map parser is extra.
+pyyaml>=6.0

@@ -1,0 +1,4 @@
+{
+  "_comment": "Overrides for agent_qa/core/profiles.py:Fixtures. Dates and symbols live here as DATA so that a stale probe date is a one-line edit, not a sweep through every test. Point AGENT_QA_FIXTURES at another file to layer a second set on top (e.g. per-environment coverage differences). Only keys that exist on the Fixtures dataclass are applied.",
+  "_example": "set \"equity_day\": \"2025-06-03\" here to move every equity test to a different session"
+}

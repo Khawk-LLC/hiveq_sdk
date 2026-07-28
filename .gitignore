@@ -10,7 +10,13 @@ logs/
 .vscode/
 
 # Local agent/tooling config — never publish
-.claude/
+# Note `.claude/*` and not `.claude/` — git cannot re-include anything inside an
+# excluded *directory*, so the directory must stay traversable for the negation
+# below to take effect.
+.claude/*
+# ...except shared skills, which are team tooling rather than local config. The
+# qa-agent skill drives agent_qa/ and is useless if it lives on one machine.
+!.claude/skills/
 
 # Environment / secrets
 .env

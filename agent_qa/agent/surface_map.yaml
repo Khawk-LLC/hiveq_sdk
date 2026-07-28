@@ -1,0 +1,189 @@
+# Which QA surface does a changed file belong to?
+#
+# The agent classifies every path in a commit through this map to decide which
+# suite level should grow. Patterns are fnmatch globs, evaluated against the
+# repo-relative path, and a file may match several surfaces — a change to
+# `context.py` plausibly affects callbacks *and* order management, and it is
+# better to over-suggest than to miss.
+#
+# Surface ids are `<level>.<topic>`; the level prefix routes the generated test
+# into `suites/l<N>_*/`. Keep ids stable: `ledger/coverage.json` keys on them.
+
+repos:
+  hiveq:
+    path: ~/PycharmProjects/hiveq
+    description: platform monorepo — orchestrator, livesim, web, data API
+  hiveq-flow:
+    path: ~/PycharmProjects/hiveq-flow
+    description: fat engine package — dispatcher, market data, OMS, TCA
+  hiveq-sdk:
+    path: ~/PycharmProjects/hiveq-sdk
+    description: thin client + canonical API spec (and this suite)
+  sigma:
+    path: ~/CLionProjects/sigma
+    description: C++ core — adapters, matching, session handling
+    optional: true
+
+# Paths that never warrant a test on their own.
+ignore:
+  - "**/__pycache__/**"
+  - "**/*.pyc"
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/*.lock"
+  - "**/package-lock.json"
+  - "**/*.md"
+  - "**/.gitignore"
+  - "agent_qa/**"
+  # The watched repos' own test suites. A product change is the signal worth
+  # acting on; a change to somebody else's test file is not, and mining it
+  # produces work-list entries that describe testing rather than behaviour.
+  # `examples/**` is deliberately NOT ignored — an example is the documented
+  # intended usage, so a change there often means the contract moved.
+  - "qa_validation/**"
+  - "tests/**"
+  - "baseline_tests/**"
+  - "**/test_*.py"
+  - "**/*_test.py"
+  - "**/__tests__/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+
+surfaces:
+
+  # --- L1 data delivery -------------------------------------------------
+  l1.data:
+    - "**/market_data/**"
+    - "**/data/**adapter**"
+    - "src/hiveq_data/**"
+    - "apps/api-service/**metadata**"
+    - "**/instrument_provider.py"
+    - "**/instrument_registry.py"
+  # `*contract*` is deliberately absent here: as a substring it matches every
+  # "callback contract" / "api contract" file in the tree, which has nothing to
+  # do with futures contracts. Match the futures sense explicitly.
+  l1.symbology:
+    - "**/symbol.py"
+    - "**/*continuous*"
+    - "**/*rollover*"
+    - "**/*fut_contract*"
+    - "**/*contract_month*"
+    - "**/*expiry*"
+  l1.sessions:
+    - "**/*session*"
+    - "**/*calendar*"
+
+  # --- L2 callbacks -----------------------------------------------------
+  l2.callbacks:
+    - "**/callback_dispatcher.py"
+    - "**/context.py"
+    - "**/events/**"
+    - "**/config.py"
+  l2.payloads:
+    - "**/trading_types.py"
+    - "**/*bridge*"
+
+  # --- L3 timers --------------------------------------------------------
+  l3.timers:
+    - "**/*timer*"
+
+  # --- L4 bars ----------------------------------------------------------
+  l4.bars:
+    - "**/*bar*"
+    - "**/*aggregat*"
+
+  # --- L5 custom data ---------------------------------------------------
+  l5.customdata:
+    - "**/*custom_data*"
+    - "**/*userdata*"
+    - "**/*user_data*"
+    - "**/*signal*"
+    - "**/*csv*"
+    - "**/data_driver/**"
+
+  # --- L6 event logs ----------------------------------------------------
+  l6.eventlogs:
+    - "**/*event_log*"
+    - "**/logger/**"
+    - "**/runs.py"
+
+  # --- L7 metrics -------------------------------------------------------
+  l7.metrics:
+    - "**/metrics/**"
+    - "**/tca/**"
+    - "**/*tearsheet*"
+    - "**/*performance*"
+    - "apps/web/src/features/**/calculations.ts"
+    - "apps/web/src/features/**/*widget*"
+
+  # --- L8 order management ----------------------------------------------
+  # Note on "executor": the word means two unrelated things in this codebase.
+  # An OMS *executor* is a server-side execution algo (POV/TWAP/VWAP/AUCTION,
+  # §5.10). A livesim_executor / alpha_executor is a container runtime and
+  # belongs to l9. Match the algo sense by its directory, not by the substring,
+  # or every livesim runtime change gets mis-filed as an order-management change.
+  l8.oms:
+    - "**/oms/**"
+    - "**/trading/**"
+    - "**/*order*"
+    - "**/trading/executors/**"
+    - "**/oms/**executor**"
+  l8.positions:
+    - "**/*position*"
+    - "**/*portfolio*"
+
+  # --- L9 livesim -------------------------------------------------------
+  l9.lifecycle:
+    - "apps/orchestrator-service/**/livesim/**"
+    - "apps/orchestrator-service/**/livesim_executor/**"
+    - "apps/orchestrator-service/**/native_livesim_executor/**"
+    - "**/docker_runner.py"
+    - "**/fleet_registry.py"
+    - "**/fleet_scheduler.py"
+  l9.params:
+    - "**/*param_change*"
+    - "**/*parameter_override*"
+  l9.promotion:
+    - "apps/orchestrator-service/**/server.py"
+    - "apps/orchestrator-service/**/handlers.py"
+    - "**/materializer.py"
+    - "**/transformer.py"
+  l9.signals:
+    - "**/task_data_publisher.py"
+    - "**/*distributor*"
+    - "**/entitlements.py"
+
+  # --- L0 contract ------------------------------------------------------
+  l0.api_surface:
+    - "src/hiveq/flow/__init__.py"
+    - "src/hiveq/flow/config.py"
+    - "src/hiveq/flow/trading_types.py"
+    - "docs/llms.txt"
+  l0.auth:
+    - "**/auth.py"
+    - "apps/auth-service/**"
+    - "**/_client.py"
+
+# Which spec sections ground a test for each surface. The agent reads only
+# these from docs/llms.txt rather than the whole 1856-line file.
+spec_sections:
+  l0.api_surface: ["0", "2", "12", "13"]
+  l0.auth: ["3"]
+  l1.data: ["9", "A.1"]
+  l1.symbology: ["9", "A.1"]
+  l1.sessions: ["13"]
+  l2.callbacks: ["4", "6", "7"]
+  l2.payloads: ["7"]
+  l3.timers: ["5.8", "7.8"]
+  l4.bars: ["5.1", "7.1", "A.1"]
+  l5.customdata: ["9.1", "9.2", "7.9", "A.2"]
+  l6.eventlogs: ["5.9", "10"]
+  l7.metrics: ["10"]
+  l8.oms: ["5.2", "5.10", "7.3", "12"]
+  l8.positions: ["5.3", "7.2", "8"]
+  l9.lifecycle: ["11"]
+  l9.params: ["11", "5.9"]
+  l9.promotion: ["11"]
+  l9.signals: ["9.1", "11"]
