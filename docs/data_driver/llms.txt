@@ -168,7 +168,7 @@ section); the cache file template uses the same fields.
 
 ```python
 import collections
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 import hiveq.driver as dd
 
@@ -235,7 +235,7 @@ file      = csv/bars/{sym}/{date:%Y.%m.%d}.csv
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
@@ -284,7 +284,7 @@ filterMap = sym=symbol;date=trade_date   ; params field → df column
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 Params = collections.namedtuple('Params', ['date', 'sym'])
@@ -319,7 +319,7 @@ schema    = bars_1m
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
@@ -361,7 +361,7 @@ To retrieve data, use the same `dd.load(...)` construct used for pulls:
 ```python
 import collections, time
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange, TimeRange
 
 dd_params = collections.namedtuple('Input', ['sym', 'date', 'time'])
@@ -488,7 +488,7 @@ filtering.
 import collections
 from hiveq.datetime import DateRange, TimeRange
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 
 dd_input = collections.namedtuple('Input', ['date', 'sym', 'time'])
 dd_param = dd_input(DateRange('2025-10-14', '2025-10-14'), ['AAPL'],
@@ -595,7 +595,7 @@ wsPort    = 8765
 ```python
 import collections, time
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 
 # Publish
 dd.save('SignalsPub', signals_df)
@@ -757,7 +757,7 @@ config selection and storage paths.
 ```python
 import os, collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 A = collections.namedtuple('A', ['date', 'sym'])
@@ -791,7 +791,7 @@ Common setup shared by the examples below (shown once — each example continues
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 A = collections.namedtuple('A', ['date', 'sym'])
@@ -973,7 +973,7 @@ Common setup shared by "Multiple calls..." and "Subscription and pulls" below:
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 Params = collections.namedtuple('Params', ['date', 'sym'])
@@ -1196,7 +1196,7 @@ append=, filter_columns=, in_memory=)`. `filter_columns` applies the section's
 `filterMap` (§6); `drop_duplicates` takes a column list; `append` appends to
 file transports; `in_memory` keeps the frame in process memory.
 
-### Cache modes (`hiveq.Cache`)
+### Cache modes (`hiveq.driver.Cache`)
 
 `NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`
 (see Caching (§5)).
