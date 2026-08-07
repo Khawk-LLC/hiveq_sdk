@@ -34,6 +34,10 @@ stubs; the canonical reference is the single-file spec at
 | `options_0dte_iron_condor.py` | 0DTE options | `subscribe_option_snaps`, `SigmaSnapData`, multi-leg all-or-nothing structure |
 | `quant_signals.py` | signal-driven | `HIVEQ_QUANT_SIGNALS` source + `ctx.subscribe_data(data_id=...)` → `on_custom_data` |
 | `custom_data.py` | bring-your-own CSV | a `type='csv'` custom feed (§9.2) → `on_custom_data` / `SigmaCustomData` |
+| `imbalance_data.py` | early auction imbalance feed | `early_imbalance` → `on_imbalance` / `ImbalanceData` (§7.14) |
+| `imbalance_arca.py` | NYSE Arca auction imbalance | metadata-routed `arca_imbalance` → `on_imbalance` |
+| `imbalance_nasdaq.py` | Nasdaq auction imbalance | metadata-routed `nasd_imbalance` → `on_imbalance` |
+| `imbalance_nyse.py` | NYSE auction imbalance | metadata-routed `nyse_imbalance` → `on_imbalance` |
 | `pairs_stat_arb.py` | 2-symbol pairs | rolling z-score spread with per-symbol state, `short_order` |
 | `timers_scheduling.py` | wall-clock scheduling | `ctx.set_timer`/`on_timer` + `ctx.now()` ET checks (§16.5) |
 
