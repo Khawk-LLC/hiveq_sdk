@@ -573,6 +573,7 @@ ctx.cancel_all_orders(symbol: str = None) -> bool
 ctx.clear_pending_order(symbol: str) -> None
 ctx.get_order_state(order_id: str) -> Optional[OrderState]
 ```
+The `modify_order` boolean reports whether the request was accepted for processing, not its final exchange/engine outcome. `quantity` is the new absolute order quantity and is passed to Sigma unchanged; it is not a delta or adjustment. Confirm success in `on_order` from `ORDER_UPDATED`; handle `ORDER_MODIFY_REJECTED` and inspect `SigmaOrder.reject_reason` for a rejected request. Do not stack another replace for the same order while the first replace is pending.
 
 ### 5.4 Position / order queries
 ```python
@@ -775,8 +776,8 @@ signal = json.loads(normalized)
 ### 7.14 ImbalanceData
 Auction imbalance record from `HIVEQ_US_EQ`. Select the logical metadata-routed schema that matches the feed: `early_imbalance` (normalized early auction), `arca_imbalance` (NYSE Arca), `nasd_imbalance` (Nasdaq), or `nyse_imbalance` (NYSE). Never embed the physical `prod_imbalances_*` database name; the platform resolves the current database and table from schema metadata.
 
-Venue-specific optional numeric fields are `None` when the venue does not publish a meaningful value. Source zeroes used as unavailable sentinels are therefore normalized to `None`; required quantities such as `imbalance` and `paired_shares` retain zero. Common mappings are: Arca `imb_side`/`paired`/`ref_price`/`market_imbalance`; Nasdaq `imb_direction`/`paired`/`ref_price`/`near_price`/`far_price`/`cross_type`; NYSE `side`/`paired_shares`/`ref_price` and clearing-price variants.
-`symbol:str` · `side:str`('B'/'S') · `imbalance:float`(shares) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C', Nasdaq) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
+Venue-specific optional numeric fields are `None` when the venue does not publish a meaningful value. Source zeroes used as unavailable sentinels are therefore normalized to `None`; required quantities such as `imbalance` and `paired_shares` retain zero. `side` preserves the normalized venue state, including descriptive values such as `BUY_IMBALANCE`, `SELL_IMBALANCE`, `NO_IMBALANCE`, and `NO_IMBALANCE_ON_CLOSE` (rather than being restricted to `B`/`S`). NYSE imbalance quantities are signed: sell imbalances can be negative. Common mappings are: Arca `imb_side`/`paired`/`ref_price`/`market_imbalance`; Nasdaq `imb_direction`/`paired`/`ref_price`/`near_price`/`far_price`/`cross_type`; NYSE `side`/`paired_shares`/`ref_price` and clearing-price variants.
+`symbol:str` · `side:str`(venue imbalance state) · `imbalance:float`(shares; signed for NYSE) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C'/'A', Nasdaq; venue code) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
 These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
