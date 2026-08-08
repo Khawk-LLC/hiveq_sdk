@@ -19,7 +19,8 @@ class SdkT20:
         self.state = {"placed": [], "modified_price": [], "modified_qty_price": [],
             "canceled": [], "double_cancel": [], "bogus_cancel": None,
             "bogus_modify": None, "fills": [], "open_qty_before_cancel": {},
-            "open_qty_after_cancel": {}, "order_events": []}
+            "open_qty_after_cancel": {}, "order_events": [],
+            "expected_modified_orders": {}}
         self.state["modify_rejections"] = []
         self.state["updates"] = []
         ctx.subscribe_bars(["AAPL", "MSFT"], asset_type=AssetType.EQUITY, interval="1m")
@@ -37,11 +38,17 @@ class SdkT20:
             # One replacement per order: isolate price-only from quantity+price
             # and avoid stacking a second replace while the first is pending.
             if symbol == "AAPL":
-                ok = ctx.modify_order(self.ids[symbol], limit_price=round(bar.close * .6, 2))
+                limit_price = round(bar.close * .6, 2)
+                self.state["expected_modified_orders"][symbol] = {
+                    "quantity": 1.0, "limit_price": limit_price}
+                ok = ctx.modify_order(self.ids[symbol], limit_price=limit_price)
                 self.state["modified_price"].append([symbol, bool(ok)])
             else:
+                limit_price = round(bar.close * .55, 2)
+                self.state["expected_modified_orders"][symbol] = {
+                    "quantity": 2.0, "limit_price": limit_price}
                 ok = ctx.modify_order(self.ids[symbol], quantity=2,
-                                      limit_price=round(bar.close * .55, 2))
+                                      limit_price=limit_price)
                 self.state["modified_qty_price"].append([symbol, bool(ok)])
         elif count == 11 and symbol in self.ids:
             self.state["open_qty_before_cancel"][symbol] = float(ctx.open_order_qty(symbol))
@@ -92,9 +99,14 @@ if __name__ == "__main__":
         "price_modify_request_accepted": state["modified_price"] == [["AAPL", True]],
         "qty_price_modify_request_accepted": state["modified_qty_price"] == [["MSFT", True]],
         "no_modify_rejections": not state["modify_rejections"],
-        "modified_order_updates_received": len([
-            row for row in state["updates"] if row["quantity"] == 2.0
-        ]) >= 2,
+        "modified_order_state_observed": all(any(
+            row["event"] == "ORDER_CANCELED"
+            and row["symbol"] == symbol
+            and row["quantity"] == expected["quantity"]
+            and row["limit_price"] == expected["limit_price"]
+            for row in state["order_events"]
+        ) for symbol, expected in state["expected_modified_orders"].items())
+        and set(state["expected_modified_orders"]) == {"AAPL", "MSFT"},
         "first_cancels_succeeded": len(state["canceled"]) == 2 and all(x[1] for x in state["canceled"]),
         "double_cancel_safe": len(state["double_cancel"]) == 2,
         "bogus_cancel_false": state["bogus_cancel"] is False,
