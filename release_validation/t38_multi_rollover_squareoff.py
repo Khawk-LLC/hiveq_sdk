@@ -12,11 +12,11 @@ class SdkT38:
     def on_start(self,ctx,event):
         if not hasattr(self,"s"):
             self.bought=set();self.pending=[];self.s={"bars":0,"rollovers":[],"fills":[],"fractional":[],"rollover_observations":[],"order_events":[]}
-        ctx.subscribe_bars(["ES.c.0","NQ.c.0"],asset_type=AssetType.FUTURES,interval="1m")
+        ctx.subscribe_bars(["ES.v.0","NQ.v.0"],asset_type=AssetType.FUTURES,interval="1m")
     def _positions(self,ctx):
         return {p.symbol:float(p.quantity) for p in ctx.portfolio().positions() if abs(float(p.quantity))>1e-9}
     def on_bar(self,ctx,event):
-        self.s["bars"]+=1;root=event.data().symbol[:2];continuous=f"{root}.c.0"
+        self.s["bars"]+=1;root=event.data().symbol[:2];continuous=f"{root}.v.0"
         for item in self.pending:
             if item["remaining"]>0:
                 item["after"].append({"bar":self.s["bars"],"symbol":event.data().symbol,"positions":self._positions(ctx)})
@@ -37,8 +37,8 @@ class SdkT38:
 
 
 if __name__=="__main__":
-    run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT38",type="SdkT38",symbols=["ES.c.0","NQ.c.0"])],
-        symbols=["ES.c.0","NQ.c.0"],start_date="2024-12-01",end_date="2025-06-24",
+    run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT38",type="SdkT38",symbols=["ES.v.0","NQ.v.0"])],
+        symbols=["ES.v.0","NQ.v.0"],start_date="2024-12-01",end_date="2025-06-24",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_FUT","schema":["bars_1m"]}],
         backtest_config=BacktestConfig(enable_auto_rollover=True,session_start="18:00",session_end="17:00"))
     s=completed_checkpoint(run,"t38_multi_rollover_squareoff");balances={};order=[]

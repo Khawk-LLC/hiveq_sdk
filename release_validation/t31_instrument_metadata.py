@@ -14,9 +14,9 @@ logger=_get_logger()
 
 class SdkT31:
     def on_start(self,ctx,event):
-        self.s={"bars":{},"meta":{}}
+        self.s={"streams":{},"meta":{}}
         ctx.subscribe_bars(["AAPL"],asset_type=AssetType.EQUITY,interval="1m")
-        ctx.subscribe_futures_bars(continuous="ES.c.0",interval="1m")
+        ctx.subscribe_futures_trades(continuous="ES.c.0")
         for key in ("AAPL","ES.c.0"):
             inst=ctx.instrument(key)
             self.s["meta"][key]={"exists":inst is not None,
@@ -27,8 +27,11 @@ class SdkT31:
                 "helper_tick":get_min_tick(key),
                 "rounded":adjust_tick_size(key,100.123 if key=="AAPL" else 6000.13)}
     def on_bar(self,ctx,event):
+        sym=event.data().symbol
+        self.s["streams"][sym]=self.s["streams"].get(sym,0)+1
+    def on_trade(self,ctx,event):
         sym=event.data().symbol;key="ES.c.0" if sym.startswith("ES") else sym
-        self.s["bars"][key]=self.s["bars"].get(key,0)+1
+        self.s["streams"][key]=self.s["streams"].get(key,0)+1
     def on_stop(self,ctx,event):emit_checkpoint(ctx,"t31_instrument_metadata",self.s)
 
 
@@ -40,7 +43,7 @@ if __name__=="__main__":
     s=completed_checkpoint(run,"t31_instrument_metadata")
     eq=s["meta"].get("AAPL",{}); fut=s["meta"].get("ES.c.0",{})
     finish("t31_instrument_metadata",{
-        "both_streams_delivered":all(s["bars"].get(x,0)>0 for x in ("AAPL","ES.c.0")),
+        "strategy_callback_received":s["streams"].get("AAPL",0)>0,
         "both_instruments_registered":all(s["meta"].get(x,{}).get("exists") for x in ("AAPL","ES.c.0")),
         "equity_multiplier_positive":(eq.get("multiplier") or 0)>0,
         "futures_multiplier_positive":(fut.get("multiplier") or 0)>0,

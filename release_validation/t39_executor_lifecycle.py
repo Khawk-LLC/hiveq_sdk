@@ -18,11 +18,13 @@ class SdkT39:
         self.state = {
             "trade_ticks": 0,
             "created": False,
-            "initial_state": "",
+            "executor_id": "",
             "params_read": False,
             "replace_result": None,
             "stop_result": None,
             "executor_events": 0,
+            "all_order_events": 0,
+            "observed_order_executor_ids": [],
             "child_order_events": 0,
             "child_filled_qty": 0.0,
             "states": [],
@@ -45,12 +47,9 @@ class SdkT39:
             )
             self.executor = ctx.add_executor(params)
             self.state["created"] = self.executor is not None
-            if self.executor is not None:
-                self.executor_id = str(self.executor.executorID)
-                self.state["initial_state"] = ctx.executor_state(self.executor)
             return
 
-        if self.ticks == 2:
+        if self.state["child_order_events"] > 0 and not self.state["params_read"]:
             current = ctx.get_executor_params_by_id(self.executor_id)
             self.state["params_read"] = current is not None
             replacement = ctx.build_executor_params(
@@ -66,21 +65,29 @@ class SdkT39:
             self.state["replace_result"] = bool(
                 ctx.replace_executor_params_by_id(self.executor_id, replacement)
             )
-        elif self.ticks == 200 and self.state["stop_result"] is None:
+            return
+        if self.state["replace_result"] is True and self.state["stop_result"] is None:
             self.state["stop_result"] = bool(ctx.stop_executor_by_id(self.executor_id))
-
     def on_executor(self, ctx, event):
         self.state["executor_events"] += 1
         # The callback payload is authoritative. Do not dereference the raw
         # executor after STOPPED: the registry removes it before dispatch.
         data = event.data()
+        callback_executor_id = str(getattr(data, "executor_id", "") or "")
+        if callback_executor_id:
+            self.executor_id = callback_executor_id
+            self.state["executor_id"] = callback_executor_id
         state = str(getattr(data, "state", ""))
         if state and state not in self.state["states"]:
             self.state["states"].append(state)
 
     def on_order(self, ctx, event):
         order = event.data()
-        if self.executor_id and str(order.executor_id) == self.executor_id:
+        self.state["all_order_events"] += 1
+        observed_executor_id = str(order.executor_id or "")
+        if observed_executor_id not in self.state["observed_order_executor_ids"]:
+            self.state["observed_order_executor_ids"].append(observed_executor_id)
+        if self.executor_id and observed_executor_id == self.executor_id:
             self.state["child_order_events"] += 1
             self.state["child_filled_qty"] = max(
                 self.state["child_filled_qty"], float(order.filled_qty)
@@ -102,12 +109,13 @@ if __name__ == "__main__":
             "schema": ["eq_trades"],
         }],
         backtest_config=BacktestConfig(session_start="09:30", session_end="16:00"),
+        config={"hiveq_log_level": "DEBUG", "oms_console_log": True},
     )
     state = completed_checkpoint(run, "t39_executor_lifecycle")
     states = set(state["states"])
     finish("t39_executor_lifecycle", {
         "tick_stream_present": state["trade_ticks"] >= 200,
-        "executor_created": state["created"] and bool(state["initial_state"]),
+        "executor_created": state["created"] and bool(state["executor_id"]),
         "params_query_worked": state["params_read"],
         "retarget_worked": state["replace_result"] is True,
         "stop_worked": state["stop_result"] is True,

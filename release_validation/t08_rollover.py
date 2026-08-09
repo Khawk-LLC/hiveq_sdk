@@ -1,4 +1,4 @@
-"""The documented ES.v.0 December rollover emits the public on_rollover callback."""
+"""The ES.c.0 June 2026 quarterly rollover emits the public on_rollover callback."""
 from pathlib import Path
 import sys
 
@@ -14,9 +14,10 @@ class SdkT08:
         self.state = {"bars": 0, "contracts": [], "rollovers": []}
 
     def on_start(self, ctx, event):
-        # Faithful to examples/bt/rollover_callback.py. Repeated daily
-        # subscriptions are deduplicated by the engine.
-        ctx.subscribe_futures_bars(symbols=["ES.v.0"], interval="1m")
+        # The data config loads bars_1m, so the subscription has to ask for
+        # bars -- the engine does not aggregate fut_trades ticks into bars.
+        # Repeated daily subscriptions are deduplicated by the engine.
+        ctx.subscribe_futures_bars(symbols=["ES.c.0"], interval="1m")
 
     def on_bar(self, ctx, event):
         bar = event.data()
@@ -46,14 +47,16 @@ class SdkT08:
 
 if __name__ == "__main__":
     run = hf.run_backtest(
-        strategy_configs=[StrategyConfig(name="SdkT08", type="SdkT08", symbols=["ES.v.0"])],
-        symbols=["ES.v.0"],
-        start_date="2025-12-15",
-        end_date="2025-12-19",
+        strategy_configs=[StrategyConfig(name="SdkT08", type="SdkT08", symbols=["ES.c.0"])],
+        symbols=["ES.c.0"],
+        # ESM6 expires Fri 2026-06-19; the window spans both an early
+        # volume-style roll and a calendar roll at expiry.
+        start_date="2026-06-08",
+        end_date="2026-06-19",
         data_configs=[{
             "type": "hiveq_historical",
             "dataset": "HIVEQ_US_FUT",
-            "schema": ["fut_trades"],
+            "schema": ["bars_1m"],
             "filter_mode": "continuous",
         }],
         backtest_config=BacktestConfig(
@@ -67,7 +70,7 @@ if __name__ == "__main__":
     finish("t08_rollover", {
         "on_rollover_fired": len(rows) >= 1,
         "public_payload_complete": bool(rows) and all(
-            row["continuous_symbol"] == "ES.v.0"
+            row["continuous_symbol"] == "ES.c.0"
             and row["prev_contract"]
             and row["current_contract"]
             and row["prev_contract"] != row["current_contract"]
@@ -78,8 +81,8 @@ if __name__ == "__main__":
             and isinstance(row["payload_ts_event"], int)
             for row in rows
         ),
-        "expected_december_roll": any(
-            row["prev_contract"] == "ESZ5" and row["current_contract"] == "ESH6"
+        "expected_quarterly_roll": any(
+            row["prev_contract"] == "ESM6" and row["current_contract"] == "ESU6"
             for row in rows
         ),
     }, extra=str(state))

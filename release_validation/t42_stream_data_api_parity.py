@@ -49,7 +49,9 @@ def remote_counts(cls, name, symbols, dataset, session_start, session_end):
 
 
 def api_counts(dataset, symbols, session_start, session_end):
-    import hiveq_data
+    # The top-level ``hiveq_data`` package shipped with the thin client is an
+    # authoring stub.  The data driver bundles the functional REST client.
+    from hiveq.driver import hiveq_data
 
     client = hiveq_data.Historical(timezone="America/New_York")
     result = Counter()
