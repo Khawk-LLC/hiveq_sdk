@@ -1,7 +1,5 @@
 # HiveQ SDK installed-wheel release validation
 
-Current conversion/accounting and execution results: [REPORT.md](REPORT.md).
-
 This suite deduplicates and translates the validation behaviors from the 165
 Python files under `hiveq-flow/examples/bt`
 to the thin SDK's real execution model. Strategies run remotely, persist their
@@ -75,7 +73,7 @@ not treated as an implementation regression. Core datasets remain hard gates.
 | `t38_multi_rollover_squareoff.py` | repeated rolls square old contracts without fractional fills |
 | `t39_executor_lifecycle.py` | POV creation, query, in-place retarget, linked child orders, and stop |
 | `t40_option_order_fill.py` | tick-valid 0DTE option limit entry/exit and completed trade evidence |
-| `t41_tca_report.py` | automatic TCA summary plus per-fill and per-trade analysis |
+| `t41_stop_limit_latch.py` | STOP_LIMIT remains triggered after a gap beyond its limit and fills on the return |
 | `t42_stream_data_api_parity.py` | exact equity/futures callback counts versus the Data API |
 | `t43_equity_tbbo_trade_quote.py` | one TBBO source drives valid trade and quote payloads |
 | `t44_cluster_analytics_data.py` | cluster-analytics custom rows or an explicit data-availability gap |

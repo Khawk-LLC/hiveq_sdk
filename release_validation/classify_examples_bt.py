@@ -33,13 +33,14 @@ DIAGNOSTICS = {
     "pre_built_strategy.py": "references the platform-internal UserSignalStrategy and obsolete UTC parameter guidance",
     "user_signal_strategy_examples.py": "configuration-only reference for a platform-internal strategy, with obsolete UTC guidance",
     "22_user_signal_asset_types.py": "configuration-only reference for a platform-internal strategy, including unsupported crypto data",
+    "tca_example.py": "TCA report presentation example, not a standalone execution release gate",
 }
 
 # Ordered: specific behaviors must win before broad words such as bars/order/futures.
 RULES = [
     (("inverse_head_shoulders", "es_scalp"),
-     "t46_stop_bracket_orders.py,t05_order_lifecycle.py",
-     "protective STOP/STOP_LIMIT exits and manual sibling cancellation"),
+     "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+     "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"),
     (("strat8_deploy",), "t44_cluster_analytics_data.py,t07_timers.py,t05_order_lifecycle.py",
      "cluster analytics evidence plus timer and direct-order lifecycle"),
     (("options_signals_strategy", "zerodte_custom_data", "zerodte_signal_strategy", "signal_dynamic_data"),
@@ -65,7 +66,6 @@ RULES = [
     (("daily_bars_fill", "bar_fill_validation"), "t17_daily_bars_fill.py", "daily-bar close fills"),
     (("enum_str",), "t16_enum_str_stability.py", "enum wire values"),
     (("error_visibility", "crash", "trace_crash"), "t32_callback_error_visibility.py", "callback failure visibility"),
-    (("tca_",), "t41_tca_report.py", "automatic TCA output"),
     (("bars_vs_clickhouse",), "t42_stream_data_api_parity.py", "stream/Data API count parity"),
     (("all_asset", "fills_all_assets"),
      "t03_all_asset_types.py,t28_cash_equity_exposure.py,t38_multi_rollover_squareoff.py,t40_option_order_fill.py",

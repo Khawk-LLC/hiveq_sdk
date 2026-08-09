@@ -516,8 +516,8 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t46_stop_bracket_orders.py,t05_order_lifecycle.py",
-      "reason": "protective STOP/STOP_LIMIT exits and manual sibling cancellation"
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
     },
     {
       "file": "es_scalp_profiled.py",
@@ -541,8 +541,8 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t46_stop_bracket_orders.py,t05_order_lifecycle.py",
-      "reason": "protective STOP/STOP_LIMIT exits and manual sibling cancellation"
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
     },
     {
       "file": "example.py",
@@ -754,8 +754,8 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t46_stop_bracket_orders.py,t05_order_lifecycle.py",
-      "reason": "protective STOP/STOP_LIMIT exits and manual sibling cancellation"
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
     },
     {
       "file": "moo_moc_strategy.py",
@@ -1880,9 +1880,9 @@
       "datasets": [],
       "schemas": [],
       "runnable": true,
-      "status": "duplicate",
-      "mapped_to": "t41_tca_report.py",
-      "reason": "automatic TCA output"
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "TCA report presentation example, not a standalone execution release gate"
     },
     {
       "file": "test_bar_data.py",
@@ -3018,8 +3018,8 @@
     }
   ],
   "status_counts": {
-    "diagnostic_only": 17,
-    "duplicate": 108,
+    "diagnostic_only": 18,
+    "duplicate": 107,
     "helper": 4,
     "ported": 36
   }

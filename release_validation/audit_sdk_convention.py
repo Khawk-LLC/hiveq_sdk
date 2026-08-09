@@ -24,6 +24,18 @@ def strategy_config_calls(tree: ast.AST):
 def main() -> None:
     issues = []
     files = sorted(HERE.glob("t[0-9][0-9]_*.py"))
+    by_number = {}
+    for path in files:
+        by_number.setdefault(int(path.stem[1:3]), []).append(path.name)
+    for number in range(1, 47):
+        matches = by_number.get(number, [])
+        if len(matches) != 1:
+            issues.append(
+                f"t{number:02d}: expected exactly one validation, found {matches}"
+            )
+    unexpected = sorted(number for number in by_number if number not in range(1, 47))
+    if unexpected:
+        issues.append(f"unexpected validation numbers: {unexpected}")
     for path in files:
         number = path.stem[1:3]
         prefix = f"SdkT{number}"
