@@ -15,7 +15,7 @@ users; see Migrating from KDB (§20).
 
 | | Values |
 |---|---|
-| Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
+| Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`, `arca_imbalance`, `nasd_imbalance`, `nyse_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
 | Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES1!` → `ES.c.0` (continuous future) |
 | Session            | `2025-10-13` … `2025-10-17`, `09:30:00`–`16:00:00` US/Eastern |
 | Live topics        | `market_data.equity.tbbo`, `signals.khawk.quant_features` |
@@ -1350,9 +1350,58 @@ options kwargs — add them in `__load_historical` if a section needs them.
 `HIVEQ_US_OPT`, `HIVEQ_US_IND`.
 
 **Schemas** seen in use / SDK examples: `bars_1s`, `bars_1m`, `bars_1d`,
-`eq_trades`, `trades`, `tbbo`, `snaps_1s`, `early_imbalance`, `indices_1m`.
+`eq_trades`, `trades`, `tbbo`, `snaps_1s`, `early_imbalance`,
+`arca_imbalance`, `nasd_imbalance`, `nyse_imbalance`, `indices_1m`.
 The authoritative, live list comes from the SDK's `Metadata` client
 (`Metadata().get_schemas(dataset=["*"])`) — not maintained here.
+
+### Equity auction imbalance feeds
+
+All four logical imbalance schemas are available from `HIVEQ_US_EQ`:
+
+| Schema | Feed | Important payload behavior |
+|---|---|---|
+| `early_imbalance` | Normalized early-auction feed | Common normalized imbalance fields. |
+| `arca_imbalance` | NYSE Arca auction imbalance | Includes Arca values such as `market_imbalance` when published. |
+| `nasd_imbalance` | Nasdaq auction imbalance | May include `near_price`, `far_price`, and `cross_type` (`O`, `C`, or `A`). |
+| `nyse_imbalance` | NYSE auction imbalance | Sell imbalance quantities can be negative; clearing-price variants are venue-specific. |
+
+Use these logical schema names. Do not embed a physical
+`prod_imbalances_*` database or table name; HiveQ resolves the current source
+through dataset metadata. Venue-specific optional numeric values are `None`
+when that venue does not publish a meaningful value. Required quantities such
+as `imbalance` and `paired_shares` retain zero, and `side` can contain
+descriptive venue states such as `BUY_IMBALANCE`, `SELL_IMBALANCE`,
+`NO_IMBALANCE`, or `NO_IMBALANCE_ON_CLOSE`.
+
+Example Data Driver source and pull:
+
+```ini
+[ArcaImbalances]
+primary = HiveQArcaImbalances
+
+[HiveQArcaImbalances]
+transport = HiveQ
+dataset   = HIVEQ_US_EQ
+schema    = arca_imbalance
+```
+
+```python
+import collections
+import hiveq.driver as dd
+from hiveq.driver import Cache
+from hiveq.datetime import DateRange
+
+Params = collections.namedtuple('Params', ['date', 'sym'])
+params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+df = dd.load('ArcaImbalances', params_tuple=params,
+             cache=Cache.PULL_UPDATE_CACHE)
+```
+
+Replace only the logical schema with `early_imbalance`, `nasd_imbalance`, or
+`nyse_imbalance` to use the other feeds. Confirm current entitlement, fields,
+and date coverage with the SDK metadata/catalog commands before choosing a
+research window.
 
 **`filter_mode`:**
 - **`continuous`** (default) — a single time-range query that spans date
