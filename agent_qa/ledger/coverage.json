@@ -5,16 +5,16 @@
       "engine": "remote",
       "profile": "vm",
       "status": "PASS",
-      "updated_at": "2026-07-28T03:21:10"
+      "updated_at": "2026-08-06T03:23:09"
     }
   },
   "l0.auth": {
     "l0_01_auth_endpoints": {
-      "duration_s": 1.57,
+      "duration_s": 1.73,
       "engine": "remote",
       "profile": "vm",
       "status": "PASS",
-      "updated_at": "2026-07-28T03:21:10"
+      "updated_at": "2026-08-06T03:23:09"
     }
   },
   "l1.data": {
@@ -56,169 +56,169 @@
       "dataset": "HIVEQ_ADMIN_QA",
       "schema": "task_configs",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_ADMIN_QA/tasks": {
       "dataset": "HIVEQ_ADMIN_QA",
       "schema": "tasks",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_ECON/econ_events": {
       "dataset": "HIVEQ_ECON",
       "schema": "econ_events",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_QUANT_CLUSTERS/clusters": {
       "dataset": "HIVEQ_QUANT_CLUSTERS",
       "schema": "clusters",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_QUANT_CLUSTERS_MODES/clusters_modes": {
       "dataset": "HIVEQ_QUANT_CLUSTERS_MODES",
       "schema": "clusters_modes",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_QUANT_CLUSTER_ZONE/cluster_zone": {
       "dataset": "HIVEQ_QUANT_CLUSTER_ZONE",
       "schema": "cluster_zone",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_QUANT_FEATURES_V3/quant_features_v3": {
       "dataset": "HIVEQ_QUANT_FEATURES_V3",
       "schema": "quant_features_v3",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_QUANT_SIGNALS/signals": {
       "dataset": "HIVEQ_QUANT_SIGNALS",
       "schema": "signals",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/daily_returns": {
       "dataset": "HIVEQ_STRAT",
       "schema": "daily_returns",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/event_logs": {
       "dataset": "HIVEQ_STRAT",
       "schema": "event_logs",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/global_metrics": {
       "dataset": "HIVEQ_STRAT",
       "schema": "global_metrics",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/hiveq_code_config": {
       "dataset": "HIVEQ_STRAT",
       "schema": "hiveq_code_config",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/orders": {
       "dataset": "HIVEQ_STRAT",
       "schema": "orders",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/positions": {
       "dataset": "HIVEQ_STRAT",
       "schema": "positions",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/returns_data": {
       "dataset": "HIVEQ_STRAT",
       "schema": "returns_data",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/run_meta_data": {
       "dataset": "HIVEQ_STRAT",
       "schema": "run_meta_data",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/strategy_metrics": {
       "dataset": "HIVEQ_STRAT",
       "schema": "strategy_metrics",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/strategy_params": {
       "dataset": "HIVEQ_STRAT",
       "schema": "strategy_params",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/summary": {
       "dataset": "HIVEQ_STRAT",
       "schema": "summary",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/symbol_metrics": {
       "dataset": "HIVEQ_STRAT",
       "schema": "symbol_metrics",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_STRAT/trades": {
       "dataset": "HIVEQ_STRAT",
       "schema": "trades",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/bars_1d": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "bars_1d",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/bars_1s": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "bars_1s",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/early_imbalance": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "early_imbalance",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/eq_company_lookup": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "eq_company_lookup",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/eq_earnings": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "eq_earnings",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/eq_fundamentals": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "eq_fundamentals",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/eq_ref_instruments": {
       "dataset": "HIVEQ_US_EQ",
       "schema": "eq_ref_instruments",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_EQ/eq_statistics": {
       "dataset": "HIVEQ_US_EQ",
@@ -230,85 +230,97 @@
       "dataset": "HIVEQ_US_EQ",
       "schema": "eq_symbol_lookup",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
+    },
+    "HIVEQ_US_EQ/lseg_us_eqt_flow_r3k_1min": {
+      "dataset": "HIVEQ_US_EQ",
+      "schema": "lseg_us_eqt_flow_r3k_1min",
+      "status": "no_behavioural_test",
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_ETF/etf_master": {
       "dataset": "HIVEQ_US_ETF",
       "schema": "etf_master",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_FUT/bars_1s": {
       "dataset": "HIVEQ_US_FUT",
       "schema": "bars_1s",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_FUT/fut_continuous_def": {
       "dataset": "HIVEQ_US_FUT",
       "schema": "fut_continuous_def",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_FUT/fut_trades": {
       "dataset": "HIVEQ_US_FUT",
       "schema": "fut_trades",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
+    },
+    "HIVEQ_US_FUT/rtd_fut_trades": {
+      "dataset": "HIVEQ_US_FUT",
+      "schema": "rtd_fut_trades",
+      "status": "no_behavioural_test",
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_FUT/tbbo": {
       "dataset": "HIVEQ_US_FUT",
       "schema": "tbbo",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_FUT_REF/fut_ref_instruments": {
       "dataset": "HIVEQ_US_FUT_REF",
       "schema": "fut_ref_instruments",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_IND/idx_ref_instruments": {
       "dataset": "HIVEQ_US_IND",
       "schema": "idx_ref_instruments",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_IND/indices_1d": {
       "dataset": "HIVEQ_US_IND",
       "schema": "indices_1d",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_IND/indices_1m": {
       "dataset": "HIVEQ_US_IND",
       "schema": "indices_1m",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_IND/indices_values": {
       "dataset": "HIVEQ_US_IND",
       "schema": "indices_values",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_OPT/opt_ref_instruments": {
       "dataset": "HIVEQ_US_OPT",
       "schema": "opt_ref_instruments",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_OPT/opt_strikes": {
       "dataset": "HIVEQ_US_OPT",
       "schema": "opt_strikes",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     },
     "HIVEQ_US_OPT/snaps_1s": {
       "dataset": "HIVEQ_US_OPT",
       "schema": "snaps_1s",
       "status": "no_behavioural_test",
-      "updated_at": "2026-07-28T03:18:56"
+      "updated_at": "2026-08-06T04:58:53"
     }
   },
   "l2.callbacks": {

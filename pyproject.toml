@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hiveq-sdk"
-version = "1.0.0"
+version = "1.0.1"
 description = "Thin HiveQ Flow client SDK — author strategies and deploy backtests to the HiveQ platform. Ships type stubs + the deploy/observe client only (no engine)."
 readme = "README.md"
 requires-python = ">=3.11"

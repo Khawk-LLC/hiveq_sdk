@@ -1,0 +1,3026 @@
+{
+  "source": "/home/rmadanagopal/PycharmProjects/hiveq-flow/examples/bt",
+  "source_file_count": 165,
+  "status_values": [
+    "pending",
+    "ported",
+    "duplicate",
+    "diagnostic_only",
+    "helper"
+  ],
+  "files": [
+    {
+      "file": "0dte_filtering.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "adaptive_parameters_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "is_net_long",
+        "net_position",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t07_timers.py,t33_parameter_changes.py",
+      "reason": "timers and adaptive parameter evidence"
+    },
+    {
+      "file": "ai_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "is_net_long",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "all_filters_comprehensive.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "benchmark_bars_market_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_hiveq_event",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "non-deterministic throughput benchmark, retained outside release gates"
+    },
+    {
+      "file": "benchmark_bars_profiled.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_hiveq_event",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "profiling wrapper, not a distinct functional contract"
+    },
+    {
+      "file": "break_watermark_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_executor",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "add_executor",
+        "build_executor_params",
+        "get_executor_params_by_id",
+        "instrument",
+        "net_position",
+        "replace_executor_params_by_id",
+        "stop_executor_by_id",
+        "subscribe_data",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t39_executor_lifecycle.py",
+      "reason": "managed executor lifecycle"
+    },
+    {
+      "file": "bugs/bars_issue.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "now",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "bugs/on_position_not_firing.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_position",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "close_position",
+        "has_open_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "position callbacks and transitions"
+    },
+    {
+      "file": "bugs/on_start_calendar_day.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_start"
+      ],
+      "ctx_calls": [
+        "now",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "buy_and_hold_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "cash_equity.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "custom_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "daily_time_filter_1_equity_full_day.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_2_equity_custom_1hr.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_3_equity_market_hours.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_4_futures_default.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_5_futures_custom.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_6_multi_day_equity.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_7_multi_day_custom.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "daily_time_filter_common.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "helper",
+      "mapped_to": null,
+      "reason": "shared source helper/configuration; no standalone behavior"
+    },
+    {
+      "file": "daily_time_filter_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "data_exploration.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py",
+      "reason": "market-data subscription delivery"
+    },
+    {
+      "file": "data_fetch_validation_strategy.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "helper",
+      "mapped_to": null,
+      "reason": "shared source helper/configuration; no standalone behavior"
+    },
+    {
+      "file": "dynamic_subscription_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py",
+      "reason": "successive subscription accumulation"
+    },
+    {
+      "file": "enhanced_snap_filtering.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "equity_rerun_loop.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "open_order_qty",
+        "sell_order",
+        "set_timer",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "equity_trades_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_quote",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "reason": "trade/quote delivery and payloads"
+    },
+    {
+      "file": "es_scalp_debug.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_quote",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "cancel_order",
+        "net_position",
+        "sell_order",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
+    },
+    {
+      "file": "es_scalp_profiled.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_quote",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "cancel_order",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
+    },
+    {
+      "file": "example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "close_position",
+        "is_flat",
+        "short_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "expiration_date_format.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "fill_bars.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "instrument",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "futures_dynamic_subscription_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py",
+      "reason": "successive subscription accumulation"
+    },
+    {
+      "file": "futures_session.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "futures_session_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "global_function_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t23_global_dispatch.py",
+      "reason": "module-level dispatch"
+    },
+    {
+      "file": "global_portfolio_simple.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "global_portfolio",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t25_global_portfolio.py",
+      "reason": "global aggregation"
+    },
+    {
+      "file": "hold_and_close.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "index_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "is_net_long",
+        "net_position",
+        "sell_order",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py,t03_all_asset_types.py",
+      "reason": "index values and bars"
+    },
+    {
+      "file": "inverse_head_shoulders.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_position",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "cancel_all_orders",
+        "has_open_order",
+        "is_flat",
+        "net_position",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t41_stop_limit_latch.py,t46_stop_bracket_orders.py,t05_order_lifecycle.py",
+      "reason": "latched STOP_LIMIT behavior, protective exits, and manual sibling cancellation"
+    },
+    {
+      "file": "moo_moc_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "sell_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t24_auction_orders.py",
+      "reason": "auction order fills"
+    },
+    {
+      "file": "multi_day_equity_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "no_filtering.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py",
+      "reason": "market-data subscription delivery"
+    },
+    {
+      "file": "noop_perf_baseline.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_quote",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "performance baseline, not a functional pass/fail contract"
+    },
+    {
+      "file": "notebook_simulation_class.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "interactive notebook demonstration, not a validation oracle"
+    },
+    {
+      "file": "offtick_reject.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t18_reject_reason.py,t19_order_gate.py",
+      "reason": "local and engine rejection paths"
+    },
+    {
+      "file": "offtick_reject_diag.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t18_reject_reason.py,t19_order_gate.py",
+      "reason": "local and engine rejection paths"
+    },
+    {
+      "file": "oom.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_quote",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "short_order",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "intentional memory-stress reproducer, unsafe as a release gate"
+    },
+    {
+      "file": "option_snaps_0dte.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "options_0dte_straddle.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_index_price",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_index",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "options_signals_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_custom_data",
+        "on_index",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_data",
+        "subscribe_futures_bars",
+        "subscribe_index",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py,t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "combined option and custom/hosted-signal routing"
+    },
+    {
+      "file": "order_management_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_hiveq_event",
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "cancel_order",
+        "modify_order",
+        "net_position",
+        "open_order_qty",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t20_cancel_modify_order.py",
+      "reason": "order query/modify/cancel lifecycle"
+    },
+    {
+      "file": "order_rejection_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t18_reject_reason.py,t19_order_gate.py",
+      "reason": "local and engine rejection paths"
+    },
+    {
+      "file": "peg_direct_control.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t39_executor_lifecycle.py",
+      "reason": "managed executor lifecycle"
+    },
+    {
+      "file": "peg_executor_smoke_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_executor",
+        "build_executor_params",
+        "instrument",
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t39_executor_lifecycle.py",
+      "reason": "managed executor lifecycle"
+    },
+    {
+      "file": "performance_test_intraday.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "wall-clock performance harness, environment-dependent"
+    },
+    {
+      "file": "performance_test_overnight.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "wall-clock performance harness, environment-dependent"
+    },
+    {
+      "file": "pre_built_compare_daily.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "references the platform-internal UserSignalStrategy, outside the public authoring API"
+    },
+    {
+      "file": "pre_built_compare_prefetch.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "references the platform-internal UserSignalStrategy, outside the public authoring API"
+    },
+    {
+      "file": "pre_built_strategy.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "references the platform-internal UserSignalStrategy and obsolete UTC parameter guidance"
+    },
+    {
+      "file": "probe_0dte_fills.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_order",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "instrument",
+        "is_flat",
+        "portfolio",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "probe_all_asset_subscriptions.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_index_price",
+        "on_snap",
+        "on_start",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_futures_bars",
+        "subscribe_index_bars",
+        "subscribe_option_snaps",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t03_all_asset_types.py,t28_cash_equity_exposure.py,t38_multi_rollover_squareoff.py,t40_option_order_fill.py",
+      "reason": "multi-asset delivery plus equity, futures, and option fills"
+    },
+    {
+      "file": "probe_custom_session.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "probe_daily_bars_fill.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t17_daily_bars_fill.py",
+      "reason": "daily-bar close fills"
+    },
+    {
+      "file": "probe_data_flow.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "probe_enum_str_stability.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "ported",
+      "mapped_to": "t16_enum_str_stability.py",
+      "reason": "enum wire values"
+    },
+    {
+      "file": "probe_equity_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "probe_error_visibility.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t32_callback_error_visibility.py",
+      "reason": "callback failure visibility"
+    },
+    {
+      "file": "probe_futures_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_futures_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "probe_market_center_latency.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event",
+        "on_order",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "uses undocumented latency_millis engine diagnostics"
+    },
+    {
+      "file": "probe_options_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "probe_order_gate.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t18_reject_reason.py,t19_order_gate.py",
+      "reason": "local and engine rejection paths"
+    },
+    {
+      "file": "probe_reject_text.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t18_reject_reason.py,t19_order_gate.py",
+      "reason": "local and engine rejection paths"
+    },
+    {
+      "file": "probe_userdata_time_window.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "now",
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "uses undocumented data_configs start_time/end_time fields"
+    },
+    {
+      "file": "ref_price_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_fill",
+        "on_order_event",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "rerun_backtest_loop.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "rollover_callback.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_rollover",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t08_rollover.py,t38_multi_rollover_squareoff.py",
+      "reason": "roll callback, carry, and repeated square-off"
+    },
+    {
+      "file": "sharpe_comparison_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "open_order_qty",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "sigma_backtest.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_order",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "sigma_timing_profile.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "profiling harness, environment-dependent"
+    },
+    {
+      "file": "signal_data_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "signal_dynamic_data_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py,t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "combined option and custom/hosted-signal routing"
+    },
+    {
+      "file": "simple_snap_callback.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_snap",
+        "on_start"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "sma_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "open_order_qty",
+        "sell_order",
+        "set_timer",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "sma_strategy_event_callbacks.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_timer"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "open_order_qty",
+        "sell_order",
+        "set_timer",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "snap_tradetick.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "place_order",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "stat_arb_pairs.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "strat8_deploy_v4.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_index_price",
+        "on_order",
+        "on_quote",
+        "on_start",
+        "on_stop",
+        "on_timer",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "cancel_order",
+        "cancel_timer",
+        "net_position",
+        "now",
+        "portfolio",
+        "sell_order",
+        "set_timer",
+        "subscribe_futures_trades",
+        "subscribe_index"
+      ],
+      "datasets": [
+        "HIVEQ_QUANT_CLUSTERS",
+        "HIVEQ_US_IND"
+      ],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t44_cluster_analytics_data.py,t07_timers.py,t05_order_lifecycle.py",
+      "reason": "cluster analytics evidence plus timer and direct-order lifecycle"
+    },
+    {
+      "file": "strike_filter.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "subscribe_futures.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_fill",
+        "on_order_event",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "subscribe_futures_profiled.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_fill",
+        "on_order_event",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "subscribe_index.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_index_price",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "instrument",
+        "is_flat",
+        "subscribe_bars",
+        "subscribe_futures_bars",
+        "subscribe_index"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py,t03_all_asset_types.py",
+      "reason": "index values and bars"
+    },
+    {
+      "file": "subscribe_indices_bars.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_index_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "subscribe_options.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "subscribe_tbbo.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event",
+        "on_quote",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "reason": "trade/quote delivery and payloads"
+    },
+    {
+      "file": "subscribe_trades_quotes.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event",
+        "on_quote",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_quotes",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "reason": "trade/quote delivery and payloads"
+    },
+    {
+      "file": "tbbo_order_flow_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event",
+        "on_quote",
+        "on_stop",
+        "on_timer",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "set_timer",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "reason": "trade/quote delivery and payloads"
+    },
+    {
+      "file": "tca_example.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "TCA report presentation example, not a standalone execution release gate"
+    },
+    {
+      "file": "test_bar_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "test_crash.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t32_callback_error_visibility.py",
+      "reason": "callback failure visibility"
+    },
+    {
+      "file": "test_crash_order.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t32_callback_error_visibility.py",
+      "reason": "callback failure visibility"
+    },
+    {
+      "file": "test_data_availability.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "test_deploy_publish.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "open_order_qty",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "C++ publisher logging diagnostic without a publication-result oracle"
+    },
+    {
+      "file": "test_limit_ioc.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t30_ioc_gtc_limits.py",
+      "reason": "limit persistence and TIF"
+    },
+    {
+      "file": "test_limit_simple.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t30_ioc_gtc_limits.py",
+      "reason": "limit persistence and TIF"
+    },
+    {
+      "file": "test_market_minimal.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "test_market_vs_limit.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "test_pnl.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_net_long",
+        "is_net_short",
+        "sell_order",
+        "short_order",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "test_sharpe_fix.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "ported",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "test_trace_crash.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t32_callback_error_visibility.py",
+      "reason": "callback failure visibility"
+    },
+    {
+      "file": "test_unfilled_limit.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t30_ioc_gtc_limits.py",
+      "reason": "limit persistence and TIF"
+    },
+    {
+      "file": "test_utils.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "helper",
+      "mapped_to": null,
+      "reason": "shared source helper/configuration; no standalone behavior"
+    },
+    {
+      "file": "timer_example.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "global_portfolio",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t07_timers.py,t33_parameter_changes.py",
+      "reason": "timers and adaptive parameter evidence"
+    },
+    {
+      "file": "timezone_test.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "user_examples/01_buy_and_hold.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "user_examples/02_sma_crossover.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "cancel_all_orders",
+        "net_position",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "user_examples/03_order_management.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "cancel_order",
+        "modify_order",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t20_cancel_modify_order.py",
+      "reason": "order query/modify/cancel lifecycle"
+    },
+    {
+      "file": "user_examples/04_subscribe_options.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "user_examples/05_subscribe_futures.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "is_flat",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "user_examples/06_custom_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "user_examples/07_signal_data.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "user_examples/08_multi_strategy_portfolio.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "global_portfolio",
+        "has_open_order",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t25_global_portfolio.py",
+      "reason": "global aggregation"
+    },
+    {
+      "file": "user_examples/09_hold_and_close_futures.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "sell_order",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "user_examples/10_adaptive_parameters.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "is_flat",
+        "is_net_long",
+        "net_position",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t07_timers.py,t33_parameter_changes.py",
+      "reason": "timers and adaptive parameter evidence"
+    },
+    {
+      "file": "user_examples/11_options_data_exploration.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "user_examples/12_options_0dte_filtering.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "user_examples/13_options_filter_reference.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "user_examples/15_dynamic_subscription.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py",
+      "reason": "successive subscription accumulation"
+    },
+    {
+      "file": "user_examples/16_global_portfolio.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "global_portfolio",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t25_global_portfolio.py",
+      "reason": "global aggregation"
+    },
+    {
+      "file": "user_examples/17_global_function_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "portfolio",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t23_global_dispatch.py",
+      "reason": "module-level dispatch"
+    },
+    {
+      "file": "user_examples/18_options_calls_and_puts.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "user_examples/21_time_filtering.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "user_examples/22_user_signal_asset_types.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "configuration-only reference for a platform-internal strategy, including unsupported crypto data"
+    },
+    {
+      "file": "user_examples/23_subscribe_equities.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "is_flat",
+        "is_net_long",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py",
+      "reason": "market-data subscription delivery"
+    },
+    {
+      "file": "user_examples/24_subscribe_index.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_index_price",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_index"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py,t03_all_asset_types.py",
+      "reason": "index values and bars"
+    },
+    {
+      "file": "user_examples/25_rollover_equity_curve.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "net_position",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t08_rollover.py,t38_multi_rollover_squareoff.py",
+      "reason": "roll callback, carry, and repeated square-off"
+    },
+    {
+      "file": "user_examples/26_bar_fill_validation.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "buy_order",
+        "sell_order",
+        "subscribe_futures_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t17_daily_bars_fill.py",
+      "reason": "daily-bar close fills"
+    },
+    {
+      "file": "user_signal_strategy_examples.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "configuration-only reference for a platform-internal strategy, with obsolete UTC guidance"
+    },
+    {
+      "file": "validate.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_hiveq_event"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "is_flat",
+        "subscribe_bars"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t05_order_lifecycle.py,t06_position_portfolio.py,t29_long_short_transitions.py",
+      "reason": "direct-order lifecycle and position state; application signal math adds no SDK surface"
+    },
+    {
+      "file": "validate_bars_vs_clickhouse.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t42_stream_data_api_parity.py",
+      "reason": "stream/Data API count parity"
+    },
+    {
+      "file": "validate_cancel_order.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t20_cancel_modify_order.py",
+      "reason": "order query/modify/cancel lifecycle"
+    },
+    {
+      "file": "validate_exposure_metrics.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_EQ"
+      ],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "validate_fills_all_assets.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t03_all_asset_types.py,t28_cash_equity_exposure.py,t38_multi_rollover_squareoff.py,t40_option_order_fill.py",
+      "reason": "multi-asset delivery plus equity, futures, and option fills"
+    },
+    {
+      "file": "validate_futures_rollover.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t08_rollover.py,t38_multi_rollover_squareoff.py",
+      "reason": "roll callback, carry, and repeated square-off"
+    },
+    {
+      "file": "validate_futures_session_jan2025.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_quote",
+        "on_start",
+        "on_stop",
+        "on_trade"
+      ],
+      "ctx_calls": [
+        "subscribe_quote_ticks",
+        "subscribe_trades"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "validate_holiday_no_orders.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t22_equity_holidays.py",
+      "reason": "holiday suppression"
+    },
+    {
+      "file": "validate_modify_order.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t20_cancel_modify_order.py",
+      "reason": "order query/modify/cancel lifecycle"
+    },
+    {
+      "file": "validate_pnl_multi_asset.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t06_position_portfolio.py,t10_metrics_validation.py,t28_cash_equity_exposure.py",
+      "reason": "PnL, returns, cash, and exposure arithmetic"
+    },
+    {
+      "file": "validate_rollover_squareoff.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t08_rollover.py,t38_multi_rollover_squareoff.py",
+      "reason": "roll callback, carry, and repeated square-off"
+    },
+    {
+      "file": "validate_session_boundary.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "ported",
+      "mapped_to": "t21_session_start_boundaries.py,t27_equity_futures_sessions.py,t35_calendar_day_start.py",
+      "reason": "ET sessions, DST/weekends, and calendar-day callbacks"
+    },
+    {
+      "file": "validate_vs_backtrader.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "diagnostic_only",
+      "mapped_to": null,
+      "reason": "third-party Backtrader comparison, not an SDK contract"
+    },
+    {
+      "file": "validation_equity_daily.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_EQ"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "validation_equity_prefetch.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_EQ"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "validation_futures_daily.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_FUT"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "validation_futures_prefetch.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_FUT"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t03_all_asset_types.py,t27_equity_futures_sessions.py",
+      "reason": "futures data and sessions"
+    },
+    {
+      "file": "validation_index.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_INDEX"
+      ],
+      "schemas": [
+        "index"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t02_successive_accumulate.py,t03_all_asset_types.py",
+      "reason": "index values and bars"
+    },
+    {
+      "file": "validation_multi_day.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_EQ"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t01_bars_multi_interval.py,t42_stream_data_api_parity.py",
+      "reason": "bar delivery, intervals, and counts"
+    },
+    {
+      "file": "validation_signals_daily.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_FUT"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "validation_signals_prefetch.py",
+      "syntax": "ok",
+      "callbacks": [],
+      "ctx_calls": [],
+      "datasets": [
+        "HIVEQ_US_FUT"
+      ],
+      "schemas": [
+        "bars_1m"
+      ],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "custom CSV and hosted signal routing"
+    },
+    {
+      "file": "validation_utils.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_custom_data",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "subscribe_bars",
+        "subscribe_data",
+        "subscribe_futures_bars",
+        "subscribe_index"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "helper",
+      "mapped_to": null,
+      "reason": "shared source helper/configuration; no standalone behavior"
+    },
+    {
+      "file": "zerodte_custom_data_check.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_bar",
+        "on_custom_data",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "subscribe_bars",
+        "subscribe_data"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py,t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "combined option and custom/hosted-signal routing"
+    },
+    {
+      "file": "zerodte_iron_condor.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_index_price",
+        "on_order",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "instrument",
+        "now",
+        "portfolio",
+        "sell_order",
+        "subscribe_index",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "zerodte_iron_condor_kimi_original.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_index_price",
+        "on_order",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "now",
+        "portfolio",
+        "sell_order",
+        "subscribe_index",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": false,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py",
+      "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
+    },
+    {
+      "file": "zerodte_signal_strategy.py",
+      "syntax": "ok",
+      "callbacks": [
+        "on_custom_data",
+        "on_order",
+        "on_snap",
+        "on_start",
+        "on_stop"
+      ],
+      "ctx_calls": [
+        "add_event_log",
+        "buy_order",
+        "instrument",
+        "is_flat",
+        "net_position",
+        "portfolio",
+        "sell_order",
+        "short_order",
+        "subscribe_data",
+        "subscribe_option_snaps"
+      ],
+      "datasets": [],
+      "schemas": [],
+      "runnable": true,
+      "status": "duplicate",
+      "mapped_to": "t26_option_filters.py,t40_option_order_fill.py,t45_multileg_options.py,t36_custom_csv_routing.py,t37_hosted_signals.py",
+      "reason": "combined option and custom/hosted-signal routing"
+    }
+  ],
+  "status_counts": {
+    "diagnostic_only": 18,
+    "duplicate": 107,
+    "helper": 4,
+    "ported": 36
+  }
+}

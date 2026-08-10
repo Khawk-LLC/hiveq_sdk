@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-flow` · **import root**: `hiveq.flow` · **version**: `1.0.0`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.1`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -376,7 +376,7 @@ class MyStrategy:
 | `on_timer` | `TIMER` | `TimerEventData` (§7.8) |
 | `on_custom_data` | `CUSTOM_DATA` | `SigmaCustomData` (§7.9) |
 | `on_index_price` (alias `on_index`) | `INDEX_PRICE` | `IndexPrice` (§7.11) |
-| `on_imbalance` | `IMBALANCE` | `ImbalanceData` (§7.14) — auction imbalance feed; needs the `early_imbalance` schema in `data_configs` |
+| `on_imbalance` | `IMBALANCE` | `ImbalanceData` (§7.14) — auction imbalance feed; configure one of `early_imbalance`, `arca_imbalance`, `nasd_imbalance`, or `nyse_imbalance` in `data_configs` |
 | `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
 | `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
 | `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
@@ -573,6 +573,7 @@ ctx.cancel_all_orders(symbol: str = None) -> bool
 ctx.clear_pending_order(symbol: str) -> None
 ctx.get_order_state(order_id: str) -> Optional[OrderState]
 ```
+The `modify_order` boolean reports whether the request was accepted for processing, not its final exchange/engine outcome. `quantity` is the new absolute order quantity and is passed to Sigma unchanged; it is not a delta or adjustment. Confirm success in `on_order` from `ORDER_UPDATED`; handle `ORDER_MODIFY_REJECTED` and inspect `SigmaOrder.reject_reason` for a rejected request. Do not stack another replace for the same order while the first replace is pending.
 
 ### 5.4 Position / order queries
 ```python
@@ -773,8 +774,10 @@ signal = json.loads(normalized)
 `continuous_symbol:str`("ES.c.0") · `prev_contract:str`("ESZ5") · `current_contract:str`("ESH6") · `ts_event:int`
 
 ### 7.14 ImbalanceData
-Auction imbalance record (NYSE/Arca/Nasdaq imbalance feed; `early_imbalance` schema, HIVEQ_US_EQ). Venue-specific fields are `None` when the publishing venue does not provide them.
-`symbol:str` · `side:str`('B'/'S') · `imbalance:float`(shares) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C', Nasdaq) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
+Auction imbalance record from `HIVEQ_US_EQ`. Select the logical metadata-routed schema that matches the feed: `early_imbalance` (normalized early auction), `arca_imbalance` (NYSE Arca), `nasd_imbalance` (Nasdaq), or `nyse_imbalance` (NYSE). Never embed the physical `prod_imbalances_*` database name; the platform resolves the current database and table from schema metadata.
+
+Venue-specific optional numeric fields are `None` when the venue does not publish a meaningful value. Source zeroes used as unavailable sentinels are therefore normalized to `None`; required quantities such as `imbalance` and `paired_shares` retain zero. `side` preserves the normalized venue state, including descriptive values such as `BUY_IMBALANCE`, `SELL_IMBALANCE`, `NO_IMBALANCE`, and `NO_IMBALANCE_ON_CLOSE` (rather than being restricted to `B`/`S`). NYSE imbalance quantities are signed: sell imbalances can be negative. Common mappings are: Arca `imb_side`/`paired`/`ref_price`/`market_imbalance`; Nasdaq `imb_direction`/`paired`/`ref_price`/`near_price`/`far_price`/`cross_type`; NYSE `side`/`paired_shares`/`ref_price` and clearing-price variants.
+`symbol:str` · `side:str`(venue imbalance state) · `imbalance:float`(shares; signed for NYSE) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C'/'A', Nasdaq; venue code) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
 These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
@@ -829,6 +832,10 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 ```python
 # equities 1-minute bars
 {'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}
+# exchange auction imbalance data (delivered to on_imbalance)
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['arca_imbalance']}
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['nasd_imbalance']}
+{'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['nyse_imbalance']}
 # futures (subscribe to a continuous symbol like 'ES.c.0'); for rollover set
 # BacktestConfig(enable_auto_rollover=True) — no data_configs flag needed.
 {'type':'hiveq_historical','dataset':'HIVEQ_US_FUT','schema':['bars_1m']}
