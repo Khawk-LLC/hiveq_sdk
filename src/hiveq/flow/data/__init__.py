@@ -9,6 +9,7 @@ from .data_types import (
     TimerEventData,
     RolloverData,
     IndexPrice,
+    ImbalanceData,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "TimerEventData",
     "RolloverData",
     "IndexPrice",
+    "ImbalanceData",
 ]

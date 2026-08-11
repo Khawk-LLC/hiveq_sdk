@@ -191,6 +191,8 @@ class EventType(Enum):
     TIMER = "TIMER"
     # Index events
     INDEX_PRICE = "INDEX_PRICE"
+    # Auction imbalance events (NYSE/Arca/Nasdaq imbalance feed)
+    IMBALANCE = "IMBALANCE"
     # Rollover events
     ROLLOVER = "ROLLOVER"
     # Executor events (Sigma-specific)

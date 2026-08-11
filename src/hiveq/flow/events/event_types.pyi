@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime as datetime
 from hiveq.flow.config import EventType as EventType
-from hiveq.flow.data.data_types import Bar as Bar, CustomData as CustomData, IndexPrice as IndexPrice, QuoteTick as QuoteTick, SnapData as SnapData, TimerEventData as TimerEventData, TradeTick as TradeTick
+from hiveq.flow.data.data_types import Bar as Bar, CustomData as CustomData, ImbalanceData as ImbalanceData, IndexPrice as IndexPrice, QuoteTick as QuoteTick, SnapData as SnapData, TimerEventData as TimerEventData, TradeTick as TradeTick
 from hiveq.flow.oms.sigma.types import SigmaOrder as Order, SigmaPosition as Position
 from hiveq.flow.utils.timezone_utils import get_configured_timezone as get_configured_timezone, nanos_to_local_datetime as nanos_to_local_datetime
 from typing import Any
@@ -103,3 +103,8 @@ class SecurityEvent(Event):
     security_data: SecurityEventData
     type: EventType = ...
     def data(self) -> SecurityEventData: ...
+
+class ImbalanceEvent(Event):
+    imbalance: ImbalanceData
+    type: EventType = ...
+    def data(self) -> ImbalanceData: ...

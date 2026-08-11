@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.1`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.2`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -454,7 +454,7 @@ ctx.short_order(symbol, quantity, order_type=None, limit_price=None, stop_price=
                 time_in_force=None, market_center=None)
 ctx.place_order(symbol: str, side: OrderSide, quantity: float, order_type: OrderType,
                 limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                market_center: str = None)
+                time_in_force: str = None, market_center: str = None)
 
 # Convenience helpers (size/flatten off the current net position):
 ctx.close_position(symbol: str, order_type: OrderType = None) -> Optional[SigmaOrder]
@@ -725,24 +725,24 @@ event.time_utc    -> Optional[datetime] # UTC
 `symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str`(human-readable: `'1d'` / `'1m'` / `'1s'` — matches the available bar schemas; no `'1h'`) · `interval_millis:int`(`86400000` / `60000` / `1000`) · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.2 SigmaPosition
-`symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
+`symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `last_price:float` · `long_notional:float` · `short_notional:float` · `max_exposure:float` · `total_fill_qty:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
 
 ### 7.3 SigmaOrder
 `status` is the order's **state** (sticky once terminal — FIX OrdStatus semantics); `event.type` is what just **happened**. A cancel racing a fill delivers `ORDER_FILLED` then `ORDER_CANCEL_REJECTED`, with `status == FILLED` on both — see the "Order lifecycle contract" in §4.
 
-`symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
+`symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_sell_short:bool` · `is_executor_order:bool` · `strategy_id:str` · `router_id:str` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.4 SigmaFill  (via `order.last_fill`)
-`trade_id:str` · `execution_id:str` · `last_qty:float`(alias `filled_qty`) · `last_px:float`(alias `avg_px`) · `commission:float` · `liquidity_side:str`("MAKER"|"TAKER") · `symbol:str` · `side:str`("BUY"|"SELL") · `ts_event:int`
+`order_id:str` · `leaves_qty:float` · `order_qty:float` · `exec_type:str` · `market_center` · `trade_id:str` · `execution_id:str` · `last_qty:float`(alias `filled_qty`) · `last_px:float`(alias `avg_px`) · `commission:float` · `liquidity_side:str`("MAKER"|"TAKER") · `symbol:str` · `side:str`("BUY"|"SELL") · `ts_event:int`
 
 ### 7.5 SigmaTradeTick
-`symbol:str` · `price:float` · `size:float` · `aggressor_side:str`("BUY"|"SELL"|"NO_AGGRESSOR") · `trade_id:str` · `exchange:str` · `ts_event:int` · `time/time_utc:datetime?`
+`symbol:str` · `price:float` · `size:float` · `aggressor_side:str`("BUY"|"SELL"|"NO_AGGRESSOR") · `trade_id:str` · `exchange`(normalized venue enum when available) · `market_center`(alias of normalized venue) · `exchange_raw:str`(feed venue text) · `last_price:float` · `condition`(normalized `TradeCondition`) · `raw_trade_condition:int`(numeric native code; zero when the feed supplies text) · `condition_raw:str`(feed condition text) · `ts_event:int(ns)` · `time/time_utc:datetime?`
 
 ### 7.6 SigmaQuoteTick
-`symbol:str` · `bid_price:float` · `ask_price:float` · `bid_size:float` · `ask_size:float` · `mid_price:float` · `spread:float` · `exchange:str` · `ts_event:int` · `time/time_utc:datetime?`
+`symbol:str` · `bid_price:float` · `ask_price:float` · `bid_size:float` · `ask_size:float` · `mid_price:float` · `spread:float` · `exchange`(normalized venue) · `bid_exchange` · `ask_exchange` · `condition:str?` · `is_valid:bool?` · `ts_event:int(ns)` · `time/time_utc:datetime?`
 
 ### 7.7 SigmaSnapData (options snapshot)
-`symbol:str`(root) · `chain:str`(OCC) · `underlying:str` · `option_type:str`("C"|"P") · `expiration_date:str` · `strike:float` · `bid_px:float` · `ask_px:float` · `price:float` · `bid_sz:int` · `ask_sz:int` · `size:int` · `mid_price:float` · `spread:float` · `date:str`('YYYY-MM-DD') · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
+`symbol:str`(root) · `chain:str`(OCC) · `underlying:str` · `option_type:str`("C"|"P") · `expiration_date:str` · `strike:float` · `bid_px:float` · `ask_px:float` · `price:float` · `bid_sz:int` · `ask_sz:int` · `size:int` · `mid_price:float` · `spread:float` · `date:str`('YYYY-MM-DD') · `is_valid:bool?` · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
 
 ### 7.8 TimerEventData
 `timer_id:str` · `ts_event:int` · `ts_init:int` · `time/time_utc:datetime?`
@@ -765,7 +765,7 @@ signal = json.loads(normalized)
 ```
 
 ### 7.10 SigmaInstrument  (`ctx.instrument(symbol)`)
-`symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume`)
+`symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `orderBookDepth` · `hasOrderBookDepth:bool` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume,prev_close`)
 
 ### 7.11 IndexPrice
 `symbol:str` · `price:float` · `ts_event:int` · `ts_init:int`

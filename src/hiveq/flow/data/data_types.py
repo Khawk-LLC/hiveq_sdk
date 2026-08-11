@@ -43,4 +43,7 @@ class RolloverData:
 class IndexPrice:
     ...
 
-__all__ = ['Bar', 'CustomData', 'EventLogData', 'IndexPrice', 'Instrument', 'QuoteTick', 'RolloverData', 'SnapData', 'TimerEventData', 'TradeStats', 'TradeTick', '_CustomDataCopy']
+class ImbalanceData:
+    ...
+
+__all__ = ['Bar', 'CustomData', 'EventLogData', 'ImbalanceData', 'IndexPrice', 'Instrument', 'QuoteTick', 'RolloverData', 'SnapData', 'TimerEventData', 'TradeStats', 'TradeTick', '_CustomDataCopy']
