@@ -1521,16 +1521,19 @@ data = client.get_data(
 
 # Instrument reference
 ref = hd.InstrumentReference()
-futures = ref.get_futures(root=['ES', 'NQ'])
+futures = ref.get_futures(symbols=['ES.c.0', 'NQ.c.0'],
+                          start_date='2025-08-01', end_date='2025-08-05')
 
 # Publishing
 pub = hd.Publisher()
 pub.publish(schema='quant_features', data=[{'sym': 'AAPL', 'score': 0.85}], key='my_signal')
+pub.flush()  # Publisher defaults to async_mode=True in hiveq-data 0.2.9
+pub.close()
 
 # Live streaming (async)
 stream = hd.LiveStream()
 await stream.connect()
-await stream.subscribe(topic='market_data.equity.tbbo', key='AAPL', callback=on_tick)
+await stream.subscribe(topic='market_data.equity.tbbo', keys='AAPL', callback=on_tick)
 
 # Metadata
 meta = hd.Metadata()
@@ -1543,9 +1546,9 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 | `hd.configure(api_key, base_url, ...)` | Set API credentials (once, module-level) |
 | `hd.Historical(timezone=...)` | Historical data client |
 | `.get_data(dataset, schema, symbols, root, chains, start, end, limit, filter_mode, ...)` | Fetch historical data |
-| `hd.Publisher(async_mode=...)` | REST publisher |
-| `.publish(schema, data, key, operation)` | Publish records |
-| `hd.LiveStream(...)` | WebSocket live streaming client |
+| `hd.Publisher(async_mode=True)` | REST publisher; call `flush()`/`close()` for queued writes |
+| `.publish(schema, data, key, operation)` | Publish records (`operation='add'` or `'modify'`) |
+| `hd.LiveStream(host, port, ...)` | WebSocket live/replay client; `subscribe` accepts `keys`, `replay`, `from_ts`, `to_ts` |
 | `hd.InstrumentReference(...)` | Instrument reference lookups (futures, options, equities, indices) |
 | `hd.Metadata(...)` | Dataset/schema discovery |
 | `hd.HiveQAPIError` | Exception for API failures (has `.status_code`, `.response_json`) |

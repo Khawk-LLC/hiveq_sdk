@@ -7,7 +7,7 @@ thin SDK installed.
 """
 from __future__ import annotations
 
-__version__ = "0.2.6"
+__version__ = "0.2.9"
 
 from hiveq_data.config import configure
 from hiveq_data.historical import Historical

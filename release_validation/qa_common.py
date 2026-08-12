@@ -13,12 +13,45 @@ def emit_checkpoint(ctx: Any, name: str, state: dict[str, Any]) -> None:
     ctx.add_event_log(name, sub_event_type=CHECKPOINT_TYPE, state_variable=state)
 
 
+def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0) -> Any:
+    """Call a read-only platform endpoint, retrying transient server faults.
+
+    A 5xx on ``/status`` or ``/event-logs`` is a platform read fault, not a
+    strategy result — retrying it keeps an unrelated gateway hiccup from being
+    reported as a validation failure.  Every retry is printed so a flaky
+    environment stays visible rather than silently absorbed.  Client errors
+    (4xx) and non-HTTP exceptions propagate unchanged.
+    """
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return read()
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            transient = (status is not None and 500 <= int(status) < 600) or (
+                status is None
+                and exc.__class__.__name__ in {
+                    "ConnectionError", "Timeout", "ReadTimeout", "ChunkedEncodingError",
+                }
+            )
+            if not transient:
+                raise
+            last_exc = exc
+            print(
+                f"[RETRY] {what}: transient platform fault "
+                f"({status or exc.__class__.__name__}); attempt {attempt}/{attempts}",
+                flush=True,
+            )
+            time.sleep(delay)
+    raise last_exc
+
+
 def wait_for_final(run: Any, timeout: float = 900.0, poll_interval: float = 2.0) -> dict[str, Any]:
     """Wait for the run resource itself, independent of submission-task state."""
     deadline = time.monotonic() + timeout
     last = {}
     while time.monotonic() < deadline:
-        last = run.status() or {}
+        last = _read_with_retry(run.status, "run.status()") or {}
         status = str(last.get("status", "")).lower()
         if status in {"failed", "terminated", "error"}:
             log_tail = None
@@ -47,7 +80,7 @@ def _event_logs(run: Any) -> Any:
     empty frame when ``is_local`` — an in-process engine run keeps them in the
     app singleton instead, reachable via ``hf.event_logs()``.
     """
-    logs = run.event_logs()
+    logs = _read_with_retry(run.event_logs, "run.event_logs()")
     if logs is not None and not getattr(logs, "empty", True):
         return logs
     if getattr(run, "is_local", False):

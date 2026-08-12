@@ -6,10 +6,12 @@ the backend — load data from HiveQ, CSV, HDF5 (or legacy kdb+) by changing con
 files instead of writing any code. KDB is retained (`transport=KDB`) for kdb+
 users; see Migrating from KDB (§20).
 
-> For the underlying **HiveQ Data API SDK** (`hiveq_data`) that the `transport=HiveQ`
-> path uses to pull data — `configure` + `Historical.get_data` params, datasets/schemas,
-> filter modes, pagination, and the config→SDK mapping — see **Part II** at the end of
-> this file.
+> `transport=HiveQ` uses a private, vendored client imported as
+> `hiveq.driver.hiveq_data`; it does not depend on the separately installed
+> `hiveq-data` distribution. Part II first documents the exact vendored-client
+> paths used by the driver, then catalogs the public standalone `hiveq_data` 0.2.9
+> API shipped as authoring stubs with this SDK. Do not treat the two packages as
+> interchangeable implementation dependencies.
 
 **HiveQ reference data** (real datasets/schemas; the examples below use a subset)
 
@@ -56,11 +58,11 @@ by searching for a line starting `## N.` (or `## II.N`).
 ```sh
 pip install HiveQDataDriver
 # extras:
-pip install 'HiveQDataDriver[hiveq]'    # HiveQ Data API SDK (transport=HiveQ)
 pip install 'HiveQDataDriver[kdb]'      # legacy kdb+ transport (qpython3)
 ```
 
-**Pre-requisite:** pandas >= 1.0.
+The HiveQ client is vendored into `HiveQDataDriver`; there is no `[hiveq]` extra
+or separate `hiveq-data` install step. **Pre-requisite:** pandas >= 1.0.
 
 
 ---
@@ -1218,21 +1220,25 @@ config. Prefer the config-driven section API above.
 
 # Part II — `hiveq_data` SDK reference
 
-This documents the part of the **`hiveq_data`** SDK (dist `hiveq-data`; repo
-<https://github.com/Khawk-LLC/hiveq-data-sdk>) that the data driver depends on to
-**pull market data**. The driver never calls the SDK directly in user code — the
-`transport=HiveQ` sections route through `hiveq/driver/hiveq_transport.py`, which
-calls the SDK for you. This file exists so an AI agent (or a human) extending the
-HiveQ transport knows the exact SDK surface, parameters, and config mapping.
+There are two related clients:
 
-SDK version referenced: **0.2.4**. Endpoints are version `v0`.
+- `HiveQDataDriver` vendors its own independent copy at
+  `hiveq.driver.hiveq_data`. Driver users call `dd.load`/`dd.save`, never that
+  private package directly. Sections II.1–II.8 describe this integration.
+- The standalone distribution is imported as `hiveq_data`. Its current public
+  release is **0.2.9** and is available directly to deployed strategy code.
+  Sections II.9–II.12 cover public surfaces beyond the driver's wrapper.
+
+The vendored copy and standalone distribution share ancestry but can evolve
+independently. Imports and defaults in one must not be assumed for the other.
+Data API endpoints documented here are version `v0`.
 
 ---
 
 ## II.1 The two SDK calls the driver makes to read data
 
 ```python
-import hiveq_data
+import hiveq.driver.hiveq_data as hiveq_data
 
 # (a) one-time credential/endpoint setup
 hiveq_data.configure(api_key=..., base_url=...)
@@ -1331,7 +1337,7 @@ def get_data(dataset, schema,
 | `schema` | table within the dataset (see §II.4). **Required.** |
 | `symbols` | symbol or list. Equities: required (`['AAPL','MSFT']`). Futures: full contract syms (`['ESH25']`) — or use `root`. Options: full OCC syms — or use `chains`. |
 | `root` | futures root(s) (`['ES','NQ']`) — alternative to `symbols` for futures. |
-| `chains` | option underlying(s) (`['SPY']`) — alternative to `symbols` for options. |
+| `chains` | option underlying(s) (`['SPY']`) — alternative to `symbols` for options; serialized as the API's singular `chain` filter. |
 | `start`, `end` | window bounds. `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS` (str/date/datetime). |
 | `limit` | max rows in **this** response (page size). |
 | `offset` | rows to skip — used for pagination. |
@@ -1341,6 +1347,9 @@ def get_data(dataset, schema,
 The driver passes `dataset`, `schema`, `symbols`, `columns`, `limit`, `offset`,
 `start`, `end`, and `filter_mode`. It does not currently use `root`/`chains`/the
 options kwargs — add them in `__load_historical` if a section needs them.
+
+For `HIVEQ_US_OPT`, standalone 0.2.9 accepts compact OCC option symbols and
+normalizes them to the canonical 21-character storage symbol before querying.
 
 ---
 
@@ -1409,6 +1418,15 @@ The **`params_tuple`** passed to `dd.load(...)` supplies the runtime window/symb
 - first **`TimeRange`** field → the intraday window (and switches `filter_mode` to `session`),
 - remaining list/str field(s) → `symbols`.
 
+For continuous futures (`ES.c.0`, `ES.v.0`, etc.), the driver performs an
+additional step before `Historical.get_data`: it calls
+`InstrumentReference().get_futures(symbols=..., start_date=..., end_date=...)`
+and replaces the continuous selector with every outright contract active in the
+requested window. Historical resolution is strict and raises if no contract can
+be resolved. Live resolution is cached per day and temporarily leaves the
+continuous key unresolved after transient lookup failures so the subscriber can
+self-heal on a later attempt.
+
 Example section + call:
 ```ini
 [AaplBars]
@@ -1462,7 +1480,7 @@ When the config section has **no `topic`** but has `publishSchema` (or `schema`)
 + `key`, `dd.save()` uses the `hiveq_data` SDK:
 
 ```python
-import hiveq_data
+import hiveq.driver.hiveq_data as hiveq_data
 publisher = hiveq_data.Publisher(async_mode=True)
 publisher.publish(schema=schema, data=records, key=key, operation=operation)
 ```
@@ -1490,9 +1508,110 @@ to live consumers.
 
 ---
 
-## II.8 Errors
+## II.8 Driver integration errors
 
 SDK calls raise **`hiveq_data.HiveQAPIError`** on non-2xx responses, carrying
 `status_code`, `response_text`, `response_json`, `request_url`, `request_method`.
 The transport logs and re-raises; a `403` typically means the API key/IP is not
 permitted, a `400` usually means a missing/invalid filter (e.g. no `start`/`end`).
+
+---
+
+## II.9 Standalone SDK discovery and instrument reference
+
+The standalone package exports five clients: `Historical`, `InstrumentReference`,
+`Metadata`, `Publisher`, and `LiveStream`. Dataset/schema discovery is live:
+
+```python
+import hiveq_data as hd
+
+metadata = hd.Metadata()
+datasets = metadata.get_datasets()
+schemas = metadata.get_schemas(dataset=['HIVEQ_US_EQ'])
+schema = metadata.get_schema(schema='bars_1m', dataset='HIVEQ_US_EQ')
+metadata.refresh_schema()
+```
+
+`InstrumentReference` returns `{'instruments': [...], 'count': N}` and exposes:
+
+```python
+ref = hd.InstrumentReference()
+ref.get_futures(symbols=None, start_date=None, end_date=None, exchange=None,
+                currency=None, expiry_type='volume', limit=None, offset=None)
+ref.get_options(symbols=None, chains=None, start_date=None, end_date=None,
+                expiration_date=None, strike=None, option_type=None,
+                exchange=None, currency=None, limit=None, offset=None, root=None)
+ref.get_equities(symbols=None, date=None, exchange=None, currency=None,
+                 limit=None, offset=None)
+ref.get_indices(symbols=None, date=None, exchange=None, currency=None,
+                limit=None, offset=None)
+ref.get_instruments(symbols=None, asset_class=None, start_date=None, end_date=None,
+                    exchange=None, currency=None, limit=None, offset=None)
+```
+
+Continuous futures use `ROOT.RULE.POSITION`, for example `ES.c.0` (calendar
+front) or `ES.v.1` (volume-ranked second contract). Symbol parsing helpers live
+in `hiveq_data.instrument_reference.symbol_parser`, including
+`parse_futures_ticker`, `parse_continuous_symbol`, `parse_options_ticker`,
+`detect_asset_type`, `normalize_futures_symbol`, and `extract_root`.
+
+---
+
+## II.10 Standalone `LiveStream`
+
+`LiveStream` talks directly to the distributor WebSocket; it does not take API
+credentials or a Data API base URL:
+
+```python
+stream = hd.LiveStream(host='localhost', port=8765, auto_reconnect=True,
+                       reconnect_interval=1.0, status_log_interval=30.0)
+
+async with stream:
+    await stream.subscribe(topic, ['AAPL', 'MSFT'], callback)
+    await stream.subscribe(topic, 'AAPL', callback, replay='1h')
+    await stream.subscribe(topic, 'AAPL', callback,
+                           from_ts='2026-08-12T09:30:00-04:00',
+                           to_ts='2026-08-12T10:00:00-04:00')
+```
+
+`replay` accepts `True`/`'today'`, durations such as `'1h'`/`'7d'`, or use
+explicit `from_ts`/`to_ts` (timezone-aware datetime, ISO string, or epoch value).
+`replay` and `from_ts` are mutually exclusive. `replay_tz` controls the meaning
+of `'today'`. The client reconnects and resubscribes automatically by default;
+replayed rows can be duplicated after reconnect because no partition cursor is
+tracked. Other public methods are `connect`, `disconnect`, `unsubscribe`,
+`wait_until_disconnected`, and `is_connected`.
+
+---
+
+## II.11 Standalone publisher and configuration lifecycle
+
+Standalone `Publisher` defaults to `async_mode=True` in 0.2.9. Async calls return
+after queueing, so call `flush()` before results must be durable and `close()` at
+shutdown:
+
+```python
+publisher = hd.Publisher()  # async_mode=True
+publisher.publish(schema='event_logs', data=records, key='run-123', operation='add')
+publisher.flush()
+publisher.close()
+```
+
+Set `async_mode=False` when the API response is needed synchronously.
+`operation` is exactly `'add'` or `'modify'`.
+
+Standalone base URL precedence is `HIVEQ_DATA_URL`, `HIVEQ_BASE_URL`, then the
+origin of `HIVEQ_AUTH_URL`, followed by its local-development fallback. This is
+separate from the Data Driver's explicit section → `[HiveQ]` → `[default]` →
+staging resolution. `hiveq_data.config.get_config()` returns the global config;
+`ensure_configured()` loads well-known environment/credential sources when a
+client is created.
+
+---
+
+## II.12 Standalone errors
+
+`HiveQAPIError` carries `status_code`, `response_text`, `response_json`,
+`request_url`, `request_method`, and `original_exception`. Network libraries may
+also raise their native connection/timeout exceptions before an HTTP response is
+available.

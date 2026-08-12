@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 
 class Historical:
@@ -14,13 +15,13 @@ class Historical:
         user_id: Optional[str] = None,
         org_id: Optional[str] = None,
         user_name: Optional[str] = None,
-        timezone: Optional[Union[str, Any]] = None,
+        timezone: Optional[Union[str, ZoneInfo]] = None,
     ) -> None: ...
 
     def get_data(
         self,
-        dataset: str = ...,
-        schema: str = ...,
+        dataset: str,
+        schema: str,
         symbols: Optional[Union[str, List[str]]] = None,
         root: Optional[Union[str, List[str]]] = None,
         chains: Optional[Union[str, List[str]]] = None,
@@ -29,7 +30,7 @@ class Historical:
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         filter_mode: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Dict[str, Any]: ...
 
 
