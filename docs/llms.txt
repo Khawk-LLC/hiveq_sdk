@@ -403,7 +403,15 @@ class MyStrategy:
 ```python
 ctx.subscribe_bars(symbols: List[str], asset_type: AssetType = None, interval: str = "1m")
 ctx.subscribe_quotes(symbols: Optional[List[str]], asset_type: AssetType = AssetType.EQUITY)
-ctx.subscribe_trades(symbols: List[str], asset_type: AssetType = AssetType.EQUITY)  # trades; with the `tbbo` schema, quotes arrive too (on_quote)
+ctx.subscribe_trades(symbols: List[str], asset_type: AssetType = AssetType.EQUITY)  # trades; eq_trades/fut_trades rows carry bid/ask, so quotes arrive too (on_quote)
+#   SUBSCRIPTIONS DO NOT DOUBLE-COUNT. subscribe_trades and subscribe_quotes are the
+#   same call — each registers the symbol's instrument once, and registration is
+#   guarded by a symbol-keyed cache. Calling both for a symbol (or repeating either,
+#   in backtest or liveSim) registers nothing further and delivers no duplicate
+#   on_trade/on_quote events; event volume comes from the data rows, not the number
+#   of subscribe_* calls. Pick whichever name states your intent.
+#   The only real duplication risk is listing two overlapping tick schemas in
+#   data_configs — use exactly one tick schema (eq_trades OR fut_trades) per symbol.
 ctx.subscribe_data(data_id: str, signals: List[str] = None)               # custom / signal data → on_custom_data
 #   data_id must match the 'id' field in data_configs (CSV or HIVEQ_QUANT_SIGNALS).
 #   For historical HIVEQ_QUANT_SIGNALS filtering, put signal names in the
@@ -430,7 +438,7 @@ ctx.subscribe_bars(["ES.c.0", "NQ.c.0"], asset_type=AssetType.FUTURES,
                    interval="1m")
 ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional[str] = None,
                              contract: Optional[str] = None, continuous: Optional[str] = None)
-#   NOTE: there is NO subscribe_futures_quotes. For futures NBBO/tbbo quotes,
+#   NOTE: there is NO subscribe_futures_quotes. For futures NBBO quotes,
 #   use subscribe_quotes with the futures symbol string and asset_type=FUTURES:
 #     ctx.subscribe_quotes(['ES.c.0'], asset_type=AssetType.FUTURES)
 #   The futures symbol string encodes the contract:
@@ -526,7 +534,7 @@ ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
 Auction orders participate in an exchange's opening or closing cross/auction, not the continuous book. Pass them via `order_type=OrderType.MOO|MOC|LOO|LOC` (LOO/LOC also need `limit_price`). Each exchange enforces its own **entry cutoff** (latest time an order is accepted) and **cancel/modify cutoff** (after which the order is locked). These differ by venue.
 
 > ⚠️ **Two requirements for auction orders to fill in a backtest:**
-> 1. **Trade-print data.** Auction orders cross against the official open/close prints (`MCOfficialOpen` / `MCOfficialClose`), which live only in tick-level **trade** data. Subscribe with `ctx.subscribe_trades(...)` and use schema **`eq_trades`** (equities) or **`fut_trades`** (futures). Minute/second **bars** (`bars_*`) and **quotes** (`tbbo`) carry **no auction print** — auction orders on those never fill (§9.1).
+> 1. **Trade-print data.** Auction orders cross against the official open/close prints (`MCOfficialOpen` / `MCOfficialClose`), which live only in tick-level **trade** data. Subscribe with `ctx.subscribe_trades(...)` and use schema **`eq_trades`** (equities) or **`fut_trades`** (futures). Minute/second **bars** (`bars_*`) carry **no auction print** — auction orders on a bar-only subscription never fill (§9.1).
 > 2. **Primary listing exchange.** The cross happens at the symbol's primary venue. When `market_center` is **omitted, auction orders default to NASDAQ** — correct for NASDAQ-listed names (e.g. AAPL), so omitting it is the portable choice. Pass `market_center=` (e.g. `'NYSE'`) only to override routing. ⚠️ Explicit `market_center` on a *direct* `buy_order`/`sell_order` requires a recent engine — older deployed executors raise `TypeError: ... unexpected keyword argument 'market_center'`; if you hit that, omit it (or route via the `AUCTION` executor, which has always accepted `market_center`).
 
 **Two ways to send an auction order:**
@@ -654,7 +662,7 @@ An executor is a server-side execution algo that owns the *entire* order lifecyc
 
 For **simple cases — a single immediate market order, or a signal-style backtest** that just needs a position — plain `buy_order`/`sell_order` (or the §5.2 sizing helpers) are simpler and sufficient; an executor adds no value there. Don't wrap a one-shot market order in an executor.
 
-> ⚠️ **Executors require a tick-by-tick data stream — they do NOT work on bars.** POV/TWAP/VWAP/PASSIVE/AUCTION etc. slice and reprice against the live tick stream, so the strategy must subscribe to ticks — **prefer trades: `ctx.subscribe_trades(...)` with schema `eq_trades` (equities) / `fut_trades` (futures)**. (`ctx.subscribe_quotes(...)` with the `tbbo` schema also drives executors, but tbbo tick coverage is limited — default to `eq_trades`/`fut_trades`.) **Not** `bars_1m`/`bars_*` (§9.1) — subscribing only to bars and starting an executor will not work.
+> ⚠️ **Executors require a tick-by-tick data stream — they do NOT work on bars.** POV/TWAP/VWAP/PASSIVE/AUCTION etc. slice and reprice against the live tick stream, so the strategy must subscribe to ticks — **use trades: `ctx.subscribe_trades(...)` with schema `eq_trades` (equities) / `fut_trades` (futures)**. **Not** `bars_1m`/`bars_*` (§9.1) — subscribing only to bars and starting an executor will not work.
 
 ```python
 ctx.build_executor_params(symbol: str, quantity: int, side: str, executor_type: str,
@@ -826,7 +834,7 @@ These fire for executor lifecycle transitions (`on_executor`) and security/refer
 |---|---|---|
 | `type` | str | `'hiveq_historical'` |
 | `dataset` | str | dataset code — see §A.1 in the Data Reference appendix for the full list (`HIVEQ_US_EQ`, `HIVEQ_US_FUT`, `HIVEQ_QUANT_SIGNALS`, …). |
-| `schema` | list[str] \| str | one or more exact schema codes — see §A.2 in the Data Reference appendix for the full list (`bars_1m`, `eq_trades`, `fut_trades`, `tbbo`, …) and coverage caveats (bar granularities, auction prints, executor tick-stream requirement). |
+| `schema` | list[str] \| str | one or more exact schema codes — see §A.2 in the Data Reference appendix for the full list (`bars_1m`, `eq_trades`, `fut_trades`, …) and coverage caveats (bar granularities, auction prints, executor tick-stream requirement). |
 | `id` | str (opt) | identifier referenced by `ctx.subscribe_data(data_id=...)` for signal/custom sources |
 | `symbols` | list[str] (opt) | dataset row selectors. For `HIVEQ_QUANT_SIGNALS`, these are signal names such as `Prillach_MC_ES`, not the logical `id`. The dataset registry determines the physical filter column. |
 | `enabled` | bool (opt) | default `True` |
@@ -902,7 +910,7 @@ on existing configs).
 | key | type | notes |
 |---|---|---|
 | `type` | str | `'csv'` |
-| `data_type` | str | fill-mode hint for your own file: a `bars_*` value (OHLCV → bar fills), `'tbbo'`/`'trades'` (tick fills), or `'custom'` (user/signal data). For CSV the granularity is whatever your file contains. |
+| `data_type` | str | fill-mode hint for your own file: a `bars_*` value (OHLCV → bar fills), `'trades'` (tick fills), or `'custom'` (user/signal data). For CSV the granularity is whatever your file contains. |
 | `path` | str | path to CSV (relative or absolute) |
 | `id` | str | identifier referenced in strategy subscriptions |
 | `enabled` | bool (opt) | default `True` |
@@ -1481,7 +1489,7 @@ dd.save(df, path='output.csv')
 dd.save(df, schema='quant_features', key='my_signal')
 
 # Live subscription (distributor)
-dd.load(topic='market_data.equity.tbbo', keys=['AAPL'], mode='subscribe')
+dd.load(topic='market_data.equity.trades', keys=['AAPL'], mode='subscribe')
 ```
 
 | Function | Purpose |
@@ -1533,7 +1541,7 @@ pub.close()
 # Live streaming (async)
 stream = hd.LiveStream()
 await stream.connect()
-await stream.subscribe(topic='market_data.equity.tbbo', keys='AAPL', callback=on_tick)
+await stream.subscribe(topic='market_data.equity.trades', key='AAPL', callback=on_tick)
 
 # Metadata
 meta = hd.Metadata()
@@ -1572,7 +1580,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - `report.*` DataFrames can be `None`/empty — guard before use.
 - For futures bars, use the complete symbol string with the canonical API, e.g. `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES, interval='1m')`. Make one call per interval; each call may include multiple symbols, and identical requests are deduplicated. For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
 - **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.c.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.c.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.c.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.
-- **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`/TBBO), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
+- **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`, schema `fut_trades`), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
 - **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.
 - Set `symbols`/`start_date`/`end_date` in one place (top-level args OR `BacktestConfig`), not both.
 - **A tearsheet file defaults to PDF, not HTML — via `run.tearsheet()`, with no `output=` needed.** Don't reach for `report.create_tearsheet()` to produce a saved report: that method returns an HTML/text *string* meant for inline notebook display (§10.0), and writing that string to a `.html` file yourself is not "the default," it's calling the wrong API. If you actually want an HTML file, pass `run.tearsheet(output='report.html')` explicitly.
@@ -1702,7 +1710,7 @@ def on_timer(self, ctx, event):
 ### 16.6 Executor-driven strategies (when execution quality matters)
 When the strategy needs managed execution — sizeable orders to slice, live trading with order-chasing/replaces, or auction routing (see "when to use" in §5.10) — let an **executor** work the order instead of hand-managing `buy_order`/`sell_order` + replaces + cancels. The executor handles child-order slicing, repricing, cancel/replace, and fill aggregation. For a simple one-shot market entry this is overkill — use a direct order. The idiom: **hold one executor handle per (symbol, role); check its state before starting another; re-target in place.**
 
-⚠️ **Executors need a tick stream, not bars** (§5.10/§9.1): subscribe with `ctx.subscribe_trades(...)` — **prefer schema `eq_trades`/`fut_trades`** (`tbbo` quotes work but have limited coverage) — and drive them from `on_trade`. They will not work on a `bars_*` subscription.
+⚠️ **Executors need a tick stream, not bars** (§5.10/§9.1): subscribe with `ctx.subscribe_trades(...)` — **schema `eq_trades`/`fut_trades`** — and drive them from `on_trade`. They will not work on a `bars_*` subscription.
 
 ```python
 class ExecAlgo:

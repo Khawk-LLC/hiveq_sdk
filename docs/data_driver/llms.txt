@@ -20,7 +20,7 @@ users; see Migrating from KDB (§20).
 | Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
 | Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES1!` → `ES.c.0` (continuous future) |
 | Session            | `2025-10-13` … `2025-10-17`, `09:30:00`–`16:00:00` US/Eastern |
-| Live topics        | `market_data.equity.tbbo`, `signals.khawk.quant_features` |
+| Live topics        | `market_data.equity.trades`, `signals.khawk.quant_features` |
 
 **How to read this**: one file, sections §1–§21, then **Part II** — the
 `hiveq_data` SDK reference (its sections are numbered §II.N). Jump to a section
@@ -347,12 +347,12 @@ held in memory and lost on shutdown.
 Config for a subscription (a section whose transport has a `topic`):
 
 ```ini
-[TbboSub]
-primary = HiveQTbboSub
+[TradesSub]
+primary = HiveQTradesSub
 
-[HiveQTbboSub]
+[HiveQTradesSub]
 transport = HiveQ
-topic     = market_data.equity.tbbo
+topic     = market_data.equity.trades
 keyField  = sym
 wsHost    = localhost
 wsPort    = 8765
@@ -371,10 +371,10 @@ params = dd_params(['AAPL'],
                    DateRange('2025-10-14', '2025-10-14'),
                    TimeRange('09:30:00', '16:00:00'))
 
-df = dd.load('TbboSub', params_tuple=params)
+df = dd.load('TradesSub', params_tuple=params)
 for i in range(10):
     time.sleep(10)
-    df = dd.load('TbboSub', params_tuple=params)
+    df = dd.load('TradesSub', params_tuple=params)
 
 # stop() lets the driver stop its internal subscription threads; otherwise the
 # process won't exit.
@@ -391,12 +391,12 @@ To pre-load, set **`pullDataSourceID`** to the data source id whose history
 should seed the buffer.
 
 ```ini
-[TbboSub]
-primary = HiveQTbboSub
+[TradesSub]
+primary = HiveQTradesSub
 
-[HiveQTbboSub]
+[HiveQTradesSub]
 transport        = HiveQ
-topic            = market_data.equity.tbbo
+topic            = market_data.equity.trades
 keyField         = sym
 pullDataSourceID = Trades       ; history seed source (any transport)
 
@@ -423,9 +423,9 @@ specify a **`time_out`** (milliseconds). It makes the call blocking until the
 timeout elapses or data is available.
 
 ```python
-df = dd.load('TbboSub', params_tuple=params, cache=Cache.CACHE_FORCE_PULL)
+df = dd.load('TradesSub', params_tuple=params, cache=Cache.CACHE_FORCE_PULL)
 # should load from cache
-df = dd.load('TbboSub', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE, time_out=10000)
+df = dd.load('TradesSub', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE, time_out=10000)
 ```
 
 If the pull returns empty before the timeout, `dd.load` returns an empty frame.
@@ -433,13 +433,13 @@ If the pull returns empty before the timeout, `dd.load` returns an empty frame.
 ### ForceRefresh
 
 By default all subscription data is cached in memory. For high-volume topics
-(e.g. trades/tbbo) this can grow over time. Enable **`forceRefresh`** in the
+(e.g. trades) this can grow over time. Enable **`forceRefresh`** in the
 subscription config to retain only data not yet pulled by the user.
 
 ```ini
-[HiveQTbboSub]
+[HiveQTradesSub]
 transport    = HiveQ
-topic        = market_data.equity.tbbo
+topic        = market_data.equity.trades
 forceRefresh = true
 ```
 
@@ -455,12 +455,12 @@ new data. New symbols passed on a subsequent `dd.load()` are subscribed live and
 their history is stitched in.
 
 ```ini
-[TbboSub]
-primary = HiveQTbboSub
+[TradesSub]
+primary = HiveQTradesSub
 
-[HiveQTbboSub]
+[HiveQTradesSub]
 transport        = HiveQ
-topic            = market_data.equity.tbbo
+topic            = market_data.equity.trades
 keyField         = sym
 pullDataSourceID = Trades
 forceRefresh     = true
@@ -468,8 +468,8 @@ forceRefresh     = true
 
 ```python
 # Start with AAPL, then add MSFT mid-session — both stream on the same subscription.
-df = dd.load('TbboSub', params_tuple=dd_params(['AAPL'], date, time), time_out=3000)
-df = dd.load('TbboSub', params_tuple=dd_params(['AAPL', 'MSFT'], date, time))
+df = dd.load('TradesSub', params_tuple=dd_params(['AAPL'], date, time), time_out=3000)
+df = dd.load('TradesSub', params_tuple=dd_params(['AAPL', 'MSFT'], date, time))
 ```
 
 > The HiveQ transport layer subscribes the new keys directly on the live socket;
@@ -495,7 +495,7 @@ from hiveq import Cache
 dd_input = collections.namedtuple('Input', ['date', 'sym', 'time'])
 dd_param = dd_input(DateRange('2025-10-14', '2025-10-14'), ['AAPL'],
                     TimeRange('10:00:00', '12:00:00'))
-df = dd.load('TbboSub', params_tuple=dd_param, cache=Cache.PULL_UPDATE_CACHE)
+df = dd.load('TradesSub', params_tuple=dd_param, cache=Cache.PULL_UPDATE_CACHE)
 ```
 
 ---
@@ -1032,7 +1032,7 @@ primary = HiveQTradesSub
 
 [HiveQTradesSub]
 transport        = HiveQ
-topic            = market_data.equity.tbbo
+topic            = market_data.equity.trades
 keyField         = sym
 pullDataSourceID = tickStartUp
 
@@ -1056,7 +1056,7 @@ ddat = dd.load('tickData', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
 ### Timeouts
 
 ```python
-dd.load('TbboSub', params_tuple=params, time_out=10000)
+dd.load('TradesSub', params_tuple=params, time_out=10000)
 ```
 
 1. Timeout values are in milliseconds.
@@ -1070,7 +1070,7 @@ While stitching pull + subscription data, duplicate rows can appear. Supply the
 columns to dedupe on:
 
 ```python
-df = dd.load('TbboSub', params_tuple=params, cache=Cache.NO_CACHE,
+df = dd.load('TradesSub', params_tuple=params, cache=Cache.NO_CACHE,
              drop_duplicates=['sym', 'seqno'])
 ```
 
@@ -1359,7 +1359,7 @@ normalizes them to the canonical 21-character storage symbol before querying.
 `HIVEQ_US_OPT`, `HIVEQ_US_IND`.
 
 **Schemas** seen in use / SDK examples: `bars_1s`, `bars_1m`, `bars_1d`,
-`eq_trades`, `trades`, `tbbo`, `snaps_1s`, `early_imbalance`, `indices_1m`.
+`eq_trades`, `trades`, `snaps_1s`, `early_imbalance`, `indices_1m`.
 The authoritative, live list comes from the SDK's `Metadata` client
 (`Metadata().get_schemas(dataset=["*"])`) — not maintained here.
 

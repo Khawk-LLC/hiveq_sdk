@@ -129,7 +129,7 @@ def granularity_to_schema_per_day(granularity: str) -> int:
     - '_1h' / 'bars_1h' / '1h'  -> 7 bars/day (market hours)
     - '_1d' / 'bars_1d' / '1d'  -> 1 bar/day
 
-    All other schemas (tbbo, trades, quotes, snaps, indices, etc.) default to
+    All other schemas (eq_trades, fut_trades, snaps, indices, etc.) default to
     100,000 data points/day for chunking purposes.
     """
     g = granularity.lower()

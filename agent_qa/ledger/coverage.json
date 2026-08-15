@@ -268,12 +268,6 @@
       "status": "no_behavioural_test",
       "updated_at": "2026-08-06T04:58:53"
     },
-    "HIVEQ_US_FUT/tbbo": {
-      "dataset": "HIVEQ_US_FUT",
-      "schema": "tbbo",
-      "status": "no_behavioural_test",
-      "updated_at": "2026-08-06T04:58:53"
-    },
     "HIVEQ_US_FUT_REF/fut_ref_instruments": {
       "dataset": "HIVEQ_US_FUT_REF",
       "schema": "fut_ref_instruments",

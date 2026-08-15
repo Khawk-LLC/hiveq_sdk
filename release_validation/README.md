@@ -44,7 +44,7 @@ not treated as an implementation regression. Core datasets remain hard gates.
 | `t09_event_logs_reports.py` | structured event logs and every public Run result surface |
 | `t10_metrics_validation.py` | independent PnL, fee, return, and trade arithmetic |
 | `t11_imbalance_flow.py` | public imbalance callback contract; no QA rows is `GAP` |
-| `t12_quotes_tbbo.py` | futures TBBO delivery and non-crossed quotes |
+| `t12_quotes.py` | futures tick delivery (`fut_trades`) and non-crossed quotes |
 | `t13_arca_imbalance.py` | NYSE Arca imbalance delivery and venue-specific fields |
 | `t14_nasdaq_imbalance.py` | Nasdaq imbalance delivery, indicative prices, and cross type |
 | `t15_nyse_imbalance.py` | NYSE imbalance delivery and clearing-price fields |
@@ -75,7 +75,7 @@ not treated as an implementation regression. Core datasets remain hard gates.
 | `t40_option_order_fill.py` | tick-valid 0DTE option limit entry/exit and completed trade evidence |
 | `t41_stop_limit_latch.py` | STOP_LIMIT remains triggered after a gap beyond its limit and fills on the return |
 | `t42_stream_data_api_parity.py` | exact equity/futures callback counts versus the Data API |
-| `t43_equity_tbbo_trade_quote.py` | one TBBO source drives valid trade and quote payloads |
+| `t43_equity_trade_quote.py` | one `eq_trades` source drives valid trade and quote payloads |
 | `t44_cluster_analytics_data.py` | cluster-analytics custom rows or an explicit data-availability gap |
 | `t45_multileg_options.py` | four-leg 0DTE long/short basket entry, exit, and flatness |
 | `t46_stop_bracket_orders.py` | STOP/STOP_LIMIT fills and manual bracket sibling cancellation |

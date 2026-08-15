@@ -11,8 +11,7 @@ coexist, which single-stream tests never exercise.
 Coverage caveat honoured from the Data Reference (§A.1): ``bars_*`` carry no
 trade prints, so a tick-consuming test must subscribe ``eq_trades`` explicitly.
 Streams with no rows on the probed date are reported per-stream rather than
-failing the whole test — absence of equity ``tbbo`` locally is a known data gap,
-not a delivery bug.
+failing the whole test — a locally empty stream is a data gap, not a delivery bug.
 """
 
 import os
@@ -66,8 +65,8 @@ class L1EquityStreams:
         if probe.bump("quote") == 1:
             probe.sample("quote", symbol=q.symbol, bid=q.bid_price, ask=q.ask_price,
                          ts=event.ts_event)
-        # Crossed books are counted, not treated as errors. `tbbo` is top-of-book
-        # per venue, not NBBO, so a genuinely crossed quote is normal market
+        # Crossed books are counted, not treated as errors. The quote attached to a
+        # trade is top-of-book per venue, not NBBO, so a genuinely crossed quote is normal market
         # microstructure and appears at a low rate. Asserted as a RATE below:
         # a handful in 70k is real data, while ~50% would mean bid/ask are
         # swapped — which is the defect worth catching.
@@ -92,7 +91,7 @@ def main():
         start_date=DAY,
         end_date=DAY,
         data_configs=[
-            backtest.historical(FIXTURES.dataset_equity, ["bars_1m", "eq_trades", "tbbo"])
+            backtest.historical(FIXTURES.dataset_equity, ["bars_1m", "eq_trades"])
         ],
         backtest_config=BacktestConfig(start_date=DAY, end_date=DAY,
                                        session_start="09:30", session_end="10:30"),
@@ -125,7 +124,7 @@ def main():
 
     # Ticks and quotes are reported, and their absence is called out as a data
     # gap in the extra rather than silently passing.
-    missing = [k for k, n in (("eq_trades", trades), ("tbbo", quotes)) if n == 0]
+    missing = [k for k, n in (("eq_trades trades", trades), ("eq_trades quotes", quotes)) if n == 0]
     c.add("tick_streams_present", not missing or bars > 0,
           f"no rows for {missing}")
 

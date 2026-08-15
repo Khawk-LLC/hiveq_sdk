@@ -13,8 +13,8 @@ Demonstrates (every ctx call verified against the SDK type surface):
 IMPORTANT — data schema: MOO/MOC fill against the **auction prints**
 (MCOfficialOpen / MCOfficialClose), which exist only in tick-level trade data.
 Use the ``eq_trades`` schema (futures: ``fut_trades``) and
-``ctx.subscribe_trades(...)`` — minute bars (``bars_1m``) and quotes
-(``tbbo``) carry NO auction print, so auction orders would never fill on them.
+``ctx.subscribe_trades(...)`` — minute bars (``bars_1m``) carry NO auction
+print, so auction orders would never fill on a bar-only subscription.
 See API doc §5.2.1 (auction orders) and §9.1 (schemas).
 
 Auctions route to the symbol's primary listing exchange; when ``market_center``

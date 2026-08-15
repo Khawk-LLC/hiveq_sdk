@@ -36,7 +36,6 @@ SURFACE = "l1.data"
 BEHAVIOURAL_COVERAGE = {
     ("HIVEQ_US_EQ", "bars_1m"): "l1_01_equity_streams",
     ("HIVEQ_US_EQ", "eq_trades"): "l1_01_equity_streams",
-    ("HIVEQ_US_EQ", "tbbo"): "l1_01_equity_streams",
     ("HIVEQ_US_FUT", "bars_1m"): "l1_02_futures_symbology",
 }
 

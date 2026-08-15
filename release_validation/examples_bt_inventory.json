@@ -492,7 +492,7 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "mapped_to": "t12_quotes.py,t43_equity_trade_quote.py",
       "reason": "trade/quote delivery and payloads"
     },
     {
@@ -1810,7 +1810,7 @@
       "reason": "option snapshots, filters, single-contract fills, and multi-leg baskets"
     },
     {
-      "file": "subscribe_tbbo.py",
+      "file": "subscribe_eq_trades.py",
       "syntax": "ok",
       "callbacks": [
         "on_hiveq_event",
@@ -1825,7 +1825,7 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "mapped_to": "t12_quotes.py,t43_equity_trade_quote.py",
       "reason": "trade/quote delivery and payloads"
     },
     {
@@ -1845,11 +1845,11 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "mapped_to": "t12_quotes.py,t43_equity_trade_quote.py",
       "reason": "trade/quote delivery and payloads"
     },
     {
-      "file": "tbbo_order_flow_strategy.py",
+      "file": "order_flow_strategy.py",
       "syntax": "ok",
       "callbacks": [
         "on_hiveq_event",
@@ -1869,7 +1869,7 @@
       "schemas": [],
       "runnable": true,
       "status": "duplicate",
-      "mapped_to": "t12_quotes_tbbo.py,t43_equity_tbbo_trade_quote.py",
+      "mapped_to": "t12_quotes.py,t43_equity_trade_quote.py",
       "reason": "trade/quote delivery and payloads"
     },
     {

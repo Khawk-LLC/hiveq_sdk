@@ -6,13 +6,6 @@
     "reason": "on_imbalance / EventType.IMBALANCE are wired end-to-end (PySigma onImbalance -> bridge -> dispatcher), but the local cluster's early_imbalance table has no rows on any probed date, so live delivery cannot be asserted. Validated synthetically in hiveq-flow/qa_validation/t11 until data lands.",
     "test": ""
   },
-  "l1.data:equity_tbbo": {
-    "commit": "",
-    "first_seen": "2026-07-28T00:00:00",
-    "last_seen": "2026-07-28T00:00:00",
-    "reason": "No equity tbbo rows locally; futures tbbo has data and is covered instead.",
-    "test": "l1_01_equity_streams"
-  },
   "l2.callbacks:market_state_and_econ_calendar": {
     "commit": "",
     "first_seen": "2026-07-28T00:00:00",

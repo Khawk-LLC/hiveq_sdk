@@ -1,4 +1,4 @@
-"""Remote futures TBBO delivery and non-crossed quote invariant."""
+"""Remote futures tick delivery (fut_trades) and non-crossed quote invariant."""
 from pathlib import Path
 import sys
 # Slice-assign, not sys.path.insert(...): the engine grafts only imports/defs/assignments
@@ -16,11 +16,11 @@ class SdkT12:
         if q.symbol not in self.s["symbols"]:self.s["symbols"].append(q.symbol)
         bid=float(getattr(q,"bid_price",0) or 0);ask=float(getattr(q,"ask_price",0) or 0)
         if bid>0 and ask>0 and bid>ask:self.s["crossed"]+=1
-    def on_stop(self,ctx,event):emit_checkpoint(ctx,"t12_quotes_tbbo",self.s)
+    def on_stop(self,ctx,event):emit_checkpoint(ctx,"t12_quotes",self.s)
 
 if __name__=="__main__":
     run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT12",type="SdkT12",symbols=["ES.c.0"])],symbols=["ES.c.0"],
-        start_date="2025-06-02",end_date="2025-06-02",data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_FUT","schema":["tbbo"]}],
+        start_date="2025-06-02",end_date="2025-06-02",data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_FUT","schema":["fut_trades"]}],
         backtest_config=BacktestConfig(session_start="09:30",session_end="10:00"))
-    s=completed_checkpoint(run,"t12_quotes_tbbo")
-    finish("t12_quotes_tbbo",{"quotes_delivered":s["quotes"]>0,"no_crossed_quotes":s["crossed"]==0},extra=str(s))
+    s=completed_checkpoint(run,"t12_quotes")
+    finish("t12_quotes",{"quotes_delivered":s["quotes"]>0,"no_crossed_quotes":s["crossed"]==0},extra=str(s))

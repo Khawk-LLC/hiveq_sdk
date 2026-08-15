@@ -1,4 +1,4 @@
-"""One equity TBBO source drives both trade and quote callbacks with valid payloads."""
+"""One equity eq_trades source drives both trade and quote callbacks with valid payloads."""
 from pathlib import Path
 import sys
 
@@ -57,7 +57,7 @@ class SdkT43:
             self.state["quote_samples"].append(sample)
 
     def on_stop(self, ctx, event):
-        emit_checkpoint(ctx, "t43_equity_tbbo_trade_quote", self.state)
+        emit_checkpoint(ctx, "t43_equity_trade_quote", self.state)
 
 
 if __name__ == "__main__":
@@ -67,12 +67,12 @@ if __name__ == "__main__":
         start_date="2025-09-23",
         end_date="2025-09-23",
         data_configs=[{
-            "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["tbbo"]
+            "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
         backtest_config=BacktestConfig(session_start="09:30", session_end="10:00"),
     )
-    state = completed_checkpoint(run, "t43_equity_tbbo_trade_quote")
-    finish("t43_equity_tbbo_trade_quote", {
+    state = completed_checkpoint(run, "t43_equity_trade_quote")
+    finish("t43_equity_trade_quote", {
         "trade_callbacks_present": state["trades"] > 0,
         "quote_callbacks_present": state["quotes"] > 0,
         "positive_aggregate_volume": state["volume"] > 0,
