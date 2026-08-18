@@ -4,7 +4,7 @@ import sys
 sys.path[:0]=[str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint,emit_checkpoint,finish
 import hiveq.flow as hf
-from hiveq.flow import BacktestConfig,StrategyConfig
+from hiveq.flow import BacktestConfig,EngineConfig,StrategyConfig
 from hiveq.flow.config import AssetType
 
 
@@ -40,7 +40,9 @@ if __name__=="__main__":
     run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT38",type="SdkT38",symbols=["ES.v.0","NQ.v.0"])],
         symbols=["ES.v.0","NQ.v.0"],start_date="2024-12-01",end_date="2025-06-24",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_FUT","schema":["bars_1m"]}],
-        backtest_config=BacktestConfig(enable_auto_rollover=True,session_start="18:00",session_end="17:00"))
+        backtest_config=BacktestConfig(enable_auto_rollover=True,session_start="18:00",session_end="17:00"),
+        engine_config=EngineConfig(params={"oms_log_level":"information","oms_console_log":True,"hiveq_log_level":"INFO"}),
+        task_name="bt-SdkT38-rollover-symbol-trace")
     s=completed_checkpoint(run,"t38_multi_rollover_squareoff");balances={};order=[]
     for symbol,side,qty in s["fills"]:
         balances[symbol]=balances.get(symbol,0)+(qty if side.upper().endswith("BUY") else -qty)
