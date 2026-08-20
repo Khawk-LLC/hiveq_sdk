@@ -10,8 +10,8 @@ Usage from a strategy callback::
 
     def on_trade(self, ctx, event):
         raw = event.data().price - 1.0
-        limit = adjust_tick_size('ES.c.0', raw)
-        ctx.buy_order('ES.c.0', 1, order_type=OrderType.LIMIT, limit_price=limit)
+        limit = adjust_tick_size('ES.v.0', raw)
+        ctx.buy_order('ES.v.0', 1, order_type=OrderType.LIMIT, limit_price=limit)
 
 Internally this looks the symbol up against the active strategy bridge and
 reads ``instrument.security.minTick``. If no tick is available (no bridge

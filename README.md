@@ -174,16 +174,20 @@ Futures bars use the same explicit API: pass the complete futures symbols and
 the interval. The symbol itself identifies a continuous or dated contract;
 there is no separate root selector on this path.
 
+For continuous contracts, use `.v.0` as the standard front contract for
+quarterly-expiring products (for example, ES and NQ), and `.c.0` for products
+that expire monthly.
+
 ```python
 ctx.subscribe_bars(
-    symbols=["ES.c.0", "NQ.c.0"],
+    symbols=["ES.v.0", "NQ.v.0"],
     asset_type=AssetType.FUTURES,
     interval="1s",
 )
 
 # Subscribe the same symbols at another interval with a second explicit call.
 ctx.subscribe_bars(
-    symbols=["ES.c.0", "NQ.c.0"],
+    symbols=["ES.v.0", "NQ.v.0"],
     asset_type=AssetType.FUTURES,
     interval="1m",
 )

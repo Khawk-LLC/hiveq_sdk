@@ -18,7 +18,7 @@ users; see Migrating from KDB (§20).
 | | Values |
 |---|---|
 | Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
-| Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES1!` → `ES.c.0` (continuous future) |
+| Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES.v.0` (quarterly continuous future), `CL.c.0` (monthly continuous future) |
 | Session            | `2025-10-13` … `2025-10-17`, `09:30:00`–`16:00:00` US/Eastern |
 | Live topics        | `market_data.equity.trades`, `signals.khawk.quant_features` |
 
@@ -44,7 +44,7 @@ by searching for a line starting `## N.` (or `## II.N`).
 | 14 | CSV Data driver | CSV transport `baseCSVPath`. |
 | 15 | Date Range | `DateRange` transform functions (e.g. drop weekends/holidays). |
 | 16 | Workflow Examples | Mode-agnostic code, batching vs multiple calls, subscription+pull combos, timeouts, dedup, in-memory. |
-| 17 | Symbols | Continuous-futures symbol translation (`ES1!` → `ES.c.0`). |
+| 17 | Symbols | Continuous-futures notation and legacy symbol translation. |
 | 18 | General Guidelines | When to use which cache mode for first-build vs incremental vs bulk-add. |
 | 19 | FAQ | Range queries, "Driver not found" error. |
 | 20 | Migrating from KDB | KDB→HiveQ config mapping table, `qpython3` install notes. |
@@ -1092,6 +1092,11 @@ Old-world continuous-futures notation `<ROOT><rank>!` maps to HiveQ
 The `hiveq.dd` keyword facade translates automatically; with the section API call
 `hiveq.symbol.translate(...)` yourself when needed.
 
+This translator preserves the legacy `.c` mapping for compatibility; it does
+not choose the modern convention by expiry frequency. For new configurations,
+write canonical symbols explicitly: `.v.0` for quarterly-expiring products
+such as `ES.v.0` and `NQ.v.0`, and `.c.0` for monthly-expiring products.
+
 ```python
 from hiveq import symbol
 symbol.translate(['AAPL', 'ES1!'])   # ['AAPL', 'ES.c.0']
@@ -1418,7 +1423,7 @@ The **`params_tuple`** passed to `dd.load(...)` supplies the runtime window/symb
 - first **`TimeRange`** field → the intraday window (and switches `filter_mode` to `session`),
 - remaining list/str field(s) → `symbols`.
 
-For continuous futures (`ES.c.0`, `ES.v.0`, etc.), the driver performs an
+For continuous futures (`ES.v.0`, `CL.c.0`, etc.), the driver performs an
 additional step before `Historical.get_data`: it calls
 `InstrumentReference().get_futures(symbols=..., start_date=..., end_date=...)`
 and replaces the continuous selector with every outright contract active in the
@@ -1549,8 +1554,10 @@ ref.get_instruments(symbols=None, asset_class=None, start_date=None, end_date=No
                     exchange=None, currency=None, limit=None, offset=None)
 ```
 
-Continuous futures use `ROOT.RULE.POSITION`, for example `ES.c.0` (calendar
-front) or `ES.v.1` (volume-ranked second contract). Symbol parsing helpers live
+Continuous futures use `ROOT.RULE.POSITION`. Use `.v.0` as the standard front
+contract for quarterly-expiring products (for example `ES.v.0` and `NQ.v.0`),
+and `.c.0` for monthly-expiring products (for example `CL.c.0`). A symbol such
+as `ES.v.1` selects the volume-ranked second contract. Symbol parsing helpers live
 in `hiveq_data.instrument_reference.symbol_parser`, including
 `parse_futures_ticker`, `parse_continuous_symbol`, `parse_options_ticker`,
 `detect_asset_type`, `normalize_futures_symbol`, and `extract_root`.

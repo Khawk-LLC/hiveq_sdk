@@ -3,13 +3,14 @@
 
 Demonstrates (verified against the SDK surface):
   - subscribing to a CONTINUOUS futures series by its SYMBOL STRING via
-    ``ctx.subscribe_bars(symbols=['ES.c.0'], asset_type=AssetType.FUTURES)`` (§5.1).
+    ``ctx.subscribe_bars(symbols=['ES.v.0'], asset_type=AssetType.FUTURES)`` (§5.1).
   - ``BacktestConfig(enable_auto_rollover=True)``: this is what turns on
     continuous-contract rollover — the engine rolls the position when the contract
     rolls and you observe each roll in ``on_rollover``. No ``data_configs`` flag.
   - the FUTURES SESSION window (R6): 18:00 -> 17:00 ET (CME Globex). Times are ET.
 
-Continuous symbol forms (§5.1): "ES.c.0" = front by calendar roll, "ES.v.0" = volume-roll.
+Continuous symbol convention (§5.1): use `.v.0` for quarterly-expiring products
+such as ES and NQ; use `.c.0` for products that expire monthly.
 
 Run:  python futures_continuous_rollover.py
 """
@@ -18,7 +19,7 @@ from collections import deque
 import hiveq.flow as hf
 from hiveq.flow import AssetType, BacktestConfig, StrategyConfig
 
-CONT = "ES.c.0"              # front continuous ES
+CONT = "ES.v.0"              # quarterly expiry: volume-roll front continuous ES
 LOOKBACK = 30                # bars for the breakout channel
 
 
