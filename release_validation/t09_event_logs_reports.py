@@ -30,7 +30,7 @@ if __name__ == "__main__":
         strategy_configs=[StrategyConfig(name="SdkT09", type="SdkT09", symbols=["AAPL"])],
         symbols=["AAPL"], start_date="2025-06-02", end_date="2025-06-02",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]}],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="11:00"))
+        backtest_config=BacktestConfig(session_start="09:30", session_end="11:00", export_orders_csv=True))
     completed_checkpoint(run, "t09_event_logs_reports")
     report=run.report(); orders=run.orders(); trades=run.trades(); positions=run.positions()
     metrics=run.metrics(); equity=run.equity_curve(); daily=run.daily_returns()

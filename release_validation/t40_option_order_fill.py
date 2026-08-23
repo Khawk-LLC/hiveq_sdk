@@ -8,7 +8,7 @@ from qa_common import completed_checkpoint, emit_checkpoint, finish
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.trading.price_utils import adjust_tick_size
-from hiveq.flow.trading_types import OrderSide, OrderType
+from hiveq.flow.trading_types import OrderType
 
 
 class SdkT40:
@@ -41,8 +41,8 @@ class SdkT40:
         if not self.entry_id:
             self.contract = snap.chain
             limit = adjust_tick_size(self.contract, float(snap.ask_px))
-            order = ctx.place_order(
-                self.contract, OrderSide.BUY, 1.0,
+            order = ctx.buy_order(
+                self.contract, 1.0,
                 order_type=OrderType.LIMIT, limit_price=limit
             )
             if order is not None:
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     finish("t40_option_order_fill", {
         "snap_data_present": state["snaps"] > 0 and state["quoted_snaps"] > 0,
         "occ_contract_identified": bool(state["contract"]),
-        "generic_place_order_entry_filled": state["entry_submitted"] and state["entry_filled"],
+        "option_limit_entry_filled": state["entry_submitted"] and state["entry_filled"],
         "exit_limit_filled": state["exit_submitted"] and state["exit_filled"],
         "position_closed": state["final_position"] == 0.0,
         "order_results_present": orders is not None and len(orders) >= 2,

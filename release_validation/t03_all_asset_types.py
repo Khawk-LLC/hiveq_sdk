@@ -6,7 +6,7 @@ import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint, emit_checkpoint, finish
 import hiveq.flow as hf
-from hiveq.flow import StrategyConfig
+from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
 
 class SdkT03:
@@ -33,7 +33,8 @@ if __name__ == "__main__":
     schemas=[("HIVEQ_US_EQ","bars_1m"),("HIVEQ_US_EQ","bars_1d"),("HIVEQ_US_EQ","eq_trades"),
              ("HIVEQ_US_FUT","bars_1m"),("HIVEQ_US_IND","indices_values"),("HIVEQ_US_OPT","snaps_1s")]
     run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT03",type="SdkT03",symbols=["AAPL","MSFT"])],
-        symbols=["AAPL","MSFT"],start_date="2025-06-02",end_date="2025-06-03",
-        data_configs=[{"type":"hiveq_historical","dataset":d,"schema":[s]} for d,s in schemas])
+        symbols=["AAPL","MSFT"],start_date="2025-06-02",end_date="2025-06-05",
+        data_configs=[{"type":"hiveq_historical","dataset":d,"schema":[s]} for d,s in schemas],
+        backtest_config=BacktestConfig(export_orders_csv=True))
     s=completed_checkpoint(run,"t03_all_asset_types")
     finish("t03_all_asset_types",{k:s[k]>0 for k in s},extra=str(s))

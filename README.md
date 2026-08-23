@@ -209,8 +209,13 @@ deduplicated by the runtime and do not produce duplicate callbacks.
   It always matches the SDK release (the version is stated in its header),
   and a copy ships inside the wheel — `hiveq docs` prints the installed path.
 - **[`docs/data_driver/llms.txt`](docs/data_driver/llms.txt)**
-  — reference for the separate data-driver config DSL (`hiveq.driver`); Part II
-  of the same file covers the underlying `hiveq_data` SDK client.
+  — reference for the separate data-driver config DSL (`hiveq.driver`): the
+  data-access tool for HiveQ, covering transports, caching, subscriptions, and
+  publishing. The driver runs **only inside HiveQ platform containers**, so this
+  SDK ships it as an import stub: importing it prints a notice, and calling
+  `dd.load`/`dd.save` raises `PlatformOnlyError` instead of quietly returning
+  nothing. Write driver code locally, then deploy it to run — §1.1 (deploying)
+  and §1.2 (the stub contract).
 
 ### How to read the docs
 

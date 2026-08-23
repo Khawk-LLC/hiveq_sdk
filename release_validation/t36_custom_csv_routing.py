@@ -1,6 +1,5 @@
 """Uploaded CSV custom rows reach only the strategy subscribing to their id."""
 from pathlib import Path
-import subprocess
 import sys
 sys.path[:0]=[str(Path(__file__).resolve().parent)]
 from qa_common import checkpoint,emit_checkpoint,finish
@@ -31,23 +30,13 @@ class SdkT36B:
 
 if __name__=="__main__":
     fixture=Path(__file__).resolve().parent/"data"/"user_data.csv"
-    data_cli=Path(sys.executable).with_name("hiveq-data")
-    upload=subprocess.run(
-        [str(data_cli),"--base",str(fixture.parent),"--upload",str(fixture),"--quiet"],
-        text=True,capture_output=True,
-    )
-    if upload.returncode:
-        raise RuntimeError(
-            "t36_custom_csv_routing: fixture upload failed before deployment: "
-            + (upload.stderr or upload.stdout).strip()
-        )
-    print("UPLOAD: ok user_data.csv")
+    # Local backtests consume the fixture directly; there is no upload step.
     run=hf.run_backtest(strategy_configs=[
         StrategyConfig(name="SdkT36A",type="SdkT36A",symbols=["AAPL"]),
         StrategyConfig(name="SdkT36B",type="SdkT36B",symbols=["AAPL"]),
     ],symbols=["AAPL"],start_date="2025-08-01",end_date="2025-08-02",
       data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]},
-                    {"type":"csv","data_type":"custom","path":"user_data.csv","id":"UserDataTest"}])
+                    {"type":"csv","data_type":"custom","path":str(fixture),"id":"UserDataTest"}])
     run.wait(progress=False);status=run.status() or {};status_name=str(status.get("status","")).lower()
     if status_name in {"failed","error","terminated"}:
         log_text="\n".join(run.logs());missing="user_data.csv" in log_text and any(x in log_text.lower() for x in ("not found","no such file","missing"))

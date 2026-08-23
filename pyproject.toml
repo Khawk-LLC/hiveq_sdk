@@ -20,8 +20,9 @@ classifiers = [
 # Thin client deps only — no engine, no polars.
 # Deploy/observe is a direct REST transport (capture -> cloudpickle -> submit)
 # built on requests + cloudpickle below; no platform-internal client package.
-# Stubs for data_driver (hiveq.dd/driver/symbol/datetime) and hiveq_data are
-# shipped so user code that references those imports resolves locally.
+# Stubs for the data driver (hiveq.dd/driver/symbol/datetime) are shipped so user
+# code that references those imports resolves locally; importing one prints a
+# notice and calling one raises, since the driver runs only on the platform.
 # quantstats + matplotlib power the visual tearsheet / summary_stats(); weasyprint
 # is the bundled HTML->PDF backend for run.tearsheet() so PDF export works out of
 # the box (a headless browser, if present, is used first for higher fidelity).
@@ -60,7 +61,6 @@ where = ["src"]
 # Ship the type stubs (.pyi) and the PEP 561 marker so authoring is typed.
 "hiveq" = ["py.typed", "**/*.pyi", "docs/**/*.txt"]
 "hiveq.flow" = ["py.typed", "**/*.pyi"]
-"hiveq_data" = ["py.typed"]
 
 [tool.setuptools]
 include-package-data = true

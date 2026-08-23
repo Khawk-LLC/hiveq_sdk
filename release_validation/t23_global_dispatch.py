@@ -6,19 +6,26 @@ sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint, emit_checkpoint, finish
 
 import hiveq.flow as hf
-from hiveq.flow import StrategyConfig
+from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
 
 
 class SdkT23:
     def on_start(self, ctx, event):
-        self.state = {"starts": 1, "bars": 0, "orders": 0, "fills": 0, "stops": 0}
+        if not hasattr(self, "state"):
+            self.state = {"starts": 1, "bars": 0, "orders": 0, "fills": 0, "stops": 0}
+            self.trade_open = False
         ctx.subscribe_bars(["AAPL"], asset_type=AssetType.EQUITY, interval="1m")
 
     def on_bar(self, ctx, event):
         self.state["bars"] += 1
-        if self.state["orders"] == 0:
-            self.state["orders"] += int(ctx.buy_order(event.data().symbol, 10.0) is not None)
+        if not self.trade_open:
+            self.trade_open = ctx.buy_order(event.data().symbol, 10.0) is not None
+            self.state["orders"] += int(self.trade_open)
+        elif self.state["orders"] == 1:
+            closed = ctx.sell_order(event.data().symbol, 10.0) is not None
+            self.state["orders"] += int(closed)
+            self.trade_open = not closed
 
     def on_order(self, ctx, event):
         if event.data().is_filled:
@@ -38,13 +45,14 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
+        backtest_config=BacktestConfig(export_orders_csv=True),
     )
     state = completed_checkpoint(run, "t23_sdk_dispatch")
     finish("t23_sdk_dispatch", {
         "start_dispatched": state["starts"] == 1,
         "bars_dispatched": state["bars"] > 0,
-        "order_placed": state["orders"] == 1,
-        "fill_dispatched": state["fills"] > 0,
+        "order_placed": state["orders"] == 2,
+        "fill_dispatched": state["fills"] >= 2,
         "stop_dispatched": state["stops"] >= 1,
         "public_orders_recorded": len(run.orders()) >= 1,
     }, extra=str(state))

@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import checkpoint, emit_checkpoint, finish, wait_for_final
+from qa_common import checkpoint, emit_checkpoint, export_run_artifacts, finish, wait_for_final
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
@@ -39,10 +39,11 @@ if __name__ == "__main__":
         StrategyConfig(name="SdkT25B", type="SdkT25B", symbols=["AAPL"]),
     ], symbols=["AAPL"], start_date="2025-08-01", end_date="2025-08-01",
        data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]}],
-       backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"))
+       backtest_config=BacktestConfig(session_start="09:30", session_end="10:30", export_orders_csv=True))
     wait_for_final(run)
     a = checkpoint(run, "t25_global_portfolio_a")
     b = checkpoint(run, "t25_global_portfolio_b")
+    export_run_artifacts(run, validation={"checkpoints": {"a": a, "b": b}})
     finish("t25_global_portfolio", {
         "both_orders_placed": a["sent"] and b["sent"],
         "strategy_a_position_isolated": a["own"] == 100,

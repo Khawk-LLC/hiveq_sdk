@@ -1,0 +1,314 @@
+# HiveQ Data API — low-level REST/WebSocket reference
+
+The raw HTTP and WebSocket surface underneath the data driver: read rows,
+browse the catalog, publish rows, move files, subscribe to a live topic. Every
+call in this file was exercised against a live platform; where something is
+unverified it says so.
+
+**This is not the recommended way to access HiveQ data.** Read §0 before using
+anything here.
+
+| § | Section | What it covers |
+|---|---|---|
+| 0 | Read this first | Who this is for, the access restriction, and why the driver is the default. |
+| 1 | Driver vs raw API | The plumbing the driver does for you, line by line, against what you write yourself. |
+| 2 | Auth, hosts, envelope | Headers, the two hosts, the response/error shape. |
+| 3 | Reading rows | `POST /api/read/v0/data` — the filter grammar, paging, worked examples. |
+| 4 | Catalog & schemas | `…/metadata/v0/{datasets,all-schemas,schemas,schema-details}`. |
+| 5 | Publishing rows | `POST /api/publish/v0/data`. |
+| 6 | Live topics | The distributor WebSocket — frames, and where it is reachable from. |
+| 7 | Files | `…/containers/v0/persistent-data/{upload,list,delete}`. |
+| 8 | Limits & failure modes | What errors look like and what they mean. |
+
+---
+
+## 0. Read this first
+
+**Use `hiveq.driver` (the data driver) unless you have a specific reason not
+to.** It is the supported, documented, transport-agnostic way to get data in and
+out of HiveQ — see `data_driver/llms.txt`. This reference exists for three
+narrow cases:
+
+1. **Another language or runtime.** No Python: a Go service, a notebook kernel
+   you do not control, a shell script, a dashboard backend.
+2. **A one-line lookup.** "What columns does `bars_1d` have?", "did yesterday's
+   rows land?" — a `curl` beats writing, deploying, and reading back a job.
+3. **Debugging the driver.** When a driver call returns something surprising,
+   the raw call tells you whether the platform or the driver is at fault.
+
+For everything else — pipelines, anything scheduled, anything that needs
+caching, anything that may need to switch backends later — the driver is the
+right tool, and §1 is the itemised reason why.
+
+> **Access is restricted.** These endpoints are reachable only from **inside the
+> HiveQ platform** (strategy containers, deployed jobs) or from a machine on a
+> **trusted network**. An API key alone is not sufficient from an arbitrary
+> internet host: the key authenticates you, the network decides whether you can
+> reach the endpoint at all. Code written against this reference is therefore
+> not portable to a user's laptop by default — the driver, run inside a deployed
+> job, has no such constraint. Treat "it works from my machine" as evidence
+> about *your* network, not about the API's availability.
+
+---
+
+## 1. Driver vs raw API — what you give up
+
+Both paths hit the same platform. The difference is entirely in what you have to
+write and maintain yourself.
+
+| Concern | With `hiveq.driver` | With the raw API |
+|---|---|---|
+| **Backend choice** | `transport = HiveQ \| CSV \| HDF5 \| KDB` in config; the same `dd.load('Trades', …)` moves between them with no code change | HiveQ only. A CSV or kdb+ source is a rewrite, not a config edit |
+| **Caching** | Five modes (`NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`), with cache files templated per symbol/date and populated on miss | None. You design the cache, the file layout, the invalidation, and the miss path |
+| **Date/symbol windowing** | A `params_tuple` with a `DateRange` fans out into per-window queries and reassembles one frame; `splitSize` tunes the fan-out | You loop dates yourself. `start`/`end` are required per call and one symbol per call (§3) |
+| **Paging** | Handled — the transport pages at `page_size` and concatenates | You loop `limit`/`offset` and detect the end yourself |
+| **Result shape** | A `pandas.DataFrame`, typed | JSON rows. You build the frame and coerce dtypes |
+| **Column selection & renaming** | `columns`, `filterMap`, `columnMap`, `outputColumns`, `defaults`, `required_fields` in config | Post-process every response by hand |
+| **Symbol conventions** | `hiveq.symbol.translate` and continuous-contract handling (`ES.c.0`) | You format symbols correctly on every call |
+| **Live topics** | `topic` on a section: subscribe, keepalive, reconnect, dynamic key add (`keyField`), unread-window buffering (`forceRefresh`), history stitching (`pullDataSourceID`), blocking `time_out` | A raw WebSocket. You write connect, auth, reconnect, ack handling, buffering and replay (§6) |
+| **Publish routing** | `dd.save('Section', df)` picks WebSocket or REST from config | You choose the endpoint and hand-build the payload (§5) |
+| **Credentials/endpoint** | Resolved from `HIVEQ_API_KEY` + config precedence | You assemble headers and pick the right host (§2) |
+| **Dedupe/ordering** | `drop_duplicates=` on the call | Yours |
+
+Rule of thumb: **one lookup → raw API. A pipeline → driver.** The moment you
+find yourself writing a paging loop, a date loop, or a cache, you have started
+reimplementing the driver.
+
+---
+
+## 2. Auth, hosts, envelope
+
+**Headers** — every call:
+
+```
+X-API-Key: <your key>          # required
+X-Org-ID:  <your org id>       # OMIT ENTIRELY if you do not have one
+Content-Type: application/json # POST bodies
+```
+
+> **Never send `X-Org-ID` empty.** A present-but-blank header is rejected with
+> `400 VALIDATION_FAILED — X-Org-ID: Too small: expected string to have >=1
+> characters`. This bites in Python, where `{'X-Org-ID': os.environ.get('HIVEQ_ORG_ID', '')}`
+> sends the empty header, while the equivalent `curl -H "X-Org-ID: $UNSET"` drops
+> it silently — the same code then "works in curl" and 400s in `requests`. Build
+> the header dict conditionally (§3).
+
+Inside a platform container both values are already in the environment as
+`HIVEQ_API_KEY` and `HIVEQ_ORG_ID`. Locally, `hiveq login` writes the key to
+`~/.hiveq/.env` but **not** an org id — so local callers normally send the key
+alone.
+
+**Hosts** — two, and they are not interchangeable:
+
+| Host | Where it works | Serves |
+|---|---|---|
+| `https://<platform host>` (e.g. `https://staging.hiveq.ai`) | Trusted network and inside the platform | Everything in this file |
+| `http://api-service:3000` (`$HIVEQ_DATA_URL` inside a container) | Inside the platform only | `/api/read/*`, `/api/publish/*`, `/api/metadata/*` — **404s `/api/containers/*`** (§7) |
+
+**Envelope** — success is uniform:
+
+```json
+{"data": …, "meta": {"requestId": "req_…", "version": "v0"}, "success": true}
+```
+
+`data` is an object for most routes and a bare array for `/api/read/v0/data`.
+Failures come in **two** shapes, so match on the HTTP status rather than on a
+key: application errors carry `{"success": false, "data": {"code", "message"}}`
+(e.g. `AUTHORIZATION_ERROR`, `VALIDATION_MISSING_FIELD`), while request-shape
+errors carry `{"error": {"code", "message", "details": {"fields": […]}}}`
+(e.g. a malformed header). Some filter errors return a bare
+`{"error": "<text>", "success": false}`. `meta.requestId` is present throughout
+— quote it when reporting a problem.
+
+---
+
+## 3. Reading rows — `POST /api/read/v0/data`
+
+```bash
+curl -X POST "$HIVEQ_BASE_URL/api/read/v0/data" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $HIVEQ_API_KEY" -H "X-Org-ID: $HIVEQ_ORG_ID" \
+  -d '{"dataset":"HIVEQ_US_EQ","schema":"bars_1d",
+       "filters":{"symbol":"AAPL","start":"2025-10-13","end":"2025-10-17"},
+       "limit":10}'
+```
+
+```json
+{"data":[{"date":"2025-10-13","symbol":"AAPL","open":249.38,"high":249.69,
+          "low":245.56,"close":247.66,"volume":38142942,"adj_close":246.748…}, …],
+ "meta":{"requestId":"req_…","version":"v0","rowCount":5},"success":true}
+```
+
+**Body**
+
+| Field | Required | Notes |
+|---|---|---|
+| `dataset` | yes | e.g. `HIVEQ_US_EQ` (§4) |
+| `schema` | yes | e.g. `bars_1d`, `eq_trades`, `tbbo` |
+| `filters.symbol` | yes | **Singular.** A `symbols` array is rejected with `Required filters missing: symbol` — one symbol per request; loop for more |
+| `filters.start` / `filters.end` | yes | `YYYY-MM-DD`. Omitting them fails with `start and end filters are required (format: YYYY-MM-DD)` |
+| `limit` | no | Rows per response |
+| `offset` | no | Skip N rows — verified: `limit:2, offset:2` returns the third and fourth rows |
+
+The same body shape works across asset classes — swapping to
+`{"dataset":"HIVEQ_US_FUT","schema":"tbbo","filters":{"symbol":"ESZ5",…}}`
+returns tick rows with `price`/`size`/`bid_px`/`ask_px`.
+
+**Python, into a DataFrame:**
+
+```python
+import os, requests, pandas as pd
+
+HEADERS = {'X-API-Key': os.environ['HIVEQ_API_KEY']}
+if os.environ.get('HIVEQ_ORG_ID'):            # omit when unset — never send it blank
+    HEADERS['X-Org-ID'] = os.environ['HIVEQ_ORG_ID']
+
+def read(dataset, schema, symbol, start, end, limit=100_000):
+    rows, offset = [], 0
+    while True:
+        r = requests.post(
+            f"{os.environ['HIVEQ_BASE_URL']}/api/read/v0/data",
+            headers=HEADERS,
+            json={'dataset': dataset, 'schema': schema,
+                  'filters': {'symbol': symbol, 'start': start, 'end': end},
+                  'limit': limit, 'offset': offset}, timeout=60)
+        r.raise_for_status()
+        batch = r.json()['data']
+        rows += batch
+        if len(batch) < limit:
+            return pd.DataFrame(rows)
+        offset += limit
+```
+
+That paging loop, the one-symbol-per-call loop around it, and the dtype pass
+after it are the concrete cost of skipping the driver.
+
+---
+
+## 4. Catalog & schemas
+
+| Call | Body / query | Returns |
+|---|---|---|
+| `GET /api/metadata/v0/datasets` | — | `{"datasets": [...], "total_count": N}` |
+| `GET /api/metadata/v0/all-schemas` | — | Every schema on the platform, with `schema_name`, `display_name`, `database`, `description`, `tags`, `datasets` |
+| `POST /api/metadata/v0/schemas` | `{"dataset": ["HIVEQ_US_EQ"]}` — note the **array** | Schemas for those datasets |
+| `POST /api/metadata/v0/schema-details` | `{"dataset": "HIVEQ_US_EQ", "schema": "bars_1d", "include_stats": false}` | Field list: `name`, `type`, `nullable`, `filterable`, `required_filter`, `primary_key`, `description` |
+
+`schemas` and `schema-details` are **POST** — the GET-with-query-params form
+404s.
+
+Field metadata is the fastest way to answer "what can I filter on?" —
+`required_filter: true` marks a filter the read call will reject you for
+omitting.
+
+From Python the SDK already wraps these: `hiveq.datasets.fetch_catalog()`,
+`fetch_schema_details(dataset, schema)`, `fetch_sample(dataset, schema, …)`,
+and the `hiveq datasets` CLI command.
+
+---
+
+## 5. Publishing rows — `POST /api/publish/v0/data`
+
+```json
+{"dataset": "HIVEQ_QUANT_SIGNALS", "schema": "signals",
+ "key": "my_batch_20251013", "operation": "add",
+ "data": [{…row…}, {…row…}]}
+```
+
+| Field | Notes |
+|---|---|
+| `dataset` | **Required** where data permissions are enforced. Omitting it fails with `VALIDATION_MISSING_FIELD: dataset is required when data permissions are enforced` |
+| `schema` | Target schema — must exist (§4). Publish into a schema you own |
+| `key` | Caller-supplied batch identifier |
+| `operation` | `add` (default) or `modify` |
+| `data` | Array of row objects; column names are the schema's field names |
+
+Rows must match the target schema's fields (§4) — check `schema-details` first.
+
+> **Unverified end-to-end.** A well-formed publish returns HTTP 200 with
+> `success: true`, but rows published this way were **not readable back**
+> through `/api/read/v0/data` afterwards in testing (tried immediately and after
+> a delay, with both a mismatched and a schema-shaped row). Treat a 200 here as
+> "accepted", not as "stored", and verify with a read before depending on it.
+> The driver's REST publish path (`publishSchema` + `key`, data-driver §9
+> path 2) goes through this same endpoint and carries the same caveat.
+
+---
+
+## 6. Live topics — the distributor WebSocket
+
+Live rows do not flow over HTTP. They move through the distributor, a WebSocket
+broker addressed as `ws://<wsHost>:<wsPort>` — default `localhost:8765`, i.e. a
+**sidecar of the strategy executor**, not a platform-wide address.
+
+**Publish** — one JSON frame per row, each acknowledged individually:
+
+```json
+{"action": "publish", "topic": "signals.myorg.quant_features",
+ "key": "AAPL", "data": {"date": "2025-10-13", "symbol": "AAPL", "score": 0.42}}
+```
+
+**Subscribe** — the driver's subscriber consumes the same broker; a section with
+a `topic` (plus optional `keyField`, `forceRefresh`, `pullDataSourceID`) is the
+supported way in, and it handles keepalive, reconnect, dynamic key addition, and
+history stitching for you (data-driver §8–§9).
+
+> **Where this is reachable.** Verified: from a deployed `QUANT_SCRIPTS` job,
+> `localhost:8765` is **connection-refused** — there is no distributor sidecar
+> in a job container, so topic publish/subscribe is not available there. It is
+> available inside a strategy container, where the engine runs alongside it.
+> The job image does ship the `websockets` and `kafka` Python modules. The raw
+> frame shapes above are documented from the driver's implementation; they have
+> not been exercised end-to-end from a job for that reason.
+>
+> **If you need live data, use a strategy and `ctx.subscribe_*`** (flow spec
+> §5). That is the only path with a supported subscription lifecycle.
+
+---
+
+## 7. Files — the per-user persistent-data store
+
+The store that `hiveq-data -u` / `hf.upload_files()` write to, and that strategy
+`data_configs` read from. Mounted in containers at
+`$HIVEQ_PERSISTENT_DATA_PATH` (`/home/hivequser/hiveq/persistent_data`).
+
+| Call | Shape |
+|---|---|
+| `POST …/api/containers/v0/persistent-data/upload` | multipart: `manifest` = JSON array of `{"field","path"}`, plus one part per file named by its `field` |
+| `GET …/api/containers/v0/persistent-data/list?path=userdata` | `{"files": [{"path","size","md5","modifiedAt"}]}` |
+| `POST …/api/containers/v0/persistent-data/delete` | `{"paths": ["userdata/x.csv"]}` → `{"deleted","missing","results"}` |
+
+```bash
+curl -X POST "$HIVEQ_BASE_URL/api/containers/v0/persistent-data/upload" \
+  -H "X-API-Key: $HIVEQ_API_KEY" -H "X-Org-ID: $HIVEQ_ORG_ID" \
+  -F 'manifest=[{"field":"f0","path":"userdata/my_signal_20251013.csv"}]' \
+  -F 'f0=@/tmp/my_signal_20251013.csv'
+```
+
+Two things to know, both verified:
+
+* **Use the public host.** `$HIVEQ_DATA_URL` (`http://api-service:3000`) **404s**
+  these routes even from inside the platform.
+* **This is how a job writes a file.** The volume is mounted in a job container
+  but not writable by it (uid mismatch), so a job stages the file in `/tmp` and
+  uploads it here; it then appears both in the store listing and on the mounted
+  volume. Full worked example: data-driver §1.2.
+
+---
+
+## 8. Limits & failure modes
+
+| Symptom | Meaning |
+|---|---|
+| `403 AUTHORIZATION_ERROR: Invalid API key` | Bad or missing `X-API-Key` |
+| `400 VALIDATION_FAILED — X-Org-ID: Too small…` | You sent `X-Org-ID` as an empty string; omit the header instead (§2) |
+| Connection refused / timeout / TLS failure | You are outside the trusted network (§0) — not an auth problem, and no key will fix it |
+| `Required filters missing: symbol` | `filters.symbol` is singular and mandatory (§3) |
+| `start and end filters are required (format: YYYY-MM-DD)` | Both window bounds are mandatory (§3) |
+| `VALIDATION_MISSING_FIELD: dataset is required when data permissions are enforced` | Add `dataset` to a publish body (§5) |
+| `404 Not Found` on `/api/containers/*` | You used the internal host; use the public one (§7) |
+| `404 Not Found` on a metadata route | `schemas` / `schema-details` are POST, not GET (§4) |
+| 200 on publish, nothing readable back | Known and unresolved (§5) |
+
+There is no documented rate limit; `limit` bounds a single response, and the
+driver pages at 500 000 rows per request against the same backend.

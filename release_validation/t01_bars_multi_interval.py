@@ -10,11 +10,12 @@ sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import (
     checkpoint,
     emit_checkpoint,
+    export_run_artifacts,
     finish,
     wait_for_final,
 )
 import hiveq.flow as hf
-from hiveq.flow import StrategyConfig
+from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
 
 class SdkT01:
@@ -24,6 +25,8 @@ class SdkT01:
         if not hasattr(self, "counts"):
             self.counts = {"1m": 0, "1d": 0}
             self.errors = []
+            self.trade_open = False
+            self.filled = 0
         ctx.subscribe_bars(["AAPL"], asset_type=AssetType.EQUITY, interval="1d")
         ctx.subscribe_bars(["AAPL"], asset_type=AssetType.EQUITY, interval="1m")
 
@@ -31,6 +34,11 @@ class SdkT01:
         bar = event.data()
         if bar.symbol == "AAPL" and bar.interval in self.counts:
             self.counts[bar.interval] += 1
+        if bar.symbol == "AAPL" and bar.interval == "1d":
+            if not self.trade_open:
+                self.trade_open = ctx.buy_order("AAPL", 1.0) is not None
+            else:
+                self.trade_open = not (ctx.sell_order("AAPL", 1.0) is not None)
         if len(self.errors) >= 5:
             return
         if not isinstance(event.ts_event, (int, float)) or event.ts_event <= 1e18:
@@ -43,12 +51,17 @@ class SdkT01:
             self.errors.append(f"invalid bar.time: {type(bar.time)}")
 
     def on_stop(self, ctx, event):
-        emit_checkpoint(ctx, "t01_bars_multi_interval", {**self.counts, "errors": self.errors})
+        emit_checkpoint(ctx, "t01_bars_multi_interval", {**self.counts, "errors": self.errors, "filled": self.filled})
+
+    def on_order(self, ctx, event):
+        if event.data().is_filled:
+            self.filled += 1
 
 if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT01", type="SdkT01", symbols=["AAPL"])],
         symbols=["AAPL"], start_date="2025-06-02", end_date="2025-06-03",
+        backtest_config=BacktestConfig(export_orders_csv=True),
         data_configs=[
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1d"]},
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]},
@@ -56,8 +69,10 @@ if __name__ == "__main__":
     )
     wait_for_final(run)
     state = checkpoint(run, "t01_bars_multi_interval")
+    export_run_artifacts(run, validation={"checkpoint": "t01_bars_multi_interval", "state": state})
     finish("t01_bars_multi_interval", {
         "1m_bars_delivered": state["1m"] >= 700,
         "1d_bars_delivered": state["1d"] == 2,
         "payload_contract": not state["errors"],
+        "trade_round_trip": state["filled"] == 2,
     }, extra=f"1m={state['1m']}, 1d={state['1d']}, errors={state['errors'][:2]}")

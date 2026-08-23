@@ -41,8 +41,7 @@ if __name__=="__main__":
         symbols=["ES.v.0","NQ.v.0"],start_date="2024-12-01",end_date="2025-06-24",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_FUT","schema":["bars_1m"]}],
         backtest_config=BacktestConfig(enable_auto_rollover=True,session_start="18:00",session_end="17:00"),
-        engine_config=EngineConfig(params={"oms_log_level":"information","oms_console_log":True,"hiveq_log_level":"INFO"}),
-        task_name="bt-SdkT38-rollover-symbol-trace")
+        engine_config=EngineConfig(params={"oms_log_level":"information","oms_console_log":True,"hiveq_log_level":"INFO"}))
     s=completed_checkpoint(run,"t38_multi_rollover_squareoff");balances={};order=[]
     for symbol,side,qty in s["fills"]:
         balances[symbol]=balances.get(symbol,0)+(qty if side.upper().endswith("BUY") else -qty)

@@ -38,6 +38,7 @@ def _cmd_docs(_args: argparse.Namespace) -> int:
     print(f"Docs: {docs}")
     print(f"Flow API reference (single file, read in one go): {docs / 'llms.txt'}")
     print(f"Data-driver reference: {docs / 'data_driver' / 'llms.txt'}")
+    print(f"Data API (low-level REST) reference: {docs / 'data_api' / 'llms.txt'}")
     return 0
 
 

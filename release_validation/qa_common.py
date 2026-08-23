@@ -4,9 +4,127 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 CHECKPOINT_TYPE = "SDK_RELEASE_CHECKPOINT"
+SENSITIVE_COLUMNS = {
+    "user_id", "user_name", "org_id", "trader_id", "account_id",
+}
+
+# Local (in-process) runs keep no order history in Python memory. With
+# ``BacktestConfig.export_orders_csv=True`` the engine streams every order event
+# to ``~/.tmp/[<run_id>_]<Strategy>_order_events.csv`` and the analyzer reads it
+# back into ``run.orders()``/``run.fills()``.  Deployed runs publish orders from
+# C++ straight to the platform and this file never exists.  Reading the raw
+# event stream is the only way to see *intermediate* states — a partial fill, a
+# cancel-reject that raced a fill — because the analyzer collapses each order to
+# one terminal row.
+LOCAL_ORDER_EVENT_DIR = Path.home() / ".tmp"
+
+
+def export_run_artifacts(
+    run: Any,
+    *,
+    root: str | Path | None = None,
+    validation: dict[str, Any] | None = None,
+) -> Path:
+    """Persist the full review surface for a completed designated run.
+
+    Each run gets its own directory keyed by run id. Identity columns are
+    removed, while order/position identifiers needed for reconciliation remain.
+    Empty or unavailable tables are still written as empty CSVs so absence is
+    explicit during post-processing.
+    """
+    run_id = str(getattr(run, "run_id", None) or "unknown-run")
+    base = Path(root) if root is not None else Path(__file__).parent / "run_artifacts"
+    out = base / run_id
+    out.mkdir(parents=True, exist_ok=True)
+
+    readers = {
+        # orders_frame, not run.orders: an in-memory run leaves its order history
+        # only in the streamed capture file, and an empty orders.csv would then
+        # misreport a run that really did trade.
+        "orders": lambda: orders_frame(run),
+        "trades": run.trades,
+        "positions": run.positions,
+        "event_logs": lambda: _event_logs(run),
+    }
+    table_rows: dict[str, int] = {}
+    for name, reader in readers.items():
+        value = _read_with_retry(reader, f"run.{name}()")
+        if value is None:
+            (out / f"{name}.csv").write_text("", encoding="utf-8")
+            table_rows[name] = 0
+            continue
+        drop = [column for column in value.columns if str(column) in SENSITIVE_COLUMNS]
+        cleaned = value.drop(columns=drop) if drop else value
+        cleaned.to_csv(out / f"{name}.csv", index=False)
+        table_rows[name] = len(cleaned)
+
+    status = _read_with_retry(run.status, "run.status()")
+    metadata = {
+        "run_id": run_id,
+        "task_id": getattr(run, "task_id", None),
+        "status": status,
+        "table_rows": table_rows,
+        "validation": validation or {},
+    }
+    (out / "validation.json").write_text(
+        json.dumps(metadata, indent=2, default=str), encoding="utf-8"
+    )
+    return out
+
+
+def order_events(run: Any) -> Any:
+    """Raw order-event stream for a local run, newest file per strategy.
+
+    ``run.orders()`` collapses each order to one terminal row, so an
+    intermediate state — ``ORDER_PARTIALLY_FILLED``, a cancel-reject that raced
+    a fill, a stop that triggered before it filled — is invisible there. This
+    reads the streamed capture file instead, which holds every event.
+
+    Returns an empty frame when the run is remote or capture was off, so a
+    caller can treat "no intermediate evidence available" uniformly.
+    """
+    import pandas as pd
+
+    run_id = str(getattr(run, "run_id", "") or "")
+    if not run_id or not LOCAL_ORDER_EVENT_DIR.is_dir():
+        return pd.DataFrame()
+    matches = sorted(LOCAL_ORDER_EVENT_DIR.glob(f"{run_id}_*_order_events.csv"))
+    frames = []
+    for path in matches:
+        try:
+            frame = pd.read_csv(path)
+        except (OSError, ValueError):
+            continue
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def orders_frame(run: Any) -> Any:
+    """Orders for a run, preferring the public reader and falling back locally.
+
+    An in-memory run only populates ``run.orders()`` when the backtest enabled
+    ``export_orders_csv``; when it did not, the streamed event capture is the
+    only order evidence that exists. Returning it here keeps a test's order
+    assertions honest instead of silently passing on an empty table.
+    """
+    import pandas as pd
+
+    public = _read_with_retry(run.orders, "run.orders()")
+    if public is not None and not getattr(public, "empty", True):
+        return public
+    events = order_events(run)
+    if events.empty:
+        return public if public is not None else pd.DataFrame()
+    # Collapse to one row per order id, keeping the last event seen — the same
+    # shape the analyzer produces, so callers can count orders either way.
+    return events.drop_duplicates(subset=["order_id"], keep="last")
 
 
 def emit_checkpoint(ctx: Any, name: str, state: dict[str, Any]) -> None:
@@ -127,7 +245,43 @@ def completed_checkpoint(run: Any, name: str) -> dict[str, Any]:
         except Exception:
             raise exc
         raise AssertionError(f"{exc}; last_checkpoint={state}") from exc
-    return checkpoint(run, name)
+    state = checkpoint(run, name)
+    # Every release-validation run must leave the complete public review
+    # surface behind, not only its summarized checkpoint.  This makes even a
+    # passing data/callback test independently reviewable for orders, trades,
+    # positions, and the event values used by its assertions.
+    export_run_artifacts(run, validation={"checkpoint": name, "state": state})
+    return state
+
+
+def evidence_checks(run: Any, *, orders: int = 1, trades: int = 0,
+                    event_logs: int = 1) -> dict[str, bool]:
+    """Public-surface evidence gate for a validation, as named checks.
+
+    The suite's PASS contract is that a case exercised the real execution and
+    result path, not only that a callback fired. Folding that into the same
+    ``checks`` dict a test already reports keeps the requirement visible in the
+    RESULT line rather than buried in a helper's side effects.
+
+    ``trades=0`` is for the cases whose contract is a rejection, a cancellation,
+    or a data gap and which therefore cannot close a round trip on the
+    instrument under test — they must still show orders and event logs.
+    """
+    def rows(value) -> int:
+        # `value or []` is not usable here: a DataFrame has no truth value.
+        return 0 if value is None else len(value)
+
+    order_rows = rows(orders_frame(run))
+    trade_rows = rows(_read_with_retry(run.trades, "run.trades()"))
+    log_rows = rows(_event_logs(run))
+    result = {}
+    if orders:
+        result[f"evidence_orders_ge_{orders}"] = order_rows >= orders
+    if trades:
+        result[f"evidence_trades_ge_{trades}"] = trade_rows >= trades
+    if event_logs:
+        result[f"evidence_event_logs_ge_{event_logs}"] = log_rows >= event_logs
+    return result
 
 
 def finish(name: str, checks: dict[str, bool], extra: str = "", gap: bool = False) -> None:

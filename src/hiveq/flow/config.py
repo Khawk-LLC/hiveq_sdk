@@ -512,9 +512,6 @@ class BacktestConfig:
     session_start: Optional[str] = None  # Session start time in HH:MM format ET (e.g., '18:00')
     session_end: Optional[str] = None    # Session end time in HH:MM format ET (e.g., '17:00')
 
-    # Export orders CSV to ~/.tmp/<run_id>_orders.csv after backtest
-    export_orders_csv: bool = False
-
     # Futures auto-rollover: auto-roll positions when continuous contracts roll
     # When True, injects filter_mode='continuous' into futures data_configs
     # and sets enableFuturesRollover=True in strategy params automatically

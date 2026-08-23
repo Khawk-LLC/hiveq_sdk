@@ -33,9 +33,10 @@ echo ">> python: $(${PY} -c 'import sys; print(sys.executable)')"
 # Sync the canonical docs (docs/ is the source of truth) into the package so
 # editable installs resolve them too; wheel builds do this in setup.py as well.
 echo ">> syncing docs/ -> src/hiveq/docs (generated, gitignored)"
-mkdir -p src/hiveq/docs/data_driver
+mkdir -p src/hiveq/docs/data_driver src/hiveq/docs/data_api
 cp docs/llms.txt src/hiveq/docs/llms.txt
 cp docs/data_driver/llms.txt src/hiveq/docs/data_driver/llms.txt
+cp docs/data_api/llms.txt src/hiveq/docs/data_api/llms.txt
 
 if [[ "${mode}" == "dev" ]]; then
   echo ">> editable install (pip install -e .)"
