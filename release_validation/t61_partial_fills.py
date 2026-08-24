@@ -126,8 +126,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="10:30",
-                                       export_orders_csv=True),
+        backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"),
     )
     state = completed_checkpoint(run, "t61_partial_fills")
     events = order_events(run)

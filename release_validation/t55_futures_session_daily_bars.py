@@ -7,7 +7,7 @@ import math
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import completed_checkpoint, emit_checkpoint, finish
+from qa_common import open_positions as open_position_rows, completed_checkpoint, emit_checkpoint, finish
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -137,13 +137,12 @@ if __name__ == "__main__":
             symbols=[SYMBOL], start_date="2016-01-01", end_date="2025-12-31",
             initial_capital=1_000_000.0, session_start="18:00", session_end="17:00",
             enable_auto_rollover=False, auto_flatten_at_close=False,
-            export_orders_csv=True,
         ),
     )
     print(f"run_id={run.run_id} task_id={run.task_id}", flush=True)
     state = completed_checkpoint(run, "t55_futures_session_daily_bars")
     positions = run.positions()
-    open_positions = positions[positions["quantity"] != 0]
+    open_positions = open_position_rows(positions)
     finish("t55_futures_session_daily_bars", {
         "ten_year_daily_data_present": state["daily_bars"] >= 2400,
         "minute_source_data_present": state["minute_bars"] > 1_000_000,

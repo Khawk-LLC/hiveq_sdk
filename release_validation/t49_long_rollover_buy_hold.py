@@ -13,7 +13,7 @@ import sys
 import pandas as pd
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts, wait_for_final
+from qa_common import finish_validation, open_positions as open_positions_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -100,23 +100,26 @@ def analyze(run, continuous_symbol: str) -> dict:
     rollover_spacing_valid = all(
         spacing >= MIN_ROLLOVER_SPACING for spacing in spacings
     )
-    status_column = "status" if "status" in orders.columns else "Status"
+    order_columns = {str(column).lower(): column for column in orders.columns}
+    status_column = order_columns.get("status")
     nonfilled = (
         orders[~orders[status_column].astype(str).str.upper().str.endswith("FILLED")]
-        if status_column in orders.columns else orders
+        if status_column is not None else orders
     )
     # positions() is a historical snapshot table (one row per contract), not
     # a current portfolio view. Derive the final live position from the filled
     # order ledger instead, which gives one authoritative net quantity per
     # contract after all rollover sells/buys.
-    if status_column in orders.columns and "Symbol" in orders.columns:
+    symbol_column = order_columns.get("symbol")
+    side_column = order_columns.get("side")
+    qty_column = order_columns.get("fillqty") or order_columns.get("filled_qty")
+    if status_column is not None and symbol_column is not None:
         filled = orders[orders[status_column].astype(str).str.upper().str.endswith("FILLED")].copy()
-        qty_column = "FillQty" if "FillQty" in filled.columns else "filled_qty"
-        if qty_column in filled.columns and "Side" in filled.columns:
-            signed_qty = filled[qty_column].astype(float) * filled["Side"].astype(str).str.upper().map({"BUY": 1.0, "SELL": -1.0}).fillna(0.0)
-            net = signed_qty.groupby(filled["Symbol"]).sum()
+        if qty_column is not None and side_column is not None:
+            signed_qty = filled[qty_column].astype(float) * filled[side_column].astype(str).str.upper().map({"BUY": 1.0, "SELL": -1.0}).fillna(0.0)
+            net = signed_qty.groupby(filled[symbol_column]).sum()
             open_positions = pd.DataFrame({"symbol": net.index, "quantity": net.values})
-            open_positions = open_positions[open_positions["quantity"] != 0]
+            open_positions = open_positions_rows(open_positions)
         else:
             open_positions = positions.iloc[0:0]
     else:
@@ -172,8 +175,7 @@ def main() -> None:
         backtest_config=BacktestConfig(
             symbols=[args.symbol], start_date=args.start, end_date=args.end,
             initial_capital=500_000.0, session_start="18:00", session_end="17:00",
-            enable_auto_rollover=True, auto_flatten_at_close=False,
-            export_orders_csv=True,
+            enable_auto_rollover=True, auto_flatten_at_close=False
         ),
     )
     print(f"run_id={run.run_id} task_id={run.task_id}", flush=True)
@@ -182,8 +184,7 @@ def main() -> None:
     artifacts = export_run_artifacts(run, validation=validation)
     print(json.dumps(validation, indent=2), flush=True)
     print(f"run_artifacts={artifacts}", flush=True)
-    if not validation["passed"]:
-        raise AssertionError(f"rollover validation failed: {validation}")
+    finish_validation("t49_long_rollover_buy_hold", validation)
 
 
 if __name__ == "__main__":

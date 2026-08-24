@@ -133,8 +133,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
-        backtest_config=BacktestConfig(session_start="04:00", session_end="18:30",
-                                       export_orders_csv=True),
+        backtest_config=BacktestConfig(session_start="04:00", session_end="18:30"),
     )
     state = completed_checkpoint(run, "t66_order_type_tif_matrix")
     events = order_events(run)

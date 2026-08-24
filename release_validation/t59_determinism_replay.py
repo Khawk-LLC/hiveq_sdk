@@ -92,7 +92,7 @@ def replay():
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
         backtest_config=BacktestConfig(initial_capital=INITIAL, session_start="09:30",
-                                       session_end="11:30", export_orders_csv=True),
+                                       session_end="11:30"),
     )
 
 

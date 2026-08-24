@@ -37,7 +37,7 @@ if __name__=="__main__":
     run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT04",type="SdkT04",symbols=["AAPL"])],
         symbols=["AAPL"],start_date="2025-06-02",end_date="2025-06-02",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]}],
-        backtest_config=BacktestConfig(session_start="09:30",session_end="10:30",export_orders_csv=True))
+        backtest_config=BacktestConfig(session_start="09:30",session_end="10:30"))
     s=completed_checkpoint(run,"t04_callbacks_contract")
     finish("t04_callbacks_contract",{"on_start_fired_once":s["starts"]==1,"on_start_before_data":s["first"]=="start",
         "on_bar_fired":s["bars"]>0,"session_scoped_data_pull":55<=s["bars"]<=65,

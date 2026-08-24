@@ -175,8 +175,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="11:30",
-                                       export_orders_csv=True),
+        backtest_config=BacktestConfig(session_start="09:30", session_end="11:30"),
     )
     state = completed_checkpoint(run, "t68_order_helper_surface")
     placed = state["place_order"]

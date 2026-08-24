@@ -6,7 +6,12 @@ import sys
 from typing import Any
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts
+from qa_common import (
+    export_run_artifacts,
+    finish_validation,
+    open_positions,
+    wait_for_final,
+)
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -151,6 +156,18 @@ def _total_trades_from_stats(stats: Any) -> Any:
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     local_userdata = Path(__file__).resolve().parent / "data" / USERDATA_PATH
+    # A platform run executes remotely and cannot open a path on this machine,
+    # so the replay fixture is streamed to the persistent-data store and then
+    # referenced by USERDATA_PATH -- the relative name it is stored under.
+    # Passing the absolute local path yields a run with no custom rows, hence no
+    # replayed orders at all, and no error to say why.
+    upload_error = ""
+    try:
+        hf.upload_files(str(local_userdata),
+                        base=str(Path(__file__).resolve().parent / "data"),
+                        progress=False)
+    except Exception as exc:                               # noqa: BLE001
+        upload_error = str(exc)[:200]
     backtest_config = BacktestConfig(
         symbols=[SYMBOL],
         start_date=START_DATE,
@@ -181,7 +198,7 @@ def main() -> None:
                 "type": "csv",
                 "data_type": "custom",
                 "id": DATA_ID,
-                "path": str(local_userdata),
+                "path": USERDATA_PATH,
             },
         ],
         backtest_config=backtest_config,
@@ -189,7 +206,10 @@ def main() -> None:
     print(f"run_id={run.run_id}")
     print(f"task_id={run.task_id}")
 
-    run.wait(progress=False)
+    # ``Run.wait()`` may return at the executor's STOPPED lifecycle state while
+    # the platform is still publishing results.  Wait for the platform's true
+    # terminal state before reading the large replay's result tables.
+    wait_for_final(run)
     report = run.report()
 
     metadata = {
@@ -217,27 +237,35 @@ def main() -> None:
     )
     _write_table(getattr(report, "return_stats", None), OUTPUT_DIR / "return_stats.csv")
     _write_table(getattr(report, "run_info", None), OUTPUT_DIR / "run_info.csv")
-    _write_table(run.trades(), OUTPUT_DIR / "trades.csv")
-    _write_table(run.positions(), OUTPUT_DIR / "positions.csv")
-
-    total_trades = _total_trades_from_stats(getattr(report, "return_stats", None))
+    trades = run.trades()
     positions = run.positions()
+    orders = run.orders()
+    _write_table(trades, OUTPUT_DIR / "trades.csv")
+    _write_table(positions, OUTPUT_DIR / "positions.csv")
+
+    total_trades_stat = _total_trades_from_stats(
+        getattr(report, "return_stats", None)
+    )
+    total_trades = len(trades)
     validation = {
         "symbol": SYMBOL,
         "enable_auto_rollover": False,
-        "orders": len(run.orders()),
-        "trades": len(run.trades()),
+        "orders": len(orders),
+        "trades": total_trades,
         "positions": len(positions),
-        "open_positions": int((positions["quantity"] != 0).sum()),
-        "total_trades_stat": total_trades,
-        "passed": bool(total_trades and (positions["quantity"] != 0).sum() == 0),
+        "open_positions": int(len(open_positions(positions))),
+        # Kept for visibility: return_stats has no "Total Trades" metric, so
+        # this is expected to be None and must not gate the result.
+        "total_trades_stat": total_trades_stat,
+        "upload_error": upload_error,
+        "passed": bool(total_trades and len(open_positions(positions)) == 0),
     }
     artifacts = export_run_artifacts(run, validation=validation)
     print(f"total_trades={total_trades}")
+    print(f"return_stats_total_trades={total_trades_stat}")
     print(f"saved_outputs={OUTPUT_DIR}")
     print(f"run_artifacts={artifacts}")
-    if not validation["passed"]:
-        raise AssertionError(f"replay validation failed: {validation}")
+    finish_validation("t48_replay_set_a_cap_slice_v3", validation)
 
 
 if __name__ == "__main__":

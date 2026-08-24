@@ -110,7 +110,7 @@ if __name__ == "__main__":
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
         backtest_config=BacktestConfig(initial_capital=CAPITAL, session_start="09:30",
-                                       session_end="11:00", export_orders_csv=True),
+                                       session_end="11:00"),
     )
     state = completed_checkpoint(run, "t62_capital_and_risk_posture")
     before = state["before"]

@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts, wait_for_final
+from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -186,6 +186,10 @@ class SdkT54FuturesTradeScalp:
 
 
 def _state(value):
+    # In-process runs serialize state_variables with orjson, so this column
+    # holds bytes; returning it undecoded made the scalp summary unreadable.
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
     return json.loads(value or "{}") if isinstance(value, str) else value
 
 
@@ -195,7 +199,7 @@ def analyze(run):
     events = run.event_logs()
     summaries = events[events["sub_event_type"] == "SCALP_SUMMARY"]
     summary = {} if summaries.empty else _state(summaries.iloc[-1]["state_variables"])
-    open_positions = positions[positions["quantity"] != 0]
+    open_positions = open_position_rows(positions)
     result = {
         "symbol": SYMBOL, "orders": len(orders), "trades": len(run.trades()),
         "all_orders_terminal": bool(len(orders)) and bool(
@@ -231,5 +235,4 @@ if __name__ == "__main__":
     artifacts = export_run_artifacts(run, validation=validation)
     print(json.dumps(validation, indent=2), flush=True)
     print(f"run_artifacts={artifacts}", flush=True)
-    if not validation["passed"]:
-        raise AssertionError(f"futures scalp validation failed: {validation}")
+    finish_validation("t54_futures_trade_scalp", validation)

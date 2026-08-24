@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts, wait_for_final
+from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -70,6 +70,10 @@ class SdkT53OvernightFuturesStrategy:
 
 
 def _state(value):
+    # In-process runs serialize state_variables with orjson, so this column
+    # holds bytes; without decoding, every payload silently reads as {}.
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
     if isinstance(value, str):
         return json.loads(value or "{}")
     return value if isinstance(value, dict) else {}
@@ -88,7 +92,7 @@ def analyze(run) -> dict:
         state is not None and float(state.get("quantity", 0)) == QUANTITY
         for state in snapshots.values()
     )
-    open_positions = positions[positions["quantity"] != 0]
+    open_positions = open_position_rows(positions)
     all_filled = len(orders) == 2 and bool((orders["status"] == "FILLED").all())
     result = {
         "symbol": SYMBOL, "expected_quantity": QUANTITY, "orders": len(orders),
@@ -126,8 +130,7 @@ def main() -> None:
     artifacts = export_run_artifacts(run, validation=validation)
     print(json.dumps(validation, indent=2), flush=True)
     print(f"run_artifacts={artifacts}", flush=True)
-    if not validation["passed"]:
-        raise AssertionError(f"overnight position validation failed: {validation}")
+    finish_validation("t53_overnight_futures_strategy", validation)
 
 
 if __name__ == "__main__":

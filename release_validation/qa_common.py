@@ -127,6 +127,36 @@ def orders_frame(run: Any) -> Any:
     return events.drop_duplicates(subset=["order_id"], keep="last")
 
 
+def open_positions(positions: Any) -> Any:
+    """Rows of a positions table that are not flat, whatever the schema calls it.
+
+    The persisted positions table has no ``quantity`` column -- it carries
+    ``entry_qty``/``closed_qty``/``remaining_qty`` and an ``is_flat`` flag. Ten
+    validations indexed ``positions["quantity"]`` anyway, so each one raised
+    KeyError at its final flatness assertion; because the process still exited
+    zero, the runner scored several of them PASS without the assertion ever
+    having run. Resolving the column here keeps that from recurring per-test.
+    """
+    import pandas as pd
+
+    if positions is None or getattr(positions, "empty", True):
+        return pd.DataFrame()
+    columns = {str(column).lower(): column for column in positions.columns}
+    for name in ("remaining_qty", "quantity", "net_quantity", "qty"):
+        if name in columns:
+            values = pd.to_numeric(positions[columns[name]], errors="coerce").fillna(0)
+            return positions[values != 0]
+    if "is_flat" in columns:
+        flat = positions[columns["is_flat"]].astype(str).str.lower().isin(
+            {"true", "1", "yes"}
+        )
+        return positions[~flat]
+    raise AssertionError(
+        f"positions table exposes no quantity or is_flat column: "
+        f"{list(positions.columns)}"
+    )
+
+
 def emit_checkpoint(ctx: Any, name: str, state: dict[str, Any]) -> None:
     ctx.add_event_log(name, sub_event_type=CHECKPOINT_TYPE, state_variable=state)
 
@@ -252,6 +282,26 @@ def completed_checkpoint(run: Any, name: str) -> dict[str, Any]:
     # positions, and the event values used by its assertions.
     export_run_artifacts(run, validation={"checkpoint": name, "state": state})
     return state
+
+
+def finish_validation(name: str, validation: dict[str, Any], extra: str = "") -> None:
+    """Report a validation dict through the standard RESULT line.
+
+    The long-running cases build a ``validation`` mapping and print it as JSON.
+    That left the runner with no ``RESULT:`` line to score, so it fell back to
+    the process exit code -- and these scripts exit 0 even when they raise, so
+    a failing validation was recorded as a pass. Every boolean in the mapping
+    becomes a named check; the non-boolean entries are carried as detail.
+    """
+    checks = {key: bool(value) for key, value in validation.items()
+              if isinstance(value, bool) and key != "passed"}
+    if "passed" in validation:
+        checks["validation_passed"] = bool(validation["passed"])
+    if not checks:
+        checks["validation_passed"] = bool(validation)
+    detail = {key: value for key, value in validation.items()
+              if not isinstance(value, bool)}
+    finish(name, checks, extra=(f"{extra}; " if extra else "") + str(detail))
 
 
 def evidence_checks(run: Any, *, orders: int = 1, trades: int = 0,

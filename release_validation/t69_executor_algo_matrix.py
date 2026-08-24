@@ -2,9 +2,8 @@
 
 t39 drives a single POV executor. TWAP is never created, ``executor_state`` and
 ``stop_executor`` (the handle-taking variants) are never called, and
-``on_executor_event`` -- a public callback with its own event type and payload
--- is implemented by no case in the suite, so the whole executor event surface
-is unobserved.
+``on_executor`` -- the callback carrying EXECUTOR_EVENT -- is implemented by no
+case in the suite, so the whole executor event surface is unobserved.
 
 Each algorithm is created, observed working through its child orders, queried
 for state, and stopped; the executor event payload is checked for the fields it
@@ -102,7 +101,7 @@ class SdkT69:
                             ctx.stop_executor_by_id(executor_id)
                         )
 
-    def on_executor_event(self, ctx, event):
+    def on_executor(self, ctx, event):
         self.state["events"] += 1
         data = event.data()
         executor_id = str(getattr(data, "executor_id", "") or "")
@@ -154,8 +153,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="10:30",
-                                       export_orders_csv=True),
+        backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"),
     )
     state = completed_checkpoint(run, "t69_executor_algo_matrix")
     created = state["created"]

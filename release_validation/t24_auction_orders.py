@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import completed_checkpoint, emit_checkpoint, finish
+from qa_common import open_positions, completed_checkpoint, emit_checkpoint, finish
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType, EventType
@@ -20,17 +20,21 @@ class SdkT24:
         self.moo_ids = {}; self.moc_ids = {}
         ctx.subscribe_trades(SYMBOLS, asset_type=AssetType.EQUITY)
         logger.info(f"[START] subscribed equity trades for {SYMBOLS}")
-
-    def on_trade(self, ctx, event):
-        trade = event.data(); self.state["trades"] += 1
-        symbol = str(trade.symbol)
-        logger.debug(f"[TRADE] {symbol} time={trade.time} price={trade.price}")
-        if symbol in SYMBOLS and symbol not in self.moo_ids:
+        # MOO orders must be resting before the opening-auction cutoff.  The
+        # session starts at 04:00 ET, so submit them here rather than waiting
+        # for each symbol's first trade (which may not arrive until 09:30 or
+        # later and would make the order ineligible for the opening auction).
+        for symbol in SYMBOLS:
             order = ctx.buy_order(symbol, 1.0, order_type=OrderType.MOO)
             if order:
                 self.moo_ids[symbol] = order.order_id
                 self.state["moo_placed"][symbol] = True
                 logger.info(f"[MOO] submitted BUY 1 {symbol}")
+
+    def on_trade(self, ctx, event):
+        trade = event.data(); self.state["trades"] += 1
+        symbol = str(trade.symbol)
+        logger.debug(f"[TRADE] {symbol} time={trade.time} price={trade.price}")
 
     def on_order(self, ctx, event):
         order = event.data()
@@ -78,5 +82,5 @@ if __name__ == "__main__":
         "twenty_public_orders": len(run.orders()) >= 20,
         "twenty_public_fills": len(run.fills()) >= 20,
         "ten_round_trip_trades": len(run.trades()) >= 10,
-        "all_symbols_flat": positions.empty or not (positions["quantity"] != 0).any(),
+        "all_symbols_flat": open_positions(positions).empty,
     }, extra=str(state))

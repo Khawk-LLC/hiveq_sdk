@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts, wait_for_final
+from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -86,6 +86,10 @@ class SdkT52MultiSymbolLongRollover:
 
 
 def _state(value):
+    # In-process runs serialize state_variables with orjson, so this column
+    # holds bytes; without decoding, every payload silently reads as {}.
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
     if isinstance(value, str):
         return json.loads(value or "{}")
     return value if isinstance(value, dict) else {}
@@ -119,7 +123,7 @@ def analyze(run, symbols: list[str]) -> dict:
             "payload_pairs_complete": pairs_complete,
             "contract_chain_continuous": continuity,
         }
-    open_positions = positions[positions["quantity"] != 0]
+    open_positions = open_position_rows(positions)
     all_filled = bool(len(orders)) and bool((orders["status"] == "FILLED").all())
     passed = (
         all_filled and len(open_positions) == len(symbols)
@@ -165,8 +169,7 @@ def main() -> None:
     artifacts = export_run_artifacts(run, validation=validation)
     print(json.dumps(validation, indent=2), flush=True)
     print(f"run_artifacts={artifacts}", flush=True)
-    if not validation["passed"]:
-        raise AssertionError(f"multi-symbol rollover validation failed: {validation}")
+    finish_validation("t52_multi_symbol_long_rollover", validation)
 
 
 if __name__ == "__main__":

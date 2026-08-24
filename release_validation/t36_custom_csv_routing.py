@@ -30,13 +30,24 @@ class SdkT36B:
 
 if __name__=="__main__":
     fixture=Path(__file__).resolve().parent/"data"/"user_data.csv"
-    # Local backtests consume the fixture directly; there is no upload step.
+    # A platform run cannot read a path on this machine: the strategy executes
+    # remotely, so the fixture has to be streamed to the persistent-data store
+    # first and then referenced by its *relative* name (docs Sect. 15 --
+    # "Reference it in data_configs by its relative path, not the full runtime
+    # path"). Passing str(fixture) yields a run with zero custom rows and no
+    # error, which is what this case used to report.
+    upload_error=""
+    try:
+        hf.upload_files(str(fixture),base=str(fixture.parent),progress=False)
+    except Exception as exc:
+        upload_error=str(exc)[:200]
+    remote_path=fixture.name
     run=hf.run_backtest(strategy_configs=[
         StrategyConfig(name="SdkT36A",type="SdkT36A",symbols=["AAPL"]),
         StrategyConfig(name="SdkT36B",type="SdkT36B",symbols=["AAPL"]),
     ],symbols=["AAPL"],start_date="2025-08-01",end_date="2025-08-02",
       data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]},
-                    {"type":"csv","data_type":"custom","path":str(fixture),"id":"UserDataTest"}])
+                    {"type":"csv","data_type":"custom","path":remote_path,"id":"UserDataTest"}])
     run.wait(progress=False);status=run.status() or {};status_name=str(status.get("status","")).lower()
     if status_name in {"failed","error","terminated"}:
         log_text="\n".join(run.logs());missing="user_data.csv" in log_text and any(x in log_text.lower() for x in ("not found","no such file","missing"))
@@ -51,4 +62,5 @@ if __name__=="__main__":
             "mandatory_symbol_present":all(x["symbol"]=="AAPL" for x in subscriber["samples"]),
             "custom_columns_readable":all(x["action"] and x["weight"] for x in subscriber["samples"]),
             "non_subscriber_isolated":bars_only["custom"]==0,
-        },extra=f"subscriber={subscriber}, bars_only={bars_only}")
+        },extra=f"subscriber={subscriber}, bars_only={bars_only}, "
+                f"remote_path={remote_path!r}, upload_error={upload_error!r}")

@@ -143,8 +143,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="11:00",
-                                       export_orders_csv=True),
+        backtest_config=BacktestConfig(session_start="09:30", session_end="11:00"),
     )
     state = completed_checkpoint(run, "t63_cancel_modify_rejects")
     events = order_events(run)

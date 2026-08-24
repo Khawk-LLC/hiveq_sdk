@@ -103,7 +103,7 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1d"]
         }],
-        backtest_config=BacktestConfig(initial_capital=INITIAL, export_orders_csv=True),
+        backtest_config=BacktestConfig(initial_capital=INITIAL),
     )
     state = completed_checkpoint(run, "t65_analytics_reconciliation")
     report = run.report()
@@ -132,14 +132,28 @@ if __name__ == "__main__":
         if peak:
             computed_dd = max(computed_dd, (peak - value) / peak)
 
+    # return_stats is long-format -- one row per metric, columns ("metric",
+    # "value") -- so scanning for a column named like "sharpe" finds nothing
+    # and would wrongly report the statistic as missing.
     reported_sharpe = None
-    if report.return_stats is not None and len(report.return_stats):
-        column = numeric_column(report.return_stats, "sharpe")
-        if column is not None:
-            try:
-                reported_sharpe = float(report.return_stats[column].dropna().iloc[-1])
-            except (IndexError, ValueError):
-                reported_sharpe = None
+    stats = report.return_stats
+    if stats is not None and len(stats):
+        lowered = {str(c).lower(): c for c in stats.columns}
+        if "metric" in lowered and "value" in lowered:
+            rows = stats[stats[lowered["metric"]].astype(str)
+                         .str.contains("sharpe", case=False, na=False)]
+            if len(rows):
+                try:
+                    reported_sharpe = float(rows[lowered["value"]].iloc[0])
+                except (TypeError, ValueError):
+                    reported_sharpe = None
+        else:
+            column = numeric_column(stats, "sharpe")
+            if column is not None:
+                try:
+                    reported_sharpe = float(stats[column].dropna().iloc[-1])
+                except (IndexError, ValueError):
+                    reported_sharpe = None
 
     trade_pnl_column = numeric_column(trades, "pnl") if len(trades) else None
     trade_pnl = (float(trades[trade_pnl_column].sum())

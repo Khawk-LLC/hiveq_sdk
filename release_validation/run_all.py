@@ -17,6 +17,13 @@ BETWEEN_TEST_DELAY_SECONDS = 2
 DEFAULT_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_NUMBERS = {45, *range(48, 59)}
+# Remote platform submissions: a timeout means the client gave up, not that the
+# run stopped -- an abandoned run can still be active server-side, so the suite
+# halts rather than submitting another strategy on top of it. Set to True only
+# for in-memory (is_local) runs, which are process-scoped and die with their
+# process, where halting the whole suite over one hung test just yields a
+# scorecard covering a prefix of the tests while reading like a full result.
+LOCAL_RUNS = False
 REPORTS_DIR = HERE / "reports"
 ARTIFACTS_DIR = HERE / "run_artifacts"
 

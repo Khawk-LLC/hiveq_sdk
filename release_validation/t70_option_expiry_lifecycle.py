@@ -131,8 +131,7 @@ if __name__ == "__main__":
             "type": "hiveq_historical", "dataset": "HIVEQ_US_OPT", "schema": ["snaps_1s"]
         }],
         backtest_config=BacktestConfig(initial_capital=INITIAL,
-                                       session_start="09:30", session_end="16:15",
-                                       export_orders_csv=True),
+                                       session_start="09:30", session_end="16:15"),
     )
     state = completed_checkpoint(run, "t70_option_expiry_lifecycle")
     at_expiry = state["at_expiry"]

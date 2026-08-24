@@ -39,7 +39,7 @@ if __name__ == "__main__":
         StrategyConfig(name="SdkT25B", type="SdkT25B", symbols=["AAPL"]),
     ], symbols=["AAPL"], start_date="2025-08-01", end_date="2025-08-01",
        data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["bars_1m"]}],
-       backtest_config=BacktestConfig(session_start="09:30", session_end="10:30", export_orders_csv=True))
+       backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"))
     wait_for_final(run)
     a = checkpoint(run, "t25_global_portfolio_a")
     b = checkpoint(run, "t25_global_portfolio_b")

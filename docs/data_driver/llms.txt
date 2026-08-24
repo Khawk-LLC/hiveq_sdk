@@ -861,9 +861,9 @@ df = dd.load('Trades', params_tuple=a, cache=Cache.CACHE_FORCE_PULL)
 ### More input parameters
 
 ```python
-A = collections.namedtuple('Input', ['date', 'sym', 'stime', 'etime'])   # rebinds A to a 4-field shape
-a = A(DateRange('2025-10-14', '2025-10-15'), 'AAPL',
-      TimeRange('09:30:00', '16:00:00'), None)
+A4 = collections.namedtuple('Input', ['date', 'sym', 'stime', 'etime'])   # a wider shape; `A` above still works
+a = A4(DateRange('2025-10-14', '2025-10-15'), 'AAPL',
+       TimeRange('09:30:00', '16:00:00'), None)
 dd.load('CombinedScoreTime', params_tuple=a, cache=Cache.PULL_UPDATE_CACHE)
 df = dd.load('CombinedScoreTime', params_tuple=a, cache=Cache.ONLY_CACHE)
 ```
@@ -1004,9 +1004,9 @@ then filter the returned dataframe — rather than many calls:
 params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL', 'MSFT', 'NVDA'])
 data = dd.load('EqBars', params_tuple=params, cache=Cache.PULL_UPDATE_CACHE)
 
-aapl = data[data['sym'] == 'AAPL']
-msft = data[data['sym'] == 'MSFT']
-nvda = data[data['sym'] == 'NVDA']
+aapl = data[data['symbol'] == 'AAPL']
+msft = data[data['symbol'] == 'MSFT']
+nvda = data[data['symbol'] == 'NVDA']
 ```
 
 ```ini

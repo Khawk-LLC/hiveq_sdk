@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import completed_checkpoint, emit_checkpoint, finish
+from qa_common import completed_checkpoint, emit_checkpoint, finish, orders_frame
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -116,6 +116,10 @@ if __name__ == "__main__":
         backtest_config=BacktestConfig(session_start="15:30", session_end="16:00"),
     )
     state = completed_checkpoint(run, "t45_multileg_options")
+    # orders_frame, not run.orders(): falls back to the streamed capture file so
+    # an in-process run reports what it actually traded.
+    order_rows = len(orders_frame(run))
+    trade_rows = len(run.trades())
     roles = set(state["legs"])
     finish("t45_multileg_options", {
         "call_and_put_wings_selected": roles == {"long_put", "short_put", "short_call", "long_call"},
@@ -127,6 +131,6 @@ if __name__ == "__main__":
         "all_legs_flat": len(state["positions"]) == 4 and all(v == 0.0 for v in state["positions"].values()),
         # Five sessions x four legs x entry+exit = 40 orders and 20 round
         # trips; the floors stay tolerant of a single thin chain.
-        "week_has_at_least_30_orders": len(run.orders()) >= 30,
-        "week_has_at_least_15_round_trips": len(run.trades()) >= 15,
-    }, extra=str(state))
+        "week_has_at_least_30_orders": order_rows >= 30,
+        "week_has_at_least_15_round_trips": trade_rows >= 15,
+    }, extra=f"orders={order_rows}, trades={trade_rows}, {state}")

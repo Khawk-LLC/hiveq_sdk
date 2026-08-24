@@ -82,7 +82,7 @@ result surfaces are validated end to end.
 | SDK test | Contract |
 |---|---|
 | `t01_bars_multi_interval.py` | successive 1m/1d subscriptions and bar payloads |
-| `t02_successive_accumulate.py` | successive trade/index subscriptions accumulate across a trading week |
+| `t02_successive_accumulate.py` | successive trade/index subscriptions accumulate |
 | `t03_all_asset_types.py` | equity, futures, index, and option streams coexist |
 | `t04_callbacks_contract.py` | callback order, event types, timestamps, and context |
 | `t05_order_lifecycle.py` | market fill, resting limit, cancel, and flatten |
@@ -130,7 +130,7 @@ result surfaces are validated end to end.
 | `t47_trade_tick_fields.py` | public futures/equity trade-tick payload fields |
 | `t48_replay_set_a_cap_slice_v3.py` | seven-year CSV-driven ES.v.0 replay with complete run-artifact export |
 | `t49_long_rollover_buy_hold.py` | ten-year ES.v.0 buy-and-hold rollover and stale-position reconciliation |
-| `t50_rollover_lifecycle.py` | multi-year ROLLOVER_DUE/COMPLETE/DONE payload and contract-chain validation |
+| `t50_rollover_lifecycle.py` | multi-year `on_rollover` payload, roll count/spacing, and contract-chain continuity (`on_security_event` carries no rollover phases) |
 | `t51_memory_session_comparison.py` | sequential 100-symbol full-session versus 14:00–16:30 memory probes |
 | `t52_multi_symbol_long_rollover.py` | ten-year buy-and-hold rollover reconciliation across 37 designated `.v.0` futures |
 | `t53_overnight_futures_strategy.py` | five-contract ES.v.0 position survives boundary/midnight, then exits next morning |
@@ -148,7 +148,7 @@ result surfaces are validated end to end.
 | `t66_order_type_tif_matrix.py` | every public order type and time-in-force submitted; nothing accepted is silently dropped |
 | `t67_portfolio_position_surface.py` | every public position and portfolio accessor reconciled against fills, long and short |
 | `t68_order_helper_surface.py` | `place_order`, `order_to_target`, `flatten_all`, `get_order_state`, `clear_pending_order` and the order field surface |
-| `t69_executor_algo_matrix.py` | POV and TWAP creation, `executor_state`, both stop paths, and the `on_executor_event` stream |
+| `t69_executor_algo_matrix.py` | POV and TWAP creation, `executor_state`, both stop paths, and the `on_executor` event stream |
 | `t70_option_expiry_lifecycle.py` | long and short 0DTE options carried into expiry resolve and settle into cash |
 | `t71_resilience_and_isolation.py` | a missing symbol and a throwing callback do not stop dispatch, trading, or readable results |
 

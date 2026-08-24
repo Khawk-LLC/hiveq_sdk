@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import completed_checkpoint, finish
+from qa_common import open_positions, completed_checkpoint, finish, orders_frame
 from t24_auction_orders import SYMBOLS, SdkT24
 
 import hiveq.flow as hf
@@ -32,7 +32,7 @@ if __name__ == "__main__":
         backtest_config=BacktestConfig(session_start="04:00", session_end="18:30"),
     )
     state = completed_checkpoint(run, "t24_auction_orders")
-    orders = run.orders()
+    orders = orders_frame(run)
     fills = run.fills()
     trades = run.trades()
     positions = run.positions()
@@ -48,6 +48,6 @@ if __name__ == "__main__":
         "at_least_60_orders": len(orders) >= 60,
         "at_least_60_fills": len(fills) >= 60,
         "no_final_session_rejections": not state["rejects"],
-        "all_symbols_flat": positions.empty or not (positions["quantity"] != 0).any(),
+        "all_symbols_flat": open_positions(positions).empty,
     }, extra=(f"orders={len(orders)}, fills={len(fills)}, trades={len(trades)}, "
               f"final_session={state}"))

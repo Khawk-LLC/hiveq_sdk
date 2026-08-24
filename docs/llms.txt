@@ -100,6 +100,17 @@ R12 A backtest that completes with 0 trades is NOT a deliverable. Design entry c
     running). After every run, check report.return_stats["Total Trades"]: if it is 0 (or wildly
     below the strategy's natural frequency), treat the iteration as FAILED — diagnose via §11.5,
     loosen/fix the conditions, and re-run until it trades — before presenting any results.
+R13 A run gets 2 GB of RAM, and exceeding it KILLS the run. Every submission is an ephemeral
+    container capped at 2 GB (HIVEQ_CONTAINER_MEMORY, default 2g); the kernel OOM-kills the
+    process and the run dies with exit code 137 and no report. So a strategy must NOT accumulate
+    per-event data on self: no list of orders/fills, no appended event or payload objects, no
+    growing DataFrame of bars or ticks. Keep only bounded state — deque(maxlen=N), a running
+    count, the last value per symbol — and ask the engine for the rest: ctx.get_order_state /
+    has_open_order / open_order_qty for orders, ctx.portfolio() for positions and P&L (R9). The
+    run already records every order, fill and trade for you; read them AFTER it finishes with
+    run.orders() / run.fills() / run.trades() (§10). One symbol-day of US equity trades is ~340k
+    events; retained as dicts that is ~85 MB (~250 B each), so a 20-day single-symbol run holding
+    them hits ~1.7 GB and dies. Details and the failure signature in §16.2.
 ```
 
 ---
@@ -784,14 +795,14 @@ signal = json.loads(normalized)
 ### 7.12 Rollover
 `continuous_symbol:str`("ES.v.0") · `prev_contract:str`("ESZ5") · `current_contract:str`("ESH6") · `ts_event:int`
 
+### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
+These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
+
 ### 7.14 ImbalanceData
 Auction imbalance record from `HIVEQ_US_EQ`. Select the logical metadata-routed schema that matches the feed: `early_imbalance` (normalized early auction), `arca_imbalance` (NYSE Arca), `nasd_imbalance` (Nasdaq), or `nyse_imbalance` (NYSE). Never embed the physical `prod_imbalances_*` database name; the platform resolves the current database and table from schema metadata.
 
 Venue-specific optional numeric fields are `None` when the venue does not publish a meaningful value. Source zeroes used as unavailable sentinels are therefore normalized to `None`; required quantities such as `imbalance` and `paired_shares` retain zero. `side` preserves the normalized venue state, including descriptive values such as `BUY_IMBALANCE`, `SELL_IMBALANCE`, `NO_IMBALANCE`, and `NO_IMBALANCE_ON_CLOSE` (rather than being restricted to `B`/`S`). NYSE imbalance quantities are signed: sell imbalances can be negative. Common mappings are: Arca `imb_side`/`paired`/`ref_price`/`market_imbalance`; Nasdaq `imb_direction`/`paired`/`ref_price`/`near_price`/`far_price`/`cross_type`; NYSE `side`/`paired_shares`/`ref_price` and clearing-price variants.
 `symbol:str` · `side:str`(venue imbalance state) · `imbalance:float`(shares; signed for NYSE) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C'/'A', Nasdaq; venue code) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
-
-### 7.13 EXECUTOR_EVENT / SECURITY_EVENT (advanced)
-These fire for executor lifecycle transitions (`on_executor`) and security/reference updates (`on_security_event`). Their payloads are not part of the stable strategy-authoring surface — treat `event.data()` as opaque. For executors, prefer `ctx.executor_state(executor)` (§5.10) to read state rather than parsing the event. Most strategies do not handle these.
 
 ---
 
@@ -1320,7 +1331,9 @@ job.status()   # -> {'status': 'scheduled', ...} — check back later; won't rea
 # A fetch + publish version follows the same shape:
 def fetch_and_publish(multiplier=2):
     from hiveq import dd
-    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"])
+    from hiveq.dd import DateRange
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"],
+                 date=DateRange("2025-08-01", "2025-08-08"))   # the window is REQUIRED
     dd.save(df, schema="quant_features", key="my_signal")
     return {"rows": len(df)}
 
@@ -1667,6 +1680,80 @@ through an external store or input data source.
 > **retracted** — treat `__init__` as running exactly once per run. If
 > you're on an older executor where you observe repeated `__init__`
 > calls, that's a framework bug, not the documented contract.
+
+#### The 2 GB limit — what kills runs (R13)
+
+That run-local memory lives in an **ephemeral container capped at 2 GB**
+(`HIVEQ_CONTAINER_MEMORY`, default `2g`, applied as the Docker `mem_limit`).
+There is no swap and no soft warning: when the strategy crosses the cap the
+kernel OOM-kills the process, the orchestrator reports **exit code 137**
+(`"Container was killed (exit code 137) — likely out of memory (limit: 2g)"`),
+and the run ends with **no report** — `run.report()` has nothing to read.
+Because the kill is external, the strategy gets no exception and no chance to
+log; `run.status()` shows the failure and `run.logs()` (§11.5) ends mid-stream
+with no traceback. **An abrupt end with no traceback is the signature of an
+OOM, not of a strategy bug.**
+
+The cap is per submission, so it is the strategy's own footprint that matters —
+the engine, the data feed and pandas/numpy all live in the same 2 GB.
+
+**Why "just keep the orders on self" runs out of memory.** Every retained
+Python object costs far more than the number in it. Measured: one symbol-day of
+US equity trades is ~340k events, and retaining them as small dicts costs
+**~85 MB (~250 B per event)**. Extrapolated over a run:
+
+| Retained per-event data | 1 day | 20 days | 20 days × 3 symbols |
+|---|---|---|---|
+| ~340k trade events/symbol/day, as dicts | ~85 MB | **~1.7 GB → dies** | **~5.1 GB → dies** |
+
+Bars are far cheaper (a symbol-day is ~400 one-minute bars, not 340k), so the
+pattern that kills runs is retaining **ticks, quotes, fills and order objects** —
+exactly the data the platform already stores for you.
+
+**Do not accumulate on `self`:**
+
+```python
+# WRONG — every one of these grows without bound for the whole run
+def on_order(self, ctx, event):
+    self.orders.append(event.data())        # order objects, one per event
+def on_bar(self, ctx, event):
+    self.all_bars.append(event.data())      # payload objects
+    self.history = pd.concat([self.history, pd.DataFrame([row])])   # worst case
+def on_trade(self, ctx, event):
+    self.ticks.append(dict(event.data()))   # ~250 B × every tick in the window
+```
+
+**Keep bounded state and ask the engine instead:**
+
+```python
+from collections import deque
+
+def __init__(self):
+    self.closes = {}          # symbol -> deque(maxlen=N): only what the signal needs
+    self.trade_count = 0      # a counter, not a list
+
+def on_bar(self, ctx, event):
+    bar = event.data()
+    self.closes.setdefault(bar.symbol, deque(maxlen=50)).append(bar.close)
+
+def on_order(self, ctx, event):
+    # Do NOT keep the order. Query the engine when you need order state:
+    if ctx.has_open_order(event.data().symbol):    # also get_order_state / open_order_qty
+        return
+    ctx.add_event_log('entry_skipped', {'symbol': event.data().symbol})   # evidence, not storage
+```
+
+| Instead of holding … | Use |
+|---|---|
+| a list of orders / order state | `ctx.get_order_state`, `ctx.has_open_order`, `ctx.open_order_qty`, `ctx.clear_pending_order` (§8) |
+| positions, exposure, P&L | `ctx.portfolio()` / `ctx.global_portfolio()`, `ctx.net_position`, `ctx.quantity`, `ctx.is_flat` (R9) |
+| a full order/fill/trade history | nothing — the run records it; read `run.orders()`, `run.fills()`, `run.trades()`, `run.positions()` after it finishes (§10) |
+| a log of decisions for later analysis | `ctx.add_event_log(...)` per event, read back with `run.event_logs()` (§11.5) — it leaves the container as it is written |
+| a full bar/tick history for indicators | `deque(maxlen=N)` sized to the longest lookback (§16.3) |
+| a large reference dataset loaded in `on_start` | pull only the window you need (§14.1), or subscribe to it as data |
+
+A strategy that keeps only what its signal needs runs in a few tens of MB, and
+run length then costs nothing.
 
 ### 16.3 Indicators (no built-in TA library)
 Compute with `numpy`/`pandas` (both are dependencies). Examples over a `deque`/`np.array` of closes:

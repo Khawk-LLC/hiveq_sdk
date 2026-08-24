@@ -9,7 +9,7 @@ import sys
 import pandas as pd
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import export_run_artifacts, wait_for_final
+from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -77,6 +77,13 @@ class SdkT50RolloverLifecycleProbe:
 
 
 def _state(value):
+    # An in-process run serializes state_variables with orjson, so the column
+    # holds bytes rather than str. Falling through to {} here made every
+    # rollover payload look empty: final_roll_contract came back None and
+    # done_payload_pairs_complete False, while the payloads were in fact
+    # complete. qa_common.checkpoint() decodes the same way.
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
     if isinstance(value, str):
         return json.loads(value or "{}")
     return value if isinstance(value, dict) else {}
@@ -106,9 +113,14 @@ def analyze(run) -> dict:
         for index, state in enumerate(done_states[1:], start=1)
     )
     positions = run.positions()
-    open_positions = positions[positions["quantity"] != 0]
+    open_positions = open_position_rows(positions)
     result = {
         "symbol": SYMBOL,
+        # Counted for visibility only. Rollovers are delivered by on_rollover;
+        # on_security_event carries no rollover phases, so these stay at zero by
+        # design and must not gate the result -- a direct probe saw 0 security
+        # events across 13,786 bars containing a real roll while on_rollover
+        # fired correctly.
         "rollover_due_events": len(due),
         "rollover_complete_events": len(complete),
         "rollover_done_events": len(done),
@@ -131,7 +143,6 @@ def analyze(run) -> dict:
     }
     result["passed"] = bool(
         len(done) == EXPECTED_ROLLOVERS and complete_pairs and continuity
-        and len(due) == len(done) and len(complete) == len(done)
         and all(spacing >= MIN_ROLLOVER_SPACING for spacing in spacings)
         and bool(done_states)
         and done_states[-1].get("current_contract") == EXPECTED_FINAL_CONTRACT
@@ -167,8 +178,7 @@ def main() -> None:
     artifacts = export_run_artifacts(run, validation=validation)
     print(json.dumps(validation, indent=2), flush=True)
     print(f"run_artifacts={artifacts}", flush=True)
-    if not validation["passed"]:
-        raise AssertionError(f"rollover lifecycle validation failed: {validation}")
+    finish_validation("t50_rollover_lifecycle", validation)
 
 
 if __name__ == "__main__":

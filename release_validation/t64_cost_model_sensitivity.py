@@ -83,7 +83,7 @@ def replay(equity_fee: float, slippage: float = 0.0):
         }],
         backtest_config=BacktestConfig(
             initial_capital=INITIAL, session_start="09:30", session_end="11:00",
-            equity_fee=equity_fee, slippage=slippage, export_orders_csv=True,
+            equity_fee=equity_fee, slippage=slippage,
         ),
     )
     state = completed_checkpoint(run, "t64_cost_model_sensitivity")
