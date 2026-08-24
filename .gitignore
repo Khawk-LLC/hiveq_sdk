@@ -25,3 +25,10 @@ logs/
 # Generated at build time from docs/ (canonical source) — never commit
 src/hiveq/docs/llms.txt
 src/hiveq/docs/data_driver/llms.txt
+/src/hiveq/docs/data_api/llms.txt
+/release_validation/probe_reports/
+/release_validation/reports/
+/release_validation/run_artifacts/
+/release_validation/runs/
+/release_validation/source_material/
+/release_validation/data/userdata/order_replay_set_a/
