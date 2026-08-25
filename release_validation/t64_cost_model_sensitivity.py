@@ -75,34 +75,41 @@ class SdkT64:
 
 
 def replay(equity_fee: float, slippage: float = 0.0):
+    backtest_config = BacktestConfig(
+        initial_capital=INITIAL, session_start="09:30", session_end="11:00",
+        # No export_orders_csv: the thin SDK's BacktestConfig has no such field,
+        # and passing it raises TypeError before the run is even submitted.
+        equity_fee=equity_fee, slippage=slippage,
+    )
+    # What the client actually submits, read from the same serialization the
+    # deploy uses. Without this a cost that never moves is ambiguous between
+    # "the SDK dropped the knob" and "the engine ignored it".
+    submitted = backtest_config.to_dict()
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT64", type="SdkT64", symbols=[SYMBOL])],
         symbols=[SYMBOL], start_date="2025-06-02", end_date="2025-06-02",
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]
         }],
-        backtest_config=BacktestConfig(
-            initial_capital=INITIAL, session_start="09:30", session_end="11:00",
-            equity_fee=equity_fee, slippage=slippage,
-        ),
+        backtest_config=backtest_config,
     )
     state = completed_checkpoint(run, "t64_cost_model_sensitivity")
-    return run, state
+    return run, state, submitted
 
 
 if __name__ == "__main__":
     results = []
     for rate in FEE_RATES:
-        run, state = replay(rate)
+        run, state, submitted = replay(rate)
         report = run.report()
         results.append({
-            "rate": rate, "run": run, "state": state,
+            "rate": rate, "run": run, "state": state, "submitted": submitted,
             "report_fees": round(float(report.total_fees or 0), 8),
             "net_pnl": round(float(report.net_pnl or 0), 6),
         })
 
     # Only slippage differs from the middle configuration.
-    slipped_run, slipped_state = replay(FEE_RATES[1], slippage=0.01)
+    slipped_run, slipped_state, slipped_submitted = replay(FEE_RATES[1], slippage=0.01)
 
     baseline = results[1]
     shares = [item["state"]["shares"] for item in results]
@@ -115,6 +122,14 @@ if __name__ == "__main__":
     expected_mid = FEE_RATES[1] * shares[1]
     checks = {
         "all_replays_traded": all(len(item["state"]["fills"]) >= 4 for item in results),
+        # Client-side: the configured rates reach the submitted payload.
+        "rates_present_in_submitted_config": all(
+            float(item["submitted"].get("equity_fee", -1)) == item["rate"]
+            for item in results
+        ),
+        "slippage_present_in_submitted_config": (
+            float(slipped_submitted.get("slippage", -1)) == 0.01
+        ),
         "identical_share_count": len(set(shares)) == 1 and shares[0] == QTY * 6,
         "zero_rate_costs_nothing": abs(fees[0]) < 1e-6,
         "fees_increase_with_rate": fees[0] < fees[1] < fees[2],
@@ -148,5 +163,7 @@ if __name__ == "__main__":
                   f"commission_totals={[i['state']['commission_total'] for i in results]}; "
                   f"expected_mid_fee={round(expected_mid, 6)}; "
                   f"slipped_fees={slipped_state['portfolio']['fees']}; "
+                  f"submitted_fees={[i['submitted'].get('equity_fee') for i in results]}; "
+                  f"submitted_slippage={slipped_submitted.get('slippage')}; "
                   f"baseline_px={prices(baseline['state'])[:3]}; "
                   f"slipped_px={prices(slipped_state)[:3]}"))

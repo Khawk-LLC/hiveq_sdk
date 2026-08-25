@@ -185,9 +185,17 @@ if __name__ == "__main__":
         "avg_price_matches_entry_fill": close_enough(
             long_position.get("avg_price", 0), entry.get(LONG_SYMBOL, 0), 0.005
         ),
+        # The short leg is a separate code path in the engine's entry-price
+        # accumulation; a sign error there would leave the long check green.
+        "short_avg_price_matches_entry_fill": close_enough(
+            short_position.get("avg_price", 0), entry.get(SHORT_SYMBOL, 0), 0.005
+        ),
+        # Three aliases of a dead property agree at 0.0, so equality alone can
+        # never fail. Require a real price alongside it.
         "avg_price_aliases_agree": (
             long_position.get("avg_price") == long_position.get("average_price")
             == long_position.get("entry_price")
+            and float(long_position.get("avg_price") or 0) > 0
         ),
         "last_price_tracks_bar": close_enough(
             long_position.get("last_price", 0), last.get(LONG_SYMBOL, 0), 0.005

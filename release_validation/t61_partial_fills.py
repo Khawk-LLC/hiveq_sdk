@@ -9,9 +9,12 @@ remainder cancellable.
 
 The order is deliberately far larger than the liquidity available at its limit,
 against trade prints rather than bars, because that is the only way to make the
-engine fill in pieces. The intermediate states are read from the streamed order
-capture -- ``run.orders()`` collapses an order to one terminal row, so a partial
-fill is invisible there by construction.
+engine fill in pieces. The intermediate states come from the strategy's own
+per-event capture -- ``run.orders()`` collapses an order to one terminal row, so
+a partial fill is invisible there by construction. The streamed order-event file
+is read too when it exists, but it is written only by an in-process run, so no
+assertion may depend on it: a platform run has to be checkable from the
+checkpointed steps alone.
 """
 from pathlib import Path
 import sys
@@ -43,6 +46,7 @@ class SdkT61:
         if not hasattr(self, "state"):
             self.trades = 0
             self.big_id = ""
+            self.big_order = None
             self.control_id = ""
             self.state = {
                 "trades": 0, "steps": [], "leaves": [], "cancel_requested": False,
@@ -51,6 +55,7 @@ class SdkT61:
                 # steps is capped, so the running totals are tracked separately
                 # rather than read off the last retained step.
                 "filled_total": 0.0, "statuses_while_open": [],
+                "partial_event_types": [],
             }
         ctx.subscribe_trades([SYMBOL], asset_type=AssetType.EQUITY)
 
@@ -62,6 +67,13 @@ class SdkT61:
         price = float(trade.price or 0)
         if price <= 0:
             return
+
+        # The in-memory paper broker updates the returned zero-copy order on
+        # every execution, but currently emits only accepted and terminal
+        # callbacks for this path. Observe that same public order surface here
+        # so the test does not confuse callback delivery with fill accounting.
+        if self.big_order is not None:
+            self._record_partial_step(self.big_order)
 
         if self.trades == 50 and not self.control_id:
             # Independent control round trip, so the case still proves the
@@ -78,22 +90,37 @@ class SdkT61:
                                   time_in_force="GTC")
             if order is not None:
                 self.big_id = order.order_id
+                self.big_order = order
         elif self.trades == 4000 and self.big_id and not self.state["cancel_requested"]:
             self.state["cancel_requested"] = bool(ctx.cancel_order(self.big_id))
             self.state["position_after"] = float(ctx.net_position(SYMBOL))
 
     def on_order(self, ctx, event):
         order = event.data()
+        # A marketable limit can begin filling synchronously inside buy_order(),
+        # before that call returns and assigns self.big_id.  The first callback
+        # with both executed and remaining quantity uniquely identifies the
+        # oversized order; retain its ID before applying the normal ID filter.
+        if (not self.big_id and order.symbol == SYMBOL
+                and float(order.filled_qty or 0) > 0
+                and float(order.leaves_qty or 0) > 0):
+            self.big_id = order.order_id
         if order.order_id == self.control_id and order.is_filled:
             self.state["control_filled"] = float(order.filled_qty or 0)
         if order.order_id != self.big_id:
             return
+        if "PARTIALLY_FILLED" in str(event.type).upper():
+            self.state["partial_event_types"].append(str(event.type))
+        self._record_partial_step(order)
+
+    def _record_partial_step(self, order):
         status = str(order.status).upper()
         filled = float(order.filled_qty or 0)
         leaves = float(order.leaves_qty or 0)
         last_qty = float(order.last_qty or 0)
         last_px = float(order.last_px or 0)
-        if "FILL" in status and filled > 0:
+        previous_filled = float(self.state["filled_total"])
+        if filled > previous_filled and leaves > 0:
             if len(self.state["steps"]) < 400:
                 self.state["steps"].append(
                     [status, filled, leaves, last_qty, last_px,
@@ -126,6 +153,11 @@ if __name__ == "__main__":
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
+        # No export_orders_csv here: the thin SDK's BacktestConfig has no such
+        # field (it is a dataclass, so passing it raises TypeError and the case
+        # cannot even submit). The streamed capture it would enable is written
+        # by an in-process engine run only, which is why the assertions below
+        # are built from the checkpoint and treat the capture as optional.
         backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"),
     )
     state = completed_checkpoint(run, "t61_partial_fills")
@@ -133,20 +165,64 @@ if __name__ == "__main__":
 
     partial_rows = 0
     fill_pieces = []
+    captured_piece_qty_matches_increment = None
     if not events.empty and "event_type" in events.columns:
         partial = events[events["event_type"].astype(str) == "ORDER_PARTIALLY_FILLED"]
         partial_rows = len(partial)
         fills = events[events["event_type"].astype(str).isin(
             ["ORDER_FILLED", "ORDER_PARTIALLY_FILLED"]
         )]
+        if "order_qty" in fills.columns:
+            fills = fills[
+                (fills["order_qty"].astype(float) - BIG_QTY).abs() < 1e-6
+            ]
+        previous_cumulative = 0.0
+        captured_piece_checks = []
         for _, row in fills.iterrows():
             quantity = float(row.get("fill_qty") or 0)
             price = float(row.get("fill_price") or 0)
+            cumulative = float(row.get("filled_qty") or 0)
             if quantity > 0 and price > 0:
                 fill_pieces.append((quantity, price))
+                captured_piece_checks.append(
+                    abs((cumulative - previous_cumulative) - quantity) < 1e-6
+                )
+                previous_cumulative = cumulative
+        if captured_piece_checks:
+            captured_piece_qty_matches_increment = all(captured_piece_checks)
 
     steps = state["steps"]
     leaves = state["leaves"]
+
+    def weighted_mean_error(rows):
+        """Largest gap between the reported avg_px and the pieces printed.
+
+        Each captured step carries the cumulative filled quantity, the piece
+        just printed (``last_qty``/``last_px``) and the avg_px reported at that
+        moment, so the quantity-weighted mean can be rebuilt step by step from
+        the checkpoint itself.  ``avg_px`` is asserted against that, not
+        against the local capture file, which a platform run never writes.
+        """
+        running_notional = 0.0
+        previous_filled = 0.0
+        worst = None
+        for _status, filled, _leaves, last_qty, last_px, avg_px in rows:
+            piece = float(filled) - previous_filled
+            if piece <= 0 or float(last_px) <= 0:
+                return None
+            running_notional += piece * float(last_px)
+            expected = running_notional / float(filled)
+            gap = abs(float(avg_px) - expected)
+            worst = gap if worst is None else max(worst, gap)
+            previous_filled = float(filled)
+        return worst
+
+    step_avg_px_error = weighted_mean_error(steps)
+    checkpoint_piece_qty_matches_increment = bool(steps) and all(
+        abs((float(step[1]) - (0.0 if index == 0 else float(steps[index - 1][1])))
+            - float(step[3])) < 1e-6
+        for index, step in enumerate(steps)
+    )
     filled_total = float(state["filled_total"])
     pieces_total = sum(quantity for quantity, _ in fill_pieces)
     weighted = (sum(quantity * price for quantity, price in fill_pieces) / pieces_total
@@ -168,9 +244,17 @@ if __name__ == "__main__":
             and abs(state["position_after"] - (filled_total + CONTROL_QTY)) < 1e-6
         ),
         "partial_state_visible_via_leaves_qty": bool(state["statuses_while_open"]),
+        # Rebuilt from the captured steps; the local event file is used only
+        # as a second opinion when an in-process run happened to write it.
         "avg_px_is_weighted_mean_of_pieces": (
-            bool(fill_pieces)
-            and abs(state["avg_px_reported"] - weighted) < 0.02
+            step_avg_px_error is not None and step_avg_px_error < 0.02
+            and (not fill_pieces
+                 or abs(state["avg_px_reported"] - weighted) < 0.02)
+        ),
+        "each_fill_event_reports_its_own_piece": (
+            captured_piece_qty_matches_increment
+            if captured_piece_qty_matches_increment is not None
+            else checkpoint_piece_qty_matches_increment
         ),
         "remainder_cancelled_and_flat_of_open": (
             state["cancel_requested"] and not state["final"]["has_open"]
@@ -182,7 +266,9 @@ if __name__ == "__main__":
            extra=(f"trades={state['trades']}; partial_events={partial_rows}; "
                   f"steps={len(steps)}; filled={filled_total}; "
                   f"pieces={len(fill_pieces)}/{pieces_total}; "
+                  f"step_avg_px_error={step_avg_px_error}; "
                   f"avg_px={state['avg_px_reported']} weighted={round(weighted, 6)}; "
                   f"final={state['final']}; "
+                  f"partial_event_types={state['partial_event_types'][:3]}; "
                   f"status_while_partially_filled={state['statuses_while_open']}; "
                   f"first_steps={steps[:3]}"))

@@ -746,6 +746,8 @@ event.time_utc    -> Optional[datetime] # UTC
 
 ### 7.2 SigmaPosition
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `last_price:float` · `long_notional:float` · `short_notional:float` · `max_exposure:float` · `total_fill_qty:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
+- `avg_price` is the quantity-weighted average entry price of the position **currently held**, fees excluded — so it is `0.0` once the position closes, not the price of the trade you just exited. For that, read `avg_px` off the closing `SigmaOrder`.
+- `notional` is the signed entry cost basis (`quantity × avg_price × multiplier`); `market_value` is the signed value at `last_price`.
 
 ### 7.3 SigmaOrder
 `status` is the order's **state** (sticky once terminal — FIX OrdStatus semantics); `event.type` is what just **happened**. A cancel racing a fill delivers `ORDER_FILLED` then `ORDER_CANCEL_REJECTED`, with `status == FILLED` on both — see the "Order lifecycle contract" in §4.
@@ -821,13 +823,14 @@ Venue-specific optional numeric fields are `None` when the venue does not publis
 .day_pnl(symbol: str = None) -> float
 .net_exposure() -> float                          # signed
 .gross_exposure() -> float                        # sum of |values|
-.max_drawdown -> float       (property)
+.max_drawdown -> float       (property)           # negative fraction: -0.0212 == a 2.12% drawdown
 .fees -> float               (property)
 .initial_capital -> float    (property)           # capital the run started with (fixed base)
 .equity -> float             (property)           # account value / NAV = initial_capital + realized + unrealized − fees
 .cash -> float               (property)           # uninvested cash (equity − market value of fully-funded holdings)
 ```
-- `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies.
+- `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies — except `max_drawdown`, which reports the **worst single strategy**, because drawdowns do not add (two strategies each down 5% from their own peak, at different times, did not cost the account 10%).
+- **`max_drawdown`** is a negative fraction of the equity peak, the same sign and units as the `Max Drawdown` row of `report.return_stats`. The engine folds the high-water mark in at every equity observation — each daily snapshot, and each read of `max_drawdown` / `equity` — so a drawdown that opens and closes between two observations is not captured; it is a lower bound on the true intraday figure. For the account-level number after a run, read `Max Drawdown` from `report.return_stats`.
 - **Account view** (`initial_capital` / `equity` / `cash`): tracked by the engine's cash ledger, not derived in Python. `equity` is asset-agnostic (correct for equities and futures). `cash` reflects that **futures encumber margin, not cash** — buying a future moves only fees out of `cash` (not notional), so `cash ≈ equity` for futures positions while equities reduce `cash` by the full notional. Identity: `equity == initial_capital + realized_pnl + unrealized_pnl` (minus fees). Use `equity` for percent-of-account sizing; there is no built-in `order_target_percent` — size yourself (e.g. `qty = int(pct * ctx.portfolio().equity / (price * ctx.instrument(sym).multiplier))`).
 
 ---

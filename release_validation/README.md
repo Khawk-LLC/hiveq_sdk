@@ -38,6 +38,45 @@ up.
 Tests requiring datasets absent from QA report `GAP`; missing optional data is
 not treated as an implementation regression. Core datasets remain hard gates.
 
+## Reading a FAIL: defect in the validation, or defect in the product
+
+A red row is only useful if it names the right defect, so every check has to
+fail for one reason and say which surface produced it. The suite has repeatedly
+scored its own mistakes as product regressions, and those are the ones to fix
+first:
+
+* **A configuration value recorded as a check.** `finish_validation` promotes
+  every boolean in a validation mapping to a named check, so
+  `"enable_auto_rollover": False` -- a record of what the run disabled -- became
+  a permanently failing check (t48). Keep configuration in the mapping as a
+  string.
+* **An assertion on evidence a platform run cannot produce.**
+  `qa_common.order_events` reads the streamed capture file, which only an
+  in-process run writes. Assert on the checkpoint the strategy emitted and use
+  the capture file as a second opinion (t61).
+* **Comparing two surfaces on different terms.** The Data API resolves no
+  continuous alias, delivers a whole window rather than a spliced front
+  contract, treats its `end` as exclusive where the engine delivers a bar
+  stamped at `session_end`, and still holds duplicate rows for some sessions.
+  Parity has to be per `(symbol, session day)` on distinct timestamps (t42).
+* **A cycle driven by whether an order object came back.** A rejected order
+  still returns an order, so a flag-driven buy/sell alternation desynchronizes
+  from the real position on the first reject and every later assertion inherits
+  it. Drive the next leg from the position (t55, t56).
+* **A floor no strategy in the case could reach.** `on_start` runs once per
+  session, so a per-session tally must be snapshotted per session and the
+  order/fill floors derived from the sessions actually run (t57).
+* **A gate that hides the property under test.** Entering only when
+  `instrument(continuous).current_contract` equals the delivered contract left
+  thirty of thirty-seven symbols untraded and the rollover reconciliation
+  running on seven (t52); the documented TWAP key params were omitted, so
+  "TWAP was not created" said nothing about TWAP (t69).
+* **One finding spread across several checks.** Split by surface instead: the
+  analytics drawdown, the strategy's own recomputation and
+  `portfolio.max_drawdown` are three claims, and only the third is wrong
+  (t65). Where the client could be at fault, assert the submitted payload too
+  (t64) so a red row is unambiguously server-side.
+
 ## Mandatory PASS evidence
 
 Every release-validation case must exercise the complete public SDK path, not

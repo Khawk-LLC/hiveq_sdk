@@ -10,6 +10,7 @@ for state, and stopped; the executor event payload is checked for the fields it
 declares. A plain strategy order runs alongside so the case can tell an
 executor that produced nothing apart from a run that never traded.
 """
+from datetime import timedelta
 from pathlib import Path
 import sys
 
@@ -26,8 +27,16 @@ from hiveq.flow import BacktestConfig, StrategyConfig                 # noqa: E4
 from hiveq.flow.config import AssetType                               # noqa: E402
 
 SYMBOL = "AAPL"
+# One executor per symbol: the executor contract is "never stack a second
+# executor on the same target", so POV and TWAP get a symbol each instead of
+# both working AAPL.
+TWAP_SYMBOL = "MSFT"
+SYMBOLS = [SYMBOL, TWAP_SYMBOL]
 ALGOS = ("POV", "TWAP")
+# Documented executor_state values that mean the executor is no longer working.
+TERMINAL_STATES = {"FILLED", "STOPPED", "STOPPING", "UNDEFINED", "INVALID"}
 CONTROL_QTY = 10.0
+TWAP_MINUTES = 20
 
 
 class SdkT69:
@@ -43,23 +52,93 @@ class SdkT69:
                 "events": 0, "event_fields": [], "event_states": [],
                 "event_ids": [], "child_orders": {}, "child_filled": {},
                 "control_filled": 0.0, "errors": [],
+                "twap_attempts": {}, "twap_fallback": False,
+                "stop_attempted": {"handle": False, "id": False},
+                "state_at_stop": {}, "state_timeline": {},
             }
-        ctx.subscribe_trades([SYMBOL], asset_type=AssetType.EQUITY)
+        ctx.subscribe_trades(SYMBOLS, asset_type=AssetType.EQUITY)
+
+    def _pov_params(self, ctx, symbol):
+        return ctx.build_executor_params(
+            symbol=symbol, quantity=5_000, side="BUY", executor_type="POV",
+            participate_pct=0.1, min_order_size=1, max_order_size=10,
+            refresh_millis=100,
+        )
+
+    def _twap_param_forms(self, ctx, symbol):
+        """Every documented way to hand TWAP its `[start_time, end_time]`.
+
+        §5.10 lists `start_time`/`end_time` as TWAP's key params but never says
+        what type they are, so each plausible form is tried and the engine's
+        answer recorded.  Without this the case only reported "TWAP was not
+        created" and could not say whether the algorithm or the parameter
+        contract was at fault.
+        """
+        now = ctx.now()
+        forms = []
+        if now is not None:
+            end = now + timedelta(minutes=TWAP_MINUTES)
+            forms.append(("datetime", {"start_time": now, "end_time": end}))
+            forms.append(("string", {
+                "start_time": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end.strftime("%Y-%m-%d %H:%M:%S"),
+            }))
+            try:
+                import PySigma
+
+                forms.append(("pysigma_datetime", {
+                    "start_time": PySigma.Chrono.dateTimeFromString(
+                        now.strftime("%Y-%m-%d %H:%M:%S")),
+                    "end_time": PySigma.Chrono.dateTimeFromString(
+                        end.strftime("%Y-%m-%d %H:%M:%S")),
+                }))
+            except Exception as exc:                       # noqa: BLE001
+                self.state["twap_attempts"]["pysigma_import"] = str(exc)[:100]
+        forms.append(("no_window", {}))
+        return forms
 
     def create(self, ctx, algo):
-        try:
-            params = ctx.build_executor_params(
-                symbol=SYMBOL, quantity=5_000, side="BUY", executor_type=algo,
-                participate_pct=0.1, min_order_size=1, max_order_size=10,
-                refresh_millis=100,
-            )
-            handle = ctx.add_executor(params)
-        except Exception as exc:                           # noqa: BLE001
-            self.state["errors"].append(f"{algo} create: {str(exc)[:140]}")
+        if algo == "POV":
+            try:
+                handle = ctx.add_executor(self._pov_params(ctx, SYMBOL))
+            except Exception as exc:                       # noqa: BLE001
+                self.state["errors"].append(f"POV create: {str(exc)[:140]}")
+                return
+            self.state["created"]["POV"] = handle is not None
+            if handle is not None:
+                self.handles["POV"] = handle
             return
-        self.state["created"][algo] = handle is not None
+
+        for label, window in self._twap_param_forms(ctx, TWAP_SYMBOL):
+            try:
+                params = ctx.build_executor_params(
+                    symbol=TWAP_SYMBOL, quantity=5_000, side="BUY",
+                    executor_type="TWAP", min_order_size=1, max_order_size=10,
+                    refresh_millis=100, **window,
+                )
+                handle = ctx.add_executor(params)
+            except Exception as exc:                       # noqa: BLE001
+                self.state["twap_attempts"][label] = f"raised: {str(exc)[:120]}"
+                continue
+            self.state["twap_attempts"][label] = (
+                "created" if handle is not None else "add_executor returned None"
+            )
+            if handle is not None:
+                self.state["created"]["TWAP"] = True
+                self.handles["TWAP"] = handle
+                return
+        self.state["created"]["TWAP"] = False
+        # A second executor regardless, so the two-executor lifecycle -- child
+        # attribution, stop by handle and stop by id -- is still exercised and
+        # the TWAP result stays a single, isolated finding.
+        try:
+            handle = ctx.add_executor(self._pov_params(ctx, TWAP_SYMBOL))
+        except Exception as exc:                           # noqa: BLE001
+            self.state["errors"].append(f"POV fallback create: {str(exc)[:140]}")
+            return
         if handle is not None:
-            self.handles[algo] = handle
+            self.state["twap_fallback"] = True
+            self.handles["POV_FALLBACK"] = handle
 
     def on_trade(self, ctx, event):
         self.ticks += 1
@@ -71,6 +150,18 @@ class SdkT69:
         elif self.ticks == 60:
             for algo in ALGOS:
                 self.create(ctx, algo)
+        elif self.ticks in (500, 1500, 4500):
+            # A state sample per executor over its working life: a lifecycle
+            # that ends early is then visible in the result instead of being
+            # inferred from a single reading.
+            for algo, handle in self.handles.items():
+                try:
+                    reading = str(ctx.executor_state(handle))
+                except Exception as exc:                   # noqa: BLE001
+                    reading = f"raised: {str(exc)[:60]}"
+                self.state["state_timeline"].setdefault(algo, []).append(
+                    [self.ticks, reading]
+                )
         elif self.ticks == 3000:
             # Both variants of the state query: by handle and by id.
             for algo, handle in self.handles.items():
@@ -85,21 +176,38 @@ class SdkT69:
                     params = ctx.get_executor_params_by_id(executor_id)
                     self.state["state_by_id"][algo] = params is not None
         elif self.ticks == 5000:
+            # One stopped by handle, one by id.  The id path is attempted on
+            # every executor whose id was resolved except the one already
+            # stopped by handle, and whether it was attempted at all is
+            # recorded -- an empty result used to read as success.
             for index, (algo, handle) in enumerate(self.handles.items()):
-                # One stopped by handle, one by id, so both paths are covered.
                 if index == 0:
+                    self.state["stop_attempted"]["handle"] = True
                     try:
                         self.state["stopped_by_handle"][algo] = bool(
                             ctx.stop_executor(handle)
                         )
                     except Exception as exc:               # noqa: BLE001
                         self.state["errors"].append(f"{algo} stop: {str(exc)[:140]}")
-                else:
-                    executor_id = self.ids.get(algo, "")
-                    if executor_id:
-                        self.state["stopped_by_id"][algo] = bool(
-                            ctx.stop_executor_by_id(executor_id)
+                    continue
+                executor_id = self.ids.get(algo, "") or str(
+                    getattr(handle, "executor_id", "")
+                    or getattr(handle, "executorID", "") or ""
+                )
+                if executor_id:
+                    self.state["stop_attempted"]["id"] = True
+                    # The state at the moment of the stop: an executor that has
+                    # already reached a terminal state cannot be stopped, so
+                    # False there is correct and must not read as a defect.
+                    try:
+                        self.state["state_at_stop"][algo] = str(
+                            ctx.executor_state(handle)
                         )
+                    except Exception as exc:               # noqa: BLE001
+                        self.state["state_at_stop"][algo] = f"raised: {str(exc)[:60]}"
+                    self.state["stopped_by_id"][algo] = bool(
+                        ctx.stop_executor_by_id(executor_id)
+                    )
 
     def on_executor(self, ctx, event):
         self.state["events"] += 1
@@ -120,7 +228,9 @@ class SdkT69:
         for algo, handle in self.handles.items():
             if algo in self.ids:
                 continue
-            if executor_id and getattr(handle, "executor_id", None) == executor_id:
+            handle_id = str(getattr(handle, "executor_id", "")
+                            or getattr(handle, "executorID", "") or "")
+            if executor_id and handle_id == executor_id:
                 self.ids[algo] = executor_id
         if executor_id and not self.ids and len(self.handles) == 1:
             self.ids[next(iter(self.handles))] = executor_id
@@ -148,8 +258,8 @@ class SdkT69:
 
 if __name__ == "__main__":
     run = hf.run_backtest(
-        strategy_configs=[StrategyConfig(name="SdkT69", type="SdkT69", symbols=[SYMBOL])],
-        symbols=[SYMBOL], start_date="2025-06-02", end_date="2025-06-02",
+        strategy_configs=[StrategyConfig(name="SdkT69", type="SdkT69", symbols=SYMBOLS)],
+        symbols=SYMBOLS, start_date="2025-06-02", end_date="2025-06-02",
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
@@ -173,17 +283,26 @@ if __name__ == "__main__":
         "child_orders_tagged_with_executor_id": total_children > 0,
         # Only meaningful once both algorithms exist; otherwise it just
         # restates the creation failure above.
-        "children_from_more_than_one_executor": (
-            len(child_orders) >= 2
-            if all(created.get(algo) for algo in ALGOS) else True
-        ),
+        "children_from_more_than_one_executor": len(child_orders) >= 2,
         "children_filled": bool(state["child_filled"]),
         "executor_state_queryable": bool(state["state_by_handle"]),
-        "executor_stopped_by_handle": any(state["stopped_by_handle"].values()),
-        # Only assertable when an executor id was resolved; an empty dict must
-        # not read as success.
+        "executor_stopped_by_handle": (
+            state["stop_attempted"]["handle"]
+            and all(state["stopped_by_handle"].values())
+            and bool(state["stopped_by_handle"])
+        ),
+        # Attempted on the second executor; the flag is what makes the empty
+        # case a failure to exercise the path rather than a silent pass. An
+        # executor already in a terminal state is not stoppable, so False is
+        # the correct answer there -- the API contract is that a live executor
+        # stops and a dead one reports that it did not.
         "executor_stopped_by_id": (
-            any(state["stopped_by_id"].values()) if state["ids"] else True
+            state["stop_attempted"]["id"]
+            and bool(state["stopped_by_id"])
+            and all(
+                stopped or state["state_at_stop"].get(algo, "") in TERMINAL_STATES
+                for algo, stopped in state["stopped_by_id"].items()
+            )
         ),
     }
     checks.update(evidence_checks(run, orders=3, trades=1))
@@ -195,4 +314,10 @@ if __name__ == "__main__":
                   f"filled={state['child_filled']}; ids={state['ids']}; "
                   f"state_by_handle={state['state_by_handle']}; "
                   f"stopped_handle={state['stopped_by_handle']} "
-                  f"stopped_id={state['stopped_by_id']}; errors={state['errors']}"))
+                  f"stopped_id={state['stopped_by_id']} "
+                  f"stop_attempted={state['stop_attempted']} "
+                  f"state_at_stop={state['state_at_stop']}; "
+                  f"state_timeline={state['state_timeline']}; "
+                  f"twap_attempts={state['twap_attempts']} "
+                  f"twap_fallback={state['twap_fallback']}; "
+                  f"errors={state['errors']}"))

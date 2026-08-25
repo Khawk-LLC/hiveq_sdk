@@ -166,9 +166,11 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
 
     A 5xx on ``/status`` or ``/event-logs`` is a platform read fault, not a
     strategy result — retrying it keeps an unrelated gateway hiccup from being
-    reported as a validation failure.  Every retry is printed so a flaky
-    environment stays visible rather than silently absorbed.  Client errors
-    (4xx) and non-HTTP exceptions propagate unchanged.
+    reported as a validation failure. A newly submitted run can also return
+    404 briefly while its run metadata is materializing, so that specific
+    ``run.status()`` response is retried as well. Every retry is printed so a
+    flaky environment stays visible rather than silently absorbed. Other
+    client errors (4xx) and non-HTTP exceptions propagate unchanged.
     """
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -176,7 +178,9 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
             return read()
         except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
             status = getattr(getattr(exc, "response", None), "status_code", None)
-            transient = (status is not None and 500 <= int(status) < 600) or (
+            transient = (
+                status == 404 and what == "run.status()"
+            ) or (status is not None and 500 <= int(status) < 600) or (
                 status is None
                 and exc.__class__.__name__ in {
                     "ConnectionError", "Timeout", "ReadTimeout", "ChunkedEncodingError",
@@ -194,23 +198,55 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
     raise last_exc
 
 
-def wait_for_final(run: Any, timeout: float = 900.0, poll_interval: float = 2.0) -> dict[str, Any]:
-    """Wait for the run resource itself, independent of submission-task state."""
+FAILURE_GRACE_SECONDS = 900.0
+
+
+def wait_for_final(run: Any, timeout: float = 14400.0, poll_interval: float = 2.0,
+                   failure_grace: float = FAILURE_GRACE_SECONDS) -> dict[str, Any]:
+    """Wait for the run resource itself, independent of submission-task state.
+
+    A failure status is provisional, even when the payload says ``is_final``.
+    The platform publishes ``ERROR`` while it is still finalizing a long run --
+    two ten-year runs were reported ERROR at day 2609/2609 and both reached
+    DONE with complete results (2609 days, net PnL, reports) roughly twelve
+    minutes later -- and a freshly submitted run can report ERROR at day 0
+    before its record materializes. Taking the first ERROR as fatal therefore
+    scored two complete runs as platform failures. Only a failure that persists
+    for ``failure_grace`` while the status and progress fields stay unchanged is
+    reported as a real failure.
+    """
     deadline = time.monotonic() + timeout
     last = {}
+    failing_since = None
+    failing_shape = None
     while time.monotonic() < deadline:
         last = _read_with_retry(run.status, "run.status()") or {}
         status = str(last.get("status", "")).lower()
         if status in {"failed", "terminated", "error"}:
-            log_tail = None
-            task_id = getattr(run, "task_id", None)
-            if task_id:
-                try:
-                    from hiveq.flow.jobs import get_logs
-                    log_tail = get_logs(task_id=task_id, limit=200)
-                except Exception as exc:
-                    log_tail = f"unavailable: {exc}"
-            raise AssertionError(f"run failed: {last}; task_logs={log_tail}")
+            shape = (status, last.get("current_day"), last.get("current_date"),
+                     last.get("total_days"))
+            if shape != failing_shape:
+                failing_shape = shape
+                failing_since = time.monotonic()
+                print(f"[WAIT ] provisional failure status {status!r}: {last}; "
+                      f"re-polling for up to {failure_grace:.0f}s", flush=True)
+            elif time.monotonic() - failing_since >= failure_grace:
+                log_tail = None
+                task_id = getattr(run, "task_id", None)
+                if task_id:
+                    try:
+                        from hiveq.flow.jobs import get_logs
+                        log_tail = get_logs(task_id=task_id, limit=200)
+                    except Exception as exc:
+                        log_tail = f"unavailable: {exc}"
+                raise AssertionError(
+                    f"run failed: {last}; unchanged for {failure_grace:.0f}s; "
+                    f"task_logs={log_tail}"
+                )
+            time.sleep(poll_interval)
+            continue
+        failing_since = None
+        failing_shape = None
         # STOPPED is a strategy/executor lifecycle state, not necessarily a
         # terminal run state.  The platform may transition STOPPED -> PENDING
         # while it publishes reports (including TCA), so returning there races

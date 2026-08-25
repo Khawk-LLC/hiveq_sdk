@@ -2,9 +2,11 @@
 
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -17,6 +19,7 @@ BETWEEN_TEST_DELAY_SECONDS = 2
 DEFAULT_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_NUMBERS = {45, *range(48, 59)}
+SUITE_CONCURRENCY = 2
 # Remote platform submissions: a timeout means the client gave up, not that the
 # run stopped -- an abandoned run can still be active server-side, so the suite
 # halts rather than submitting another strategy on top of it. Set to True only
@@ -122,7 +125,94 @@ def is_max_concurrent(output: str) -> bool:
     return any(marker in text for marker in (
         "max concurrent", "maximum concurrent", "concurrency limit",
         "too many concurrent", "too many active", "active run limit",
+        "429 client error: too many requests",
     ))
+
+
+def artifacts_for_output(output: str, before: dict[Path, int]) -> list[Path]:
+    """Associate artifacts with a concurrent test by run IDs in its output."""
+    run_ids = set(re.findall(
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+        output,
+    ))
+    matched = sorted(
+        artifact_dir for run_id in run_ids
+        if (artifact_dir := ARTIFACTS_DIR / run_id).is_dir()
+    )
+    return matched or changed_artifacts(before)
+
+
+def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
+    number = int(test.name[1:3])
+    started = time.monotonic()
+    artifacts_before = artifact_snapshot()
+    line = ""
+    output = ""
+    unsafe_to_continue = False
+    for attempt in range(1, MAX_CONCURRENT_RETRIES + 1):
+        try:
+            timeout = (LONG_TEST_TIMEOUT_SECONDS if number in LONG_TEST_NUMBERS
+                       else DEFAULT_TEST_TIMEOUT_SECONDS)
+            proc = subprocess.run(
+                [sys.executable, str(test)], cwd=str(PROJECT_ROOT), env=env,
+                capture_output=True, text=True, timeout=timeout,
+            )
+            output = (proc.stdout or "") + (proc.stderr or "")
+            if is_max_concurrent(output):
+                print(
+                    f"[WAIT ] {test.name}: platform concurrency limit "
+                    f"(attempt {attempt}/{MAX_CONCURRENT_RETRIES})",
+                    flush=True,
+                )
+                time.sleep(RETRY_DELAY_SECONDS)
+                continue
+            result = [x for x in output.splitlines() if x.startswith("RESULT:")]
+            if result:
+                line = result[-1]
+            elif proc.returncode == 0:
+                line = (
+                    f"RESULT: ERROR {test.stem} — exited 0 without a RESULT line; "
+                    "finish() was never reached, so nothing was asserted"
+                )
+            elif (
+                "Operation not permitted" in output
+                and ("Failed to deploy task" in output or "/api/orchestrator/submit" in output)
+            ):
+                line = (
+                    f"RESULT: BLOCKED {test.name} — remote platform connection denied "
+                    "by the execution sandbox before submission"
+                )
+            else:
+                tail = next(
+                    (x.strip() for x in reversed(output.splitlines()) if x.strip()),
+                    "no output",
+                )
+                line = f"RESULT: ERROR {test.name} — rc={proc.returncode}; tail={tail[:300]}"
+            break
+        except subprocess.TimeoutExpired as exc:
+            output = (exc.stdout or "") + (exc.stderr or "")
+            line = (
+                f"RESULT: ERROR {test.name} — timeout after {timeout}s; "
+                "continuing with the next validation"
+            )
+            unsafe_to_continue = not LOCAL_RUNS
+            break
+    if not line:
+        line = (
+            f"RESULT: ERROR {test.name} — platform concurrency limit persisted "
+            f"after {MAX_CONCURRENT_RETRIES} retries"
+        )
+        unsafe_to_continue = True
+    status = line.split()[1] if len(line.split()) > 1 else "ERROR"
+    duration = time.monotonic() - started
+    log_path = log_dir / f"{test.stem}.log"
+    log_path.write_text(output or line, encoding="utf-8")
+    return {
+        "status": status, "line": line, "test": test.name,
+        "duration": duration, "artifacts": artifacts_for_output(output, artifacts_before),
+        "log": log_path, "unsafe_to_continue": unsafe_to_continue,
+    }
 
 
 def main() -> int:
@@ -139,6 +229,7 @@ def main() -> int:
     report = REPORTS_DIR / f"release-validation-{suite_id}.html"
     log_dir = REPORTS_DIR / "logs" / suite_id
     log_dir.mkdir(parents=True, exist_ok=True)
+    tests = []
     for test in sorted(HERE.glob("t[0-9][0-9]_*.py")):
         number = int(test.name[1:3])
         if number < start_at:
@@ -146,84 +237,38 @@ def main() -> int:
         if number in skipped:
             print(f"[SKIP ] {test.name} (RELEASE_VALIDATION_SKIP)")
             continue
-        started = time.monotonic()
-        artifacts_before = artifact_snapshot()
-        line = ""
-        output = ""
-        unsafe_to_continue = False
-        for attempt in range(1, MAX_CONCURRENT_RETRIES + 1):
-            try:
-                timeout = (LONG_TEST_TIMEOUT_SECONDS if number in LONG_TEST_NUMBERS
-                           else DEFAULT_TEST_TIMEOUT_SECONDS)
-                proc = subprocess.run(
-                    [sys.executable, str(test)], cwd=str(PROJECT_ROOT), env=env,
-                    capture_output=True, text=True, timeout=timeout,
-                )
-                output = (proc.stdout or "") + (proc.stderr or "")
-                if is_max_concurrent(output):
+        tests.append(test)
+
+    pending: dict[Future, Path] = {}
+    stop_submitting = False
+    with ThreadPoolExecutor(max_workers=SUITE_CONCURRENCY) as executor:
+        for test in tests[:SUITE_CONCURRENCY]:
+            pending[executor.submit(run_test, test, env, log_dir)] = test
+        next_test = iter(tests[SUITE_CONCURRENCY:])
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                pending.pop(future)
+                row = future.result()
+                unsafe_to_continue = row.pop("unsafe_to_continue")
+                rows.append(row)
+                rows.sort(key=lambda item: item["test"])
+                write_html_report(rows, report, suite_id)
+                print(f"[{row['status']:5s}] {row['test']} ({row['duration']:.0f}s)", flush=True)
+                if unsafe_to_continue:
+                    stop_submitting = True
                     print(
-                        f"[WAIT ] {test.name}: platform concurrency limit "
-                        f"(attempt {attempt}/{MAX_CONCURRENT_RETRIES})"
+                        "Stopping new submissions; active-run state is not proven safe.",
+                        flush=True,
                     )
-                    time.sleep(RETRY_DELAY_SECONDS)
-                    continue
-                result = [x for x in output.splitlines() if x.startswith("RESULT:")]
-                if result:
-                    line = result[-1]
-                elif proc.returncode == 0:
-                    # No RESULT line means finish() never ran: the process may
-                    # have exited before asserting anything. That is not a pass.
-                    line = (
-                        f"RESULT: ERROR {test.stem} — exited 0 without a RESULT line; "
-                        "finish() was never reached, so nothing was asserted"
-                    )
-                elif (
-                    "Operation not permitted" in output
-                    and ("Failed to deploy task" in output or "/api/orchestrator/submit" in output)
-                ):
-                    line = (
-                        f"RESULT: BLOCKED {test.name} — remote platform connection denied "
-                        "by the execution sandbox before submission"
-                    )
-                else:
-                    tail = next(
-                        (x.strip() for x in reversed(output.splitlines()) if x.strip()),
-                        "no output",
-                    )
-                    line = f"RESULT: ERROR {test.name} — rc={proc.returncode}; tail={tail[:300]}"
-                break
-            except subprocess.TimeoutExpired:
-                line = (
-                    f"RESULT: ERROR {test.name} — timeout after {timeout}s; "
-                    "continuing with the next validation"
-                )
-                # An in-process (is_local) run dies with its own process, so a
-                # timeout here leaves nothing running to collide with. Aborting
-                # the suite instead produced a scorecard covering only a prefix
-                # of the tests while reading like a full result.
-                unsafe_to_continue = not LOCAL_RUNS
-                break
-        if not line:
-            line = (
-                f"RESULT: ERROR {test.name} — platform concurrency limit persisted "
-                f"after {MAX_CONCURRENT_RETRIES} retries"
-            )
-            unsafe_to_continue = True
-        status = line.split()[1] if len(line.split()) > 1 else "ERROR"
-        duration = time.monotonic() - started
-        log_path = log_dir / f"{test.stem}.log"
-        log_path.write_text(output or line, encoding="utf-8")
-        rows.append({
-            "status": status, "line": line, "test": test.name,
-            "duration": duration, "artifacts": changed_artifacts(artifacts_before),
-            "log": log_path,
-        })
-        write_html_report(rows, report, suite_id)
-        print(f"[{status:5s}] {test.name} ({duration:.0f}s)")
-        if unsafe_to_continue:
-            print("Stopping sequential runner; active-run state is not proven safe for the next submission.")
-            break
-        time.sleep(BETWEEN_TEST_DELAY_SECONDS)
+                if not stop_submitting:
+                    try:
+                        test = next(next_test)
+                    except StopIteration:
+                        pass
+                    else:
+                        time.sleep(BETWEEN_TEST_DELAY_SECONDS)
+                        pending[executor.submit(run_test, test, env, log_dir)] = test
     print("\n" + "=" * 78)
     print("HIVEQ SDK INSTALLED-WHEEL RELEASE SCORECARD")
     print("=" * 78)

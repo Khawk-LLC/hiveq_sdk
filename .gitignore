@@ -32,3 +32,7 @@ src/hiveq/docs/data_driver/llms.txt
 /release_validation/runs/
 /release_validation/source_material/
 /release_validation/data/userdata/order_replay_set_a/
+
+# Local comparison output and CSV fixtures (large, machine-local)
+comparisons/
+custom_data/

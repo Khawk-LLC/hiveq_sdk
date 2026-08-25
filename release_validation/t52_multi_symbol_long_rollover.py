@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -25,31 +26,71 @@ DEFAULT_SYMBOLS = [
 ]
 
 
+# An outright contract is ROOT + month code + year digits: ESZ5, 6AZ5, MCLF26.
+OUTRIGHT = re.compile(r"^([0-9A-Z]+?)([FGHJKMNQUVXZ])(\d{1,2})$")
+
+
+def outright_root(symbol: str) -> str:
+    match = OUTRIGHT.match(str(symbol))
+    return match.group(1) if match else str(symbol)
+
+
 class SdkT52MultiSymbolLongRollover:
     def __init__(self):
         self.entered = set()
         self.rollovers = {}
+        self.by_root = {}
+        self.bars = {}
+        self.unmatched = {}
 
     def on_start(self, ctx, event):
-        ctx.subscribe_bars(
-            ctx.strategy_config.symbols, asset_type=AssetType.FUTURES, interval="1m"
-        )
+        symbols = ctx.strategy_config.symbols
+        # Continuous alias -> root ("6A.v.0" -> "6A"), so a delivered outright
+        # can be matched back to the subscription that produced it.
+        self.by_root = {continuous.split(".")[0]: continuous for continuous in symbols}
+        ctx.subscribe_bars(symbols, asset_type=AssetType.FUTURES, interval="1m")
 
     def on_bar(self, ctx, event):
         bar = event.data()
-        for continuous in ctx.strategy_config.symbols:
-            if ctx.instrument(continuous).current_contract != bar.symbol:
-                continue
-            if continuous not in self.entered:
-                ctx.buy_order(bar.symbol, quantity=1.0)
-                self.entered.add(continuous)
-                ctx.add_event_log(
-                    f"ENTRY {continuous}->{bar.symbol}", sub_event_type="ENTRY",
-                    state_variable={"continuous_symbol": continuous,
-                                    "contract": bar.symbol,
-                                    "time": bar.time.isoformat()},
-                )
-            break
+        # Entry is keyed on the contract's root, not on equality with
+        # ``instrument(continuous).current_contract``: for most of these roots
+        # that accessor did not name the contract the callbacks were being
+        # given, so thirty of the thirty-seven symbols were never entered and
+        # the rollover reconciliation ran on seven of them. What
+        # current_contract reported at entry is logged instead of gating on it.
+        continuous = self.by_root.get(outright_root(bar.symbol))
+        if continuous is None:
+            # A delivered contract whose root is not in the subscription: worth
+            # naming, because it would otherwise look like a missing symbol.
+            self.unmatched[str(bar.symbol)] = self.unmatched.get(
+                str(bar.symbol), 0) + 1
+            return
+        self.bars[continuous] = self.bars.get(continuous, 0) + 1
+        if continuous in self.entered:
+            return
+        self.entered.add(continuous)
+        ctx.buy_order(bar.symbol, quantity=1.0)
+        try:
+            reported = str(getattr(ctx.instrument(continuous),
+                                   "current_contract", "") or "")
+        except Exception as exc:                           # noqa: BLE001
+            reported = f"raised: {str(exc)[:60]}"
+        ctx.add_event_log(
+            f"ENTRY {continuous}->{bar.symbol}", sub_event_type="ENTRY",
+            state_variable={"continuous_symbol": continuous,
+                            "contract": str(bar.symbol),
+                            "reported_current_contract": reported,
+                            "time": bar.time.isoformat()},
+        )
+
+    def on_stop(self, ctx, event):
+        # Which subscriptions actually produced bars. Without this a symbol that
+        # was never entered cannot be told apart from a symbol the engine never
+        # delivered data for -- and for most of these roots it is the latter.
+        ctx.add_event_log(
+            "BAR_COVERAGE", sub_event_type="BAR_COVERAGE",
+            state_variable={"bars": self.bars, "unmatched": self.unmatched},
+        )
 
     def on_security_event(self, ctx, event):
         data = event.data()
@@ -105,7 +146,18 @@ def analyze(run, symbols: list[str]) -> dict:
     rolls = [_state(x) for x in events.loc[
         events["sub_event_type"] == "ROLLOVER_DONE", "state_variables"
     ]]
+    coverage = [_state(x) for x in events.loc[
+        events["sub_event_type"] == "BAR_COVERAGE", "state_variables"
+    ]]
+    bars_by_symbol = coverage[-1].get("bars", {}) if coverage else {}
+    unmatched = coverage[-1].get("unmatched", {}) if coverage else {}
     entered = {x.get("continuous_symbol") for x in entries}
+    contract_agreed = {
+        x.get("continuous_symbol"): (
+            x.get("reported_current_contract") == x.get("contract")
+        )
+        for x in entries
+    }
     per_symbol = {}
     for symbol in symbols:
         chain = [x for x in rolls if x.get("continuous_symbol") == symbol]
@@ -118,25 +170,53 @@ def analyze(run, symbols: list[str]) -> dict:
             for i in range(1, len(chain))
         )
         per_symbol[symbol] = {
+            "bars_delivered": int(bars_by_symbol.get(symbol, 0)),
             "entered": symbol in entered,
+            "current_contract_agreed_at_entry": contract_agreed.get(symbol),
             "rollover_done_events": len(chain),
             "payload_pairs_complete": pairs_complete,
             "contract_chain_continuous": continuity,
         }
     open_positions = open_position_rows(positions)
     all_filled = bool(len(orders)) and bool((orders["status"] == "FILLED").all())
-    passed = (
-        all_filled and len(open_positions) == len(symbols)
-        and all(x["entered"] and x["rollover_done_events"] > 0
-                and x["payload_pairs_complete"] and x["contract_chain_continuous"]
-                for x in per_symbol.values())
-    )
+
+    def failing(predicate):
+        return sorted(symbol for symbol, row in per_symbol.items()
+                      if not predicate(row))
+
+    # Each property is its own named check, so the scorecard says which one
+    # broke and for which symbols instead of one opaque "passed".
     return {
         "symbols": symbols, "orders": len(orders), "all_orders_filled": all_filled,
         "open_positions": len(open_positions),
         "expected_open_positions": len(symbols),
         "stale_open_positions": max(0, len(open_positions) - len(symbols)),
-        "per_symbol": per_symbol, "passed": bool(passed),
+        # Split by cause: a symbol the engine delivered no bar for is a data
+        # gap, and a symbol that got bars but was never entered is an execution
+        # defect. Reported as separate checks so the scorecard names the right
+        # one.
+        "every_symbol_received_bars": not failing(
+            lambda row: row["bars_delivered"] > 0),
+        "every_symbol_with_bars_entered": not failing(
+            lambda row: row["entered"] or not row["bars_delivered"]),
+        "every_symbol_entered": not failing(lambda row: row["entered"]),
+        "every_symbol_rolled_over": not failing(
+            lambda row: row["rollover_done_events"] > 0),
+        "rollover_payload_pairs_complete": not failing(
+            lambda row: row["payload_pairs_complete"]),
+        "rollover_chain_continuous": not failing(
+            lambda row: row["contract_chain_continuous"]),
+        "open_position_per_symbol": len(open_positions) == len(symbols),
+        "no_bars_delivered": failing(lambda row: row["bars_delivered"] > 0),
+        "unmatched_contracts": unmatched,
+        "not_entered": failing(lambda row: row["entered"]),
+        "never_rolled": failing(lambda row: row["rollover_done_events"] > 0),
+        "discontinuous_chain": failing(lambda row: row["contract_chain_continuous"]),
+        "current_contract_disagreed_at_entry": sorted(
+            symbol for symbol, row in per_symbol.items()
+            if row["entered"] and row["current_contract_agreed_at_entry"] is False
+        ),
+        "per_symbol": per_symbol,
     }
 
 
