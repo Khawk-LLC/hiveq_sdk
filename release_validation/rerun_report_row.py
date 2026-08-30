@@ -8,7 +8,7 @@ stamped with the re-run time so it is never mistaken for part of the original
 suite.
 
     python release_validation/rerun_report_row.py \
-        --test t56_equity_calendar_daily_bars.py \
+        --test long_running_t56_equity_calendar_daily_bars.py \
         --log  /path/to/rerun.log \
         --duration 1075.7
 

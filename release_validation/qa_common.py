@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,28 @@ SENSITIVE_COLUMNS = {
 # cancel-reject that raced a fill — because the analyzer collapses each order to
 # one terminal row.
 LOCAL_ORDER_EVENT_DIR = Path.home() / ".tmp"
+
+
+def _enable_suite_local_order_exports() -> None:
+    """Default every suite-created BacktestConfig to local order capture."""
+    if os.environ.get("RELEASE_VALIDATION_EXPORT_ORDERS_CSV") != "1":
+        return
+    from hiveq.flow import BacktestConfig
+
+    original_init = BacktestConfig.__init__
+    if "export_orders_csv" not in inspect.signature(original_init).parameters:
+        raise RuntimeError(
+            "local release validation requires BacktestConfig.export_orders_csv"
+        )
+
+    def init_with_order_export(self, *args, **kwargs):
+        kwargs.setdefault("export_orders_csv", True)
+        original_init(self, *args, **kwargs)
+
+    BacktestConfig.__init__ = init_with_order_export
+
+
+_enable_suite_local_order_exports()
 
 
 def export_run_artifacts(
