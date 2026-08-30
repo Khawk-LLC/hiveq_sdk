@@ -9,8 +9,10 @@ Demonstrates (verified against the SDK surface):
     rolls and you observe each roll in ``on_rollover``. No ``data_configs`` flag.
   - the FUTURES SESSION window (R6): 18:00 -> 17:00 ET (CME Globex). Times are ET.
 
-Continuous symbol convention (§5.1): use `.v.0` for quarterly-expiring products
-such as ES and NQ; use `.c.0` for products that expire monthly.
+Continuous symbol forms (§5.1) are ROOT.roll.rank: "ES.c.0" rolls on the expiry
+calendar (deterministic roll dates), "ES.v.0" rolls when volume migrates to the
+next contract (tracks liquidity). Both work here — swap the one below if you
+prefer the other.
 
 Run:  python futures_continuous_rollover.py
 """
@@ -19,7 +21,7 @@ from collections import deque
 import hiveq.flow as hf
 from hiveq.flow import AssetType, BacktestConfig, StrategyConfig
 
-CONT = "ES.v.0"              # quarterly expiry: volume-roll front continuous ES
+CONT = "ES.v.0"              # volume-roll front continuous ES ("ES.c.0" = calendar roll)
 LOOKBACK = 30                # bars for the breakout channel
 
 
