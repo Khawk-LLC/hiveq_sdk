@@ -35,9 +35,11 @@ from hiveq.flow.trading.price_utils import adjust_tick_size           # noqa: E4
 from hiveq.flow.trading_types import OrderType                        # noqa: E402
 
 SYMBOL = "AAPL"
-# Far more than prints at one price in a minute, so the fill has to arrive in
-# pieces or not at all.
-BIG_QTY = 250_000.0
+# Far more than the session can absorb, so the order fills in pieces and still
+# has a remainder left to cancel. 250_000 was ~6% of AAPL's volume in this
+# window and filled completely, which left `remainder_cancelled_and_flat_of_open`
+# asserting against an order that no longer had a remainder.
+BIG_QTY = 5_000_000.0
 CONTROL_QTY = 10.0
 
 
@@ -73,7 +75,7 @@ class SdkT61:
         # callbacks for this path. Observe that same public order surface here
         # so the test does not confuse callback delivery with fill accounting.
         if self.big_order is not None:
-            self._record_partial_step(self.big_order)
+            self._record_partial_step(self.big_order, source="poll")
 
         if self.trades == 50 and not self.control_id:
             # Independent control round trip, so the case still proves the
@@ -111,20 +113,20 @@ class SdkT61:
             return
         if "PARTIALLY_FILLED" in str(event.type).upper():
             self.state["partial_event_types"].append(str(event.type))
-        self._record_partial_step(order)
+        self._record_partial_step(order, source="event")
 
-    def _record_partial_step(self, order):
+    def _record_partial_step(self, order, source="poll"):
         status = str(order.status).upper()
         filled = float(order.filled_qty or 0)
         leaves = float(order.leaves_qty or 0)
         last_qty = float(order.last_qty or 0)
         last_px = float(order.last_px or 0)
         previous_filled = float(self.state["filled_total"])
-        if filled > previous_filled and leaves > 0:
+        if filled > previous_filled:
             if len(self.state["steps"]) < 400:
                 self.state["steps"].append(
                     [status, filled, leaves, last_qty, last_px,
-                     round(float(order.avg_px or 0), 6)]
+                     round(float(order.avg_px or 0), 6), source]
                 )
             self.state["leaves"].append(leaves)
             self.state["filled_total"] = filled
@@ -149,7 +151,7 @@ class SdkT61:
 if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT61", type="SdkT61", symbols=[SYMBOL])],
-        symbols=[SYMBOL], start_date="2025-06-02", end_date="2025-06-02",
+        symbols=[SYMBOL], start_date="2026-08-12", end_date="2026-08-12",
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
@@ -203,7 +205,7 @@ if __name__ == "__main__":
         running_notional = 0.0
         previous_filled = 0.0
         worst = None
-        for _status, filled, _leaves, last_qty, last_px, avg_px in rows:
+        for _status, filled, _leaves, last_qty, last_px, avg_px, *_source in rows:
             piece = float(filled) - previous_filled
             if piece <= 0 or float(last_px) <= 0:
                 return None
@@ -215,11 +217,27 @@ if __name__ == "__main__":
         return worst
 
     step_avg_px_error = weighted_mean_error(steps)
-    checkpoint_piece_qty_matches_increment = bool(steps) and all(
-        abs((float(step[1]) - (0.0 if index == 0 else float(steps[index - 1][1])))
-            - float(step[3])) < 1e-6
-        for index, step in enumerate(steps)
-    )
+    # Only a real fill callback can prove "each event reports its own piece".
+    # An on_trade poll reads the zero-copy order's cumulative state, so when
+    # several executions land between two polls the increment legitimately
+    # exceeds the single last_qty on view -- asserting equality there measures
+    # the sampling rate, not the engine. Assert equality on event-sourced steps
+    # when the broker emits them, and otherwise assert the weaker property a
+    # poll can actually establish: no step reports a piece larger than the
+    # cumulative increase it accompanies.
+    def _increment(index, step):
+        return float(step[1]) - (0.0 if index == 0 else float(steps[index - 1][1]))
+
+    event_steps = [(i, x) for i, x in enumerate(steps) if len(x) > 6 and x[6] == "event"]
+    if event_steps:
+        checkpoint_piece_qty_matches_increment = all(
+            abs(_increment(i, x) - float(x[3])) < 1e-6 for i, x in event_steps
+        )
+    else:
+        checkpoint_piece_qty_matches_increment = bool(steps) and all(
+            float(step[3]) <= _increment(index, step) + 1e-6
+            for index, step in enumerate(steps)
+        )
     filled_total = float(state["filled_total"])
     pieces_total = sum(quantity for quantity, _ in fill_pieces)
     weighted = (sum(quantity * price for quantity, price in fill_pieces) / pieces_total
@@ -236,9 +254,15 @@ if __name__ == "__main__":
         "filled_plus_leaves_equals_order": bool(steps) and all(
             abs((step[1] + step[2]) - BIG_QTY) < 1e-6 for step in steps
         ),
+        # Compared at the end of the run, not at the cancel: `position_after` is
+        # a snapshot taken the moment cancel_order() returns, while fills already
+        # in flight keep landing afterwards, so the two are sampled at different
+        # instants and diverge for any order large enough to still be working.
         "position_matches_filled_not_ordered": (
-            state["position_after"] is not None
-            and abs(state["position_after"] - (filled_total + CONTROL_QTY)) < 1e-6
+            bool(state["final"])
+            and abs(
+                float(state["final"]["position"]) - (filled_total + CONTROL_QTY)
+            ) < 1e-6
         ),
         "partial_state_visible_via_leaves_qty": bool(state["statuses_while_open"]),
         # Rebuilt from the captured steps; the local event file is used only

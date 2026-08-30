@@ -101,8 +101,8 @@ if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT39", type="SdkT39", symbols=["AAPL"])],
         symbols=["AAPL"],
-        start_date="2025-12-02",
-        end_date="2025-12-02",
+        start_date="2026-08-12",
+        end_date="2026-08-12",
         data_configs=[{
             "type": "hiveq_historical",
             "dataset": "HIVEQ_US_EQ",

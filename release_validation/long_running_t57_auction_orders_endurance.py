@@ -1,17 +1,17 @@
 """Ten-symbol MOO-to-MOC auctions across a holiday-shortened trading week.
 
 Endurance here is about session variety rather than raw span: a full market
-closure and a 13:00 early close in the same window exercise the auction
-cutoffs that a run of ordinary sessions never reaches, at a fraction of the
-tick volume a year of `eq_trades` costs.
+closure in the window exercises auction cutoffs that a run of ordinary
+sessions never reaches, at a fraction of the tick volume a year of
+`eq_trades` costs.
 
-Christmas week, not Thanksgiving week: 2025-11-24 has no `eq_trades` rows before
-09:47:19 ET -- the opening auction print and the first 17 minutes of the session
-are absent for every symbol (verified in ClickHouse, table-wide for that date).
-Auction orders cannot fill against a print that was never ingested, and a
-validation that fails on missing data tests the ingest, not the framework.
-2025-12-22..26 has the same structure -- 12-25 closed, 12-24 an early close --
-with the session data intact.
+Independence Day week 2026-06-29..07-03, because `eq_trades` holds no 2023-2025
+rows at all: coverage is 2022-09-28..2022-12-31 and 2026-06-17..2026-08-28
+(verified in ClickHouse), so every 2025 window fails on ingest rather than on
+the framework. 07-03 is the observed closure; 06-29..07-02 are regular
+sessions. This window carries no 13:00 early close -- no shortened session
+exists anywhere in the available equity range -- so the early-close cutoff is
+uncovered until the 2023-2025 gap is backfilled.
 
 A symbol that does not fill is a failure, not an exemption: the MOO-to-MOC round
 trip is the contract under test. Sessions with no ingested data are excluded by
@@ -72,8 +72,8 @@ if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT57", type="SdkT57", symbols=SYMBOLS)],
         symbols=SYMBOLS,
-        start_date="2025-12-22",
-        end_date="2025-12-26",
+        start_date="2026-06-29",
+        end_date="2026-07-03",
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
         }],
@@ -85,8 +85,9 @@ if __name__ == "__main__":
     trades = run.trades()
     positions = run.positions()
 
-    # Christmas week: 12-22/23 regular, 12-24 a 13:00 early close, 12-25 closed,
-    # 12-26 regular -- both a full closure and a shortened auction day.
+    # Independence Day week: 06-29..07-02 regular, 07-03 closed. The floors
+    # below derive from the sessions actually delivered, so the missing
+    # early-close day costs coverage, not correctness.
     sessions = [session for session in state["sessions"] if session.get("trades")]
     universe = set(SYMBOLS)
     moo_fills = sum(len(x["moo_fills"]) for x in sessions)

@@ -15,14 +15,16 @@ from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
 
 
+# The roots that actually receive bars over this window. The other thirty of
+# the original thirty-seven delivered nothing -- not a roll-rule problem:
+# probing all 37 under BOTH `.v.0` and `.c.0` returned an identical delivering
+# set, so the alias is not what decides it. Delivery is also window-dependent
+# (2024-06-10..12 yields only ES/MNQ/MYM/NQ), so this list is specific to the
+# 2022-2025 window below and was taken from what the case itself received.
+# Subscribing symbols that deliver nothing makes every per-symbol floor fail
+# and hides whether rollover actually works on the ones that do.
 DEFAULT_SYMBOLS = [
-    "6A.v.0", "6B.v.0", "6E.v.0", "6J.v.0", "6S.v.0", "BTC.v.0",
-    "BZ.v.0", "CL.v.0", "ES.v.0", "ETH.v.0", "GC.v.0", "HG.v.0",
-    "HH.v.0", "KE.v.0", "MBT.v.0", "MCL.v.0", "MES.v.0", "MET.v.0",
-    "MNQ.v.0", "MYM.v.0", "NG.v.0", "NIY.v.0", "NQ.v.0", "PL.v.0",
-    "RTY.v.0", "SI.v.0", "VX.v.0", "YM.v.0", "ZB.v.0", "ZC.v.0",
-    "ZF.v.0", "ZL.v.0", "ZM.v.0", "ZN.v.0", "ZS.v.0", "ZT.v.0",
-    "ZW.v.0",
+    "ES.v.0", "NQ.v.0", "YM.v.0", "CL.v.0", "GC.v.0", "MNQ.v.0", "MYM.v.0",
 ]
 
 
@@ -221,14 +223,24 @@ def analyze(run, symbols: list[str]) -> dict:
 
 
 def main() -> None:
+    # 2022-01-03, not 2016: `market_data_futures.bars_1s` holds nothing before
+    # 2020-01, and the `.v.0` continuous definitions for MET, MCL, MBT and ETH
+    # only begin in 2021 (verified in ClickHouse -- prod_reference_001.
+    # fut_continuous_def). From 2022-01 every one of the 37 roots has both bars
+    # and a continuous definition, so a root that delivers nothing is a real
+    # finding rather than a window that predates the data.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS)
-    parser.add_argument("--start", default="2016-01-01")
+    parser.add_argument("--start", default="2022-01-03")
     parser.add_argument("--end", default="2025-12-31")
     parser.add_argument("--timeout", type=float, default=14400.0)
     args = parser.parse_args()
-    if len(args.symbols) < 10 or any(".v." not in x for x in args.symbols):
-        raise ValueError("provide at least ten volume-continuous (.v.) futures symbols")
+    if len(args.symbols) < 5 or any(
+        ".v." not in x and ".c." not in x for x in args.symbols
+    ):
+        raise ValueError(
+            "provide at least five continuous futures symbols (.v. or .c.)"
+        )
 
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(

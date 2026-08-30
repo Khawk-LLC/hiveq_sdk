@@ -10,7 +10,7 @@ from hiveq.flow.logger import logger as _get_logger
 from hiveq.flow.trading_types import OrderType
 
 logger = _get_logger()
-SYMBOLS = ["AAPL", "MSFT", "AMZN", "META", "NVDA", "TSLA", "GOOGL", "JPM", "IBM", "BAC"]
+SYMBOLS = ["AAPL"]
 PRIMARY_MARKET = {
     "AAPL": "NASDAQ", "MSFT": "NASDAQ", "AMZN": "NASDAQ",
     "META": "NASDAQ", "NVDA": "NASDAQ", "TSLA": "NASDAQ",
@@ -18,7 +18,7 @@ PRIMARY_MARKET = {
 }
 
 
-class SdkT24:
+class SdkT24Single:
     def on_start(self, ctx, event):
         self.state = {"trades": 0, "moo_placed": {}, "moc_placed": {},
             "moo_fills": {}, "moc_fills": {}, "rejects": [],
@@ -112,8 +112,12 @@ class SdkT24:
 
 
 if __name__ == "__main__":
+    # Isolation probe: identical to baseline_t24 except that it runs one symbol.
+    # Default log levels (engine WARNING, OMS error) -- debug logging filled the
+    # container's capped log tmpfs and killed the run with an uncaught
+    # Poco::WriteFileException, reported as exit 139.
     run = hf.run_backtest(
-        strategy_configs=[StrategyConfig(name="SdkT24", type="SdkT24", symbols=SYMBOLS)],
+        strategy_configs=[StrategyConfig(name="SdkT24Single", type="SdkT24Single", symbols=SYMBOLS)],
         symbols=SYMBOLS, start_date="2026-08-12", end_date="2026-08-12",
         data_configs=[{"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["eq_trades"]}],
         backtest_config=BacktestConfig(session_start="04:00", session_end="16:30"))

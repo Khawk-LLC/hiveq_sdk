@@ -26,17 +26,21 @@ import hiveq.flow as hf                                               # noqa: E4
 from hiveq.flow import BacktestConfig, StrategyConfig                 # noqa: E402
 from hiveq.flow.config import AssetType                               # noqa: E402
 
-SYMBOL = "AAPL"
+# Futures, not equities: POV and TWAP need a tick stream, and `fut_trades` is
+# the schema that delivers one.
+SYMBOL = "ES.v.0"
 # One executor per symbol: the executor contract is "never stack a second
 # executor on the same target", so POV and TWAP get a symbol each instead of
-# both working AAPL.
-TWAP_SYMBOL = "MSFT"
+# both working ES.
+TWAP_SYMBOL = "NQ.v.0"
 SYMBOLS = [SYMBOL, TWAP_SYMBOL]
 ALGOS = ("POV", "TWAP")
 # Documented executor_state values that mean the executor is no longer working.
 TERMINAL_STATES = {"FILLED", "STOPPED", "STOPPING", "UNDEFINED", "INVALID"}
-CONTROL_QTY = 10.0
+CONTROL_QTY = 2.0
 TWAP_MINUTES = 20
+# Contracts, not shares: an equity-sized quantity is not a fillable futures order.
+EXECUTOR_QTY = 20
 
 
 class SdkT69:
@@ -56,11 +60,11 @@ class SdkT69:
                 "stop_attempted": {"handle": False, "id": False},
                 "state_at_stop": {}, "state_timeline": {},
             }
-        ctx.subscribe_trades(SYMBOLS, asset_type=AssetType.EQUITY)
+        ctx.subscribe_trades(SYMBOLS, asset_type=AssetType.FUTURES)
 
     def _pov_params(self, ctx, symbol):
         return ctx.build_executor_params(
-            symbol=symbol, quantity=5_000, side="BUY", executor_type="POV",
+            symbol=symbol, quantity=EXECUTOR_QTY, side="BUY", executor_type="POV",
             participate_pct=0.1, min_order_size=1, max_order_size=10,
             refresh_millis=100,
         )
@@ -112,7 +116,7 @@ class SdkT69:
         for label, window in self._twap_param_forms(ctx, TWAP_SYMBOL):
             try:
                 params = ctx.build_executor_params(
-                    symbol=TWAP_SYMBOL, quantity=5_000, side="BUY",
+                    symbol=TWAP_SYMBOL, quantity=EXECUTOR_QTY, side="BUY",
                     executor_type="TWAP", min_order_size=1, max_order_size=10,
                     refresh_millis=100, **window,
                 )
@@ -261,9 +265,13 @@ if __name__ == "__main__":
         strategy_configs=[StrategyConfig(name="SdkT69", type="SdkT69", symbols=SYMBOLS)],
         symbols=SYMBOLS, start_date="2025-06-02", end_date="2025-06-02",
         data_configs=[{
-            "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"]
+            "type": "hiveq_historical", "dataset": "HIVEQ_US_FUT",
+            "schema": ["fut_trades"],
         }],
-        backtest_config=BacktestConfig(session_start="09:30", session_end="10:30"),
+        backtest_config=BacktestConfig(
+            initial_capital=100_000_000.0,
+            session_start="09:30", session_end="10:30",
+        ),
     )
     state = completed_checkpoint(run, "t69_executor_algo_matrix")
     created = state["created"]
