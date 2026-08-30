@@ -21,6 +21,14 @@ logs/
 # Environment / secrets
 .env
 *.env
+# Backups and copies of env files carry live keys too: `.env` and `*.env` do not
+# match `.env.staging.bak` or `.env.bak-localhost-<host>-<stamp>`.
+.env.*
+!.env.example
+
+# Stray editor/merge/backup artifacts (e.g. run_all.py.orig.bak)
+*.bak
+*.orig
 
 # Generated at build time from docs/ (canonical source) — never commit
 src/hiveq/docs/llms.txt
