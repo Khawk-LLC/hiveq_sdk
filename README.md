@@ -174,9 +174,21 @@ Futures bars use the same explicit API: pass the complete futures symbols and
 the interval. The symbol itself identifies a continuous or dated contract;
 there is no separate root selector on this path.
 
-For continuous contracts, use `.v.0` as the standard front contract for
-quarterly-expiring products (for example, ES and NQ), and `.c.0` for products
-that expire monthly.
+A continuous symbol is `ROOT.roll.rank`. The middle letter picks the roll rule
+and the trailing number picks the position in the chain (`0` = front, `1` = the
+one behind it):
+
+- `.c` — **calendar roll.** The series follows the expiry calendar and switches
+  to the next contract on its scheduled roll date. Deterministic and known in
+  advance.
+- `.v` — **volume roll.** The series switches when trading volume migrates to
+  the next contract, so it tracks where liquidity actually is. The roll date
+  varies by product and period.
+
+Both rules work for every root — `ES.c.0` and `ES.v.0` are equally valid. Pick
+whichever matches how you want the series stitched together; if your strategy
+cares about liquidity at the roll, `.v` usually tracks it more closely, and if
+you need roll dates fixed ahead of time, `.c` gives you that.
 
 ```python
 ctx.subscribe_bars(

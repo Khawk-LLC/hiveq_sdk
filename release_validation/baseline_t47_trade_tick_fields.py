@@ -184,8 +184,8 @@ if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT47", type="SdkT47", symbols=[SYMBOL])],
         symbols=[SYMBOL],
-        start_date="2025-09-23",
-        end_date="2025-09-23",
+        start_date="2026-08-12",
+        end_date="2026-08-12",
         # eq_trades, not tbbo: the engine's TBBO parser hardcodes
         # TradeCondition::Regular and never calls setExchange/setRawTradeCondition,
         # so a tbbo-backed run cannot exercise condition/exchange/raw at all.

@@ -8,9 +8,9 @@ Demonstrates (every ctx call verified against the SDK type surface):
     session_start='18:00' / session_end='17:00'`` (§9.3, doc §16.5/R6).
   - ``ctx.subscribe_bars(symbols=['ES.v.0'], asset_type=AssetType.FUTURES,
     interval=...)`` — subscribe by
-    the futures SYMBOL STRING. ``ES.v.0`` is the standard continuous form for
-    quarterly-expiring ES; use ``.c.0`` for monthly-expiring products.
-    ``ES.H25`` is a dated contract (§5.1).
+    the futures SYMBOL STRING. ``ES.v.0`` = volume-roll front continuous;
+    ``ES.c.0`` = calendar-roll front continuous; ``ES.H25`` = a dated
+    contract (§5.1). Either roll rule works — pick per strategy.
   - TIME IS EST/EDT: ``ctx.now()`` is already ET; never convert UTC (R5/R6).
 
 Shape: a single momentum-vs-open lean on ES, flat by the 16:30 ET halt.
@@ -20,7 +20,7 @@ Run:  python futures_session.py
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig, BacktestConfig, AssetType
 
-SYMBOL = "ES.v.0"            # quarterly expiry: ROOT.volume-roll.front (§5.1)
+SYMBOL = "ES.v.0"            # ROOT.roll.rank: ES, volume-roll (v), front (0). 'ES.c.0' = calendar roll. (§5.1)
 HALT_BY = (16, 15)           # ET: flatten before the 16:15-16:30 trading halt
 
 

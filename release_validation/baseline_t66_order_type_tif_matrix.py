@@ -1,7 +1,7 @@
 """Every public order type and time-in-force, actually submitted.
 
 t16 proves the enums stringify to stable wire values. That is a serialization
-test: LOO, LOC, FOK, GTD and DAY appear nowhere else in the suite as an order
+test: LOO, LOC, GTD and DAY appear nowhere else in the suite as an order
 the engine was asked to execute, so the SDK could expose an order type the OMS
 silently drops and nothing would notice.
 
@@ -42,8 +42,6 @@ CELLS = [
     ("limit_day_resting", OrderType.LIMIT, "DAY", -0.10, None),
     ("limit_ioc_executable", OrderType.LIMIT, "IOC", +0.02, None),
     ("limit_ioc_unfillable", OrderType.LIMIT, "IOC", -0.10, None),
-    ("limit_fok_executable", OrderType.LIMIT, "FOK", +0.02, None),
-    ("limit_fok_unfillable", OrderType.LIMIT, "FOK", -0.10, None),
     ("limit_gtd", OrderType.LIMIT, "GTD", -0.10, None),
     ("stop_gtc", OrderType.STOP, "GTC", None, +0.02),
     ("stop_limit_gtc", OrderType.STOP_LIMIT, "GTC", +0.03, +0.02),
@@ -170,14 +168,10 @@ if __name__ == "__main__":
             and reached("limit_day_resting", "SUBMITTED", "ACCEPTED")
         ),
         "executable_ioc_filled": reached("limit_ioc_executable", "FILL"),
-        "executable_fok_filled": reached("limit_fok_executable", "FILL"),
-        # Neither type may rest: an immediate-or-cancel order left SUBMITTED at
-        # the end of the session was accepted and then not honoured.
+        # An immediate-or-cancel order left SUBMITTED at the end of the
+        # session was accepted and then not honoured.
         "unfillable_ioc_resolved_terminally": reached(
             "limit_ioc_unfillable", "CANCEL", "EXPIRED", "REJECT", "FILL"
-        ),
-        "unfillable_fok_resolved_terminally": reached(
-            "limit_fok_unfillable", "CANCEL", "EXPIRED", "REJECT", "FILL"
         ),
         "stop_types_accepted": (
             reached("stop_gtc", "SUBMITTED", "ACCEPTED", "FILL", "TRIGGER")

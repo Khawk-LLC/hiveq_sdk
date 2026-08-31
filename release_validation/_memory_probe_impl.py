@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -23,6 +25,11 @@ from hiveq.flow.logger import logger as _get_logger
 logger = _get_logger()
 
 NAME = "probe_universe_trades_imbalance"
+
+
+def _fmt_ns_ts(ns: int) -> str:
+    """Format an event timestamp (ns since epoch) as an ISO string in UTC."""
+    return datetime.fromtimestamp(ns / 1e9, tz=timezone.utc).isoformat(timespec="seconds")
 
 SYMBOLS = [
     "AAL", "AAOI", "AAPL", "ACWI", "ADBE", "ADI", "ADSK", "ALAB", "AMAT", "AMD",
@@ -45,6 +52,13 @@ class SdkProbeUniverse:
     names is tens of millions of callbacks, so formatting or object building
     per event would dominate the run.
     """
+
+    # Sim-time cadence for the liveness heartbeat: 30 min of *market time*
+    # advanced by the tick stream, NOT wall-clock. Sim time is what actually
+    # measures backtest progress — a slow machine can't fake it, and a hang
+    # shows up as heartbeats stopping (because ticks stop being delivered).
+    # WARNING level so it survives the engine's default WARNING filter.
+    _HEARTBEAT_INTERVAL_NS = 30 * 60 * 1_000_000_000
 
     def __init__(self):
         # State lives on the instance (not in on_start) because on_start fires
@@ -74,6 +88,41 @@ class SdkProbeUniverse:
         }
         self._universe = set(SYMBOLS)
         self._day = None
+        self._run_start_wall = time.monotonic()
+        self._last_heartbeat_ts = None
+        self._last_heartbeat_wall = self._run_start_wall
+        self._events_at_last_heartbeat = 0
+
+    def _maybe_heartbeat(self, ctx, ts_event):
+        """Emit a heartbeat every _HEARTBEAT_INTERVAL_NS of *sim* (tick) time.
+
+        Cheap enough to call on every event: an int subtract and compare, no
+        syscalls. Wall-time is also captured on emit so we can spot slow-throughput
+        runs (long wall gap between two heartbeats that are 30 min sim-time apart).
+        """
+        if self._last_heartbeat_ts is None:
+            self._last_heartbeat_ts = ts_event
+            return
+        if ts_event - self._last_heartbeat_ts < self._HEARTBEAT_INTERVAL_NS:
+            return
+        state = self.state
+        total = state["trades"] + state["imbalances"]
+        delta = total - self._events_at_last_heartbeat
+        now = time.monotonic()
+        wall_window = now - self._last_heartbeat_wall
+        rate = delta / wall_window if wall_window > 0 else 0.0
+        wall_total = int(now - self._run_start_wall)
+        sim_now_iso = _fmt_ns_ts(ts_event)
+        day = (self._day or {}).get("day")
+        logger.warning(
+            f"[HEARTBEAT] sim_now={sim_now_iso} day={day} "
+            f"wall={wall_total // 3600:d}h{(wall_total % 3600) // 60:02d}m "
+            f"trades={state['trades']:,} imbalances={state['imbalances']:,} "
+            f"events_since_last={delta:,} rate={rate:,.0f}/s"
+        )
+        self._last_heartbeat_ts = ts_event
+        self._last_heartbeat_wall = now
+        self._events_at_last_heartbeat = total
 
     def on_start(self, ctx, event):
         day = str(ctx.now().date())
@@ -111,6 +160,7 @@ class SdkProbeUniverse:
                 "size": float(trade.size), "ts_event": int(trade.ts_event),
                 "aggressor_side": str(trade.aggressor_side),
             }
+        self._maybe_heartbeat(ctx, int(trade.ts_event))
 
     def on_imbalance(self, ctx, event):
         data = event.data()
@@ -156,10 +206,17 @@ class SdkProbeUniverse:
             state["first_imbalance"] = sample
         elif sample is not None and state["imbalances"] % 500 == 0:
             state["imbalance_samples"].append(sample)
+        self._maybe_heartbeat(ctx, int(event.ts_event))
 
     def on_stop(self, ctx, event):
         # on_stop fires once, when the engine STOPS (not per session day), so
         # this single emission carries the whole accumulated week.
+        elapsed = int(time.monotonic() - self._run_start_wall)
+        logger.warning(
+            f"[HEARTBEAT/FINAL] elapsed={elapsed // 3600:d}h{(elapsed % 3600) // 60:02d}m "
+            f"trades={self.state['trades']:,} imbalances={self.state['imbalances']:,} "
+            f"days={len(self.state['starts'])}"
+        )
         emit_checkpoint(ctx, NAME, self.state)
 
 

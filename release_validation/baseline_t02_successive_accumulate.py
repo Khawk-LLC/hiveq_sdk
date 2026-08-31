@@ -90,7 +90,7 @@ class SdkT02:
 if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT02", type="SdkT02", symbols=["MSFT", "AAPL"])],
-        symbols=["MSFT", "AAPL"], start_date="2025-06-02", end_date="2025-07-01",
+        symbols=["MSFT", "AAPL"], start_date="2026-07-01", end_date="2026-07-31",
         data_configs=[
             {"type":"hiveq_historical","dataset":"HIVEQ_US_EQ","schema":["eq_trades"]},
             {"type":"hiveq_historical","dataset":"HIVEQ_US_IND","schema":["indices_values"]},

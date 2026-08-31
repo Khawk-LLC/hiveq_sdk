@@ -6,7 +6,7 @@ that submits nothing, one whose strategy class or `StrategyConfig.type` no
 longer identifies which test it belongs to, a duplicated or missing number, or
 one that never reads its own result back.
 
-It is numbered t00 so it runs before the validations it audits.
+It is named ``baseline_t00`` so it runs before the validations it audits.
 """
 from __future__ import annotations
 
@@ -21,12 +21,16 @@ HERE = Path(__file__).resolve().parent
 
 # t00 is this audit: static, strategy-free, and therefore not subject to the
 # convention it enforces.
-SELF_PREFIX = "t00_"
+SELF_NAME = "baseline_t00_sdk_convention.py"
 EXPECTED_NUMBERS = range(1, 72)
 EXCEPTIONS = {
-    "t51_memory_session_comparison.py": "sequential wrapper around the strategy-bearing memory probe",
-    "t58_100_symbol_monthly_short_session.py": "wrapper around the strategy-bearing 100-symbol memory probe",
+    "long_running_t51_memory_session_comparison.py": "sequential wrapper around the strategy-bearing memory probe",
+    "long_running_t58_100_symbol_monthly_short_session.py": "wrapper around the strategy-bearing 100-symbol memory probe",
 }
+
+
+def validation_number(path: Path) -> int:
+    return int(path.name.split("_t", 1)[1][:2])
 
 
 def strategy_config_calls(tree: ast.AST):
@@ -44,13 +48,16 @@ def strategy_config_calls(tree: ast.AST):
 
 def audit() -> tuple[dict[str, bool], list[str], int]:
     """Return (checks, issues, number of validations audited)."""
-    files = [p for p in sorted(HERE.glob("t[0-9][0-9]_*.py"))
-             if not p.name.startswith(SELF_PREFIX)]
+    files = sorted([
+        *HERE.glob("baseline_t[0-9][0-9]_*.py"),
+        *HERE.glob("long_running_t[0-9][0-9]_*.py"),
+    ])
+    files = [p for p in files if p.name != SELF_NAME]
 
     numbering: list[str] = []
     by_number: dict[int, list[str]] = {}
     for path in files:
-        by_number.setdefault(int(path.stem[1:3]), []).append(path.name)
+        by_number.setdefault(validation_number(path), []).append(path.name)
     for number in EXPECTED_NUMBERS:
         matches = by_number.get(number, [])
         if len(matches) != 1:
@@ -67,7 +74,7 @@ def audit() -> tuple[dict[str, bool], list[str], int]:
     config_type: list[str] = []
 
     for path in files:
-        number = path.stem[1:3]
+        number = f"{validation_number(path):02d}"
         prefix = f"SdkT{number}"
         source = path.read_text()
         tree = ast.parse(source, filename=str(path))
@@ -101,6 +108,9 @@ def audit() -> tuple[dict[str, bool], list[str], int]:
 
     checks = {
         "numbering": not numbering,
+        "suite_prefix": all(
+            path.name.startswith(("baseline_", "long_running_")) for path in files
+        ),
         "strategy_class_naming": not naming,
         "submits_with_run_backtest": not submits,
         "reads_platform_evidence": not evidence,

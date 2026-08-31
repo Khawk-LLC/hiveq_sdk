@@ -2,8 +2,12 @@
 
 Pure logic, no external dependencies. Shipped as real code in the SDK so
 users can translate legacy symbols locally (e.g. ``ES1!`` → ``ES.c.0``).
-For new canonical symbols, prefer explicit ``.v.0`` for quarterly-expiring
-products and ``.c.0`` for monthly-expiring products.
+
+The legacy ``<ROOT><rank>!`` notation always means the calendar-roll series, so
+that is what this maps to. Canonical symbols are ``ROOT.roll.rank``: ``.c``
+rolls on the expiry calendar, ``.v`` rolls when volume moves to the next
+contract. To use the volume-roll series, write ``ES.v.0`` directly instead of
+translating.
 """
 import re
 

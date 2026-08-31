@@ -41,11 +41,16 @@ class SdkT44:
 
 
 if __name__ == "__main__":
+    # 2026-05-07, not 2026-07-07: the cluster rows this environment reads
+    # (qa_quant_001.clusters_v1) stop on 2026-05-11 -- the later date has none
+    # at all, so the case reported a data gap for a window past the end of the
+    # data. 2026-05-07 carries 5,257 `tag=ON` rows for the front ES contract
+    # across the whole session (verified in ClickHouse).
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT44", type="SdkT44", symbols=["ES.c.0"])],
         symbols=["ES.c.0"],
-        start_date="2026-07-07",
-        end_date="2026-07-07",
+        start_date="2026-05-07",
+        end_date="2026-05-07",
         data_configs=[
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_FUT", "schema": ["bars_1m"]},
             {

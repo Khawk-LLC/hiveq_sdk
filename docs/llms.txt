@@ -436,9 +436,9 @@ ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C
                            expiration_type: Optional[Union[str, datetime]] = None,  # '0dte' | 'YYYY-MM-DD' | datetime
                            underlying: Optional[str] = None, interval: str = "1s")
 # Futures bars use the same unambiguous symbols + interval API. A symbol may
-# be continuous ("ES.v.0", "CL.c.0") or dated ("ES.H25"). Use `.v.0` for
-# quarterly-expiring products (for example ES/NQ) and `.c.0` for monthly-expiring
-# products. Do not pass a separate root/contract/continuous selector:
+# be continuous ("ES.c.0", "ES.v.0") or dated ("ES.H25"). The roll rule is the
+# user's choice — see the ROOT.roll.rank notes below. Do not pass a separate
+# root/contract/continuous selector:
 ctx.subscribe_bars(symbols: List[str], asset_type=AssetType.FUTURES,
                    interval: str = "1m")
 # Multiple intervals: make one explicit call per interval. Each call may carry
@@ -453,10 +453,17 @@ ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional
 #   NOTE: there is NO subscribe_futures_quotes. For futures NBBO quotes,
 #   use subscribe_quotes with the futures symbol string and asset_type=FUTURES:
 #     ctx.subscribe_quotes(['ES.v.0'], asset_type=AssetType.FUTURES)
-#   The futures symbol string encodes the contract:
-#     "ES.v.0" — continuous, volume roll, front (rank 0); standard for quarterly expiry
-#     "CL.c.0" — continuous, calendar/front-month roll, front; standard for monthly expiry
+#   The futures symbol string encodes the contract as ROOT.roll.rank:
+#     "ES.c.0" — continuous, CALENDAR roll, front (rank 0): rolls on the expiry
+#                calendar, so roll dates are deterministic and known in advance.
+#     "ES.v.0" — continuous, VOLUME roll, front (rank 0): rolls when volume
+#                migrates to the next contract, so it tracks liquidity; the roll
+#                date varies by product and period.
+#     "ES.v.1" — rank 1 = the contract behind the front one (same for ".c.1").
 #     "ES.H25" — a specific dated contract (root + month code)
+#   Both roll rules are supported for every root; neither is required. Pick the
+#   one that matches the strategy — do not rewrite a user's .c symbol to .v (or
+#   vice versa) unless they ask.
 #   For continuous-contract ROLLOVER, set BacktestConfig(enable_auto_rollover=True)
 #   and handle on_rollover (§7.12) — nothing extra in data_configs.
 ```
@@ -746,6 +753,8 @@ event.time_utc    -> Optional[datetime] # UTC
 
 ### 7.2 SigmaPosition
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `last_price:float` · `long_notional:float` · `short_notional:float` · `max_exposure:float` · `total_fill_qty:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
+- `avg_price` is the quantity-weighted average entry price of the position **currently held**, fees excluded — so it is `0.0` once the position closes, not the price of the trade you just exited. For that, read `avg_px` off the closing `SigmaOrder`.
+- `notional` is the signed entry cost basis (`quantity × avg_price × multiplier`); `market_value` is the signed value at `last_price`.
 
 ### 7.3 SigmaOrder
 `status` is the order's **state** (sticky once terminal — FIX OrdStatus semantics); `event.type` is what just **happened**. A cancel racing a fill delivers `ORDER_FILLED` then `ORDER_CANCEL_REJECTED`, with `status == FILLED` on both — see the "Order lifecycle contract" in §4.
@@ -821,13 +830,14 @@ Venue-specific optional numeric fields are `None` when the venue does not publis
 .day_pnl(symbol: str = None) -> float
 .net_exposure() -> float                          # signed
 .gross_exposure() -> float                        # sum of |values|
-.max_drawdown -> float       (property)
+.max_drawdown -> float       (property)           # negative fraction: -0.0212 == a 2.12% drawdown
 .fees -> float               (property)
 .initial_capital -> float    (property)           # capital the run started with (fixed base)
 .equity -> float             (property)           # account value / NAV = initial_capital + realized + unrealized − fees
 .cash -> float               (property)           # uninvested cash (equity − market value of fully-funded holdings)
 ```
-- `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies.
+- `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies — except `max_drawdown`, which reports the **worst single strategy**, because drawdowns do not add (two strategies each down 5% from their own peak, at different times, did not cost the account 10%).
+- **`max_drawdown`** is a negative fraction of the equity peak, the same sign and units as the `Max Drawdown` row of `report.return_stats`. The engine folds the high-water mark in at every equity observation — each daily snapshot, and each read of `max_drawdown` / `equity` — so a drawdown that opens and closes between two observations is not captured; it is a lower bound on the true intraday figure. For the account-level number after a run, read `Max Drawdown` from `report.return_stats`.
 - **Account view** (`initial_capital` / `equity` / `cash`): tracked by the engine's cash ledger, not derived in Python. `equity` is asset-agnostic (correct for equities and futures). `cash` reflects that **futures encumber margin, not cash** — buying a future moves only fees out of `cash` (not notional), so `cash ≈ equity` for futures positions while equities reduce `cash` by the full notional. Identity: `equity == initial_capital + realized_pnl + unrealized_pnl` (minus fees). Use `equity` for percent-of-account sizing; there is no built-in `order_target_percent` — size yourself (e.g. `qty = int(pct * ctx.portfolio().equity / (price * ctx.instrument(sym).multiplier))`).
 
 ---
@@ -1467,7 +1477,7 @@ from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency, termin
 # Ancillary: data facade (§14.1 — only when clearly the right tool or user-requested)
 from hiveq import dd                           # keyword-style data load/save/subscribe
 from hiveq.dd import DateRange, TimeRange      # date/time range helpers for dd.load()
-from hiveq.symbol import translate             # legacy ticker translation (ES1! → ES.c.0); prefer explicit ES.v.0
+from hiveq.symbol import translate             # legacy ticker translation (ES1! → ES.c.0, the calendar-roll form)
 from hiveq.driver.data_driver_interface import Cache  # cache enum for legacy load()
 
 # Ancillary: data API SDK (§14.1 — only when clearly the right tool or user-requested)
@@ -1521,7 +1531,7 @@ dd.load(topic='market_data.equity.trades', keys=['AAPL'], mode='subscribe')
 
 ```python
 from hiveq.driver.data_driver_interface import Cache  # NO_CACHE, ONLY_CACHE, CACHE_FORCE_PULL, PULL_UPDATE_CACHE, IN_MEMORY
-from hiveq.symbol import translate              # legacy ticker translation (ES1! → ES.c.0); prefer explicit ES.v.0
+from hiveq.symbol import translate              # legacy ticker translation (ES1! → ES.c.0, the calendar-roll form)
 from hiveq.datetime import DateRange, TimeRange # older alias (prefer hiveq.dd.DateRange)
 ```
 
@@ -1592,7 +1602,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
 - Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
 - `report.*` DataFrames can be `None`/empty — guard before use.
-- For futures bars, use the complete symbol string with the canonical API, e.g. `subscribe_bars(['ES.v.0'], asset_type=AssetType.FUTURES, interval='1m')`. `.v.0` is the standard front continuous form for quarterly-expiring products such as ES/NQ; `.c.0` is the standard for monthly-expiring products. Make one call per interval; each call may include multiple symbols, and identical requests are deduplicated. For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
+- For futures bars, use the complete symbol string with the canonical API, e.g. `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES, interval='1m')`. The continuous form is `ROOT.roll.rank`: `.c` rolls on the expiry calendar (deterministic roll dates), `.v` rolls when volume migrates to the next contract (tracks liquidity). Both are valid for any root — the choice belongs to the user; keep whichever symbol they wrote. Make one call per interval; each call may include multiple symbols, and identical requests are deduplicated. For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
 - **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.v.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.v.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.v.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.
 - **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`, schema `fut_trades`), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
 - **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.
@@ -1950,7 +1960,7 @@ populated physical table for that date.
 ```python
 # equities 1-minute bars
 {'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['bars_1m']}
-# futures (subscribe to a quarterly continuous symbol like 'ES.v.0')
+# futures (subscribe to a continuous symbol like 'ES.c.0' or 'ES.v.0')
 {'type':'hiveq_historical','dataset':'HIVEQ_US_FUT','schema':['bars_1m']}
 # tick trades for auction fills / executors
 {'type':'hiveq_historical','dataset':'HIVEQ_US_EQ','schema':['eq_trades']}

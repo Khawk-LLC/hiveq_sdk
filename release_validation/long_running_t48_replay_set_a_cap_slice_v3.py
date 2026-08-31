@@ -249,7 +249,10 @@ def main() -> None:
     total_trades = len(trades)
     validation = {
         "symbol": SYMBOL,
-        "enable_auto_rollover": False,
+        # A string, not a bool: ``finish_validation`` turns every boolean in
+        # this mapping into a named check, so recording the configuration this
+        # run deliberately disabled as ``False`` scored it as a failed check.
+        "enable_auto_rollover": "disabled",
         "orders": len(orders),
         "trades": total_trades,
         "positions": len(positions),

@@ -160,6 +160,11 @@ def _first_party_files(root: str, lib_dirs: Sequence[str]) -> Dict[str, str]:
 _CONFIG_EXTS = (".yaml", ".yml", ".json", ".toml", ".ini", ".cfg")
 # Project-meta files we never want to sweep in as "config".
 _CONFIG_NAME_DENY = {"pyproject.toml", "setup.cfg", "tox.ini", "mypy.ini"}
+# Real params/config files are tiny; anything bigger sitting next to source is
+# almost always a generated artifact (inventory/report dumps, cached results,
+# fixture data). Skip auto-sweep past this size — users who really need a large
+# JSON/YAML shipped can name it explicitly via ``includes=``.
+_ADJACENT_CONFIG_MAX_BYTES = 32 * 1024
 
 
 def _adjacent_config_files(
@@ -169,7 +174,8 @@ def _adjacent_config_files(
 
     Returns ``abs_path -> rel_path`` for each. Non-recursive per directory (so a
     sibling ``data/`` full of CSVs is never swept in), known config extensions
-    only, and project-meta files (``pyproject.toml`` …) excluded.
+    only, project-meta files (``pyproject.toml`` …) excluded, and per-file size
+    capped so generated artifacts (inventory/report JSONs) don't ride along.
     """
     out: Dict[str, str] = {}
     member_dirs = {os.path.dirname(ap) for ap in members}
@@ -185,6 +191,17 @@ def _adjacent_config_files(
             if not os.path.isfile(ap) or ap in members or ap in out:
                 continue
             if not _is_under(ap, root) or _has_skip_component(ap, root):
+                continue
+            try:
+                sz = os.path.getsize(ap)
+            except OSError:
+                continue
+            if sz > _ADJACENT_CONFIG_MAX_BYTES:
+                logger.debug(
+                    f"source bundle: skipping adjacent {fn} "
+                    f"({sz} B > {_ADJACENT_CONFIG_MAX_BYTES} B cap); "
+                    f"name it in includes= if you need it shipped."
+                )
                 continue
             out[ap] = os.path.relpath(ap, root).replace(os.sep, "/")
     return out

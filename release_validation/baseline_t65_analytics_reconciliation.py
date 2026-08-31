@@ -135,25 +135,48 @@ if __name__ == "__main__":
     # return_stats is long-format -- one row per metric, columns ("metric",
     # "value") -- so scanning for a column named like "sharpe" finds nothing
     # and would wrongly report the statistic as missing.
-    reported_sharpe = None
     stats = report.return_stats
-    if stats is not None and len(stats):
+
+    def reported_statistic(needle):
+        """A named metric out of return_stats, long or wide format."""
+        if stats is None or not len(stats):
+            return None
         lowered = {str(c).lower(): c for c in stats.columns}
         if "metric" in lowered and "value" in lowered:
             rows = stats[stats[lowered["metric"]].astype(str)
-                         .str.contains("sharpe", case=False, na=False)]
-            if len(rows):
+                         .str.contains(needle, case=False, na=False)]
+            for value in rows[lowered["value"]]:
                 try:
-                    reported_sharpe = float(rows[lowered["value"]].iloc[0])
+                    return float(str(value).replace("%", "").strip())
                 except (TypeError, ValueError):
-                    reported_sharpe = None
-        else:
-            column = numeric_column(stats, "sharpe")
-            if column is not None:
-                try:
-                    reported_sharpe = float(stats[column].dropna().iloc[-1])
-                except (IndexError, ValueError):
-                    reported_sharpe = None
+                    continue
+            return None
+        column = numeric_column(stats, needle)
+        if column is None:
+            return None
+        try:
+            return float(stats[column].dropna().iloc[-1])
+        except (IndexError, TypeError, ValueError):
+            return None
+
+    reported_sharpe = reported_statistic("sharpe")
+    # The analytics report is the "reported drawdown" a user reads; the live
+    # portfolio property is a second, independent claim and is checked
+    # separately so a zero in one is not blamed on the other.
+    reported_drawdown = reported_statistic("drawdown")
+    live_drawdown = state["final"]["max_drawdown_reported"]
+
+    # A flat 2% tolerance would let a reported 0.0 "match" any drawdown smaller
+    # than 2% -- which is most of them -- so a dead statistic would pass. The
+    # tolerance has to scale with the number being checked.
+    dd_tolerance = max(0.002, computed_dd * 0.1)
+
+    def matches_dd(value):
+        """True if value is this run's drawdown, as a fraction or a percent."""
+        if value is None:
+            return False
+        return (abs(abs(value) - computed_dd) < dd_tolerance
+                or abs(abs(value) / 100.0 - computed_dd) < dd_tolerance)
 
     trade_pnl_column = numeric_column(trades, "pnl") if len(trades) else None
     trade_pnl = (float(trades[trade_pnl_column].sum())
@@ -184,11 +207,12 @@ if __name__ == "__main__":
         "equity_curve_ends_at_final_equity": bool(series) and abs(
             series[-1] - state["final"]["equity"]
         ) < max(2.0, state["final"]["equity"] * 0.001),
-        "reported_drawdown_matches_curve": abs(
-            state["final"]["max_drawdown_reported"] - computed_dd
-        ) < 0.02 or abs(
-            state["final"]["max_drawdown_reported"] / 100.0 - computed_dd
-        ) < 0.02,
+        "drawdown_reported_in_return_stats": reported_drawdown is not None,
+        "reported_drawdown_matches_curve": matches_dd(reported_drawdown),
+        # The same statistic as the strategy saw it, recomputed live from
+        # ctx.portfolio().equity bar by bar.
+        "strategy_side_drawdown_matches_curve": matches_dd(state["max_dd"]),
+        "live_portfolio_max_drawdown_matches_curve": matches_dd(live_drawdown),
         "drawdown_is_a_fraction_not_a_ratio_error": 0.0 <= computed_dd <= 1.0,
         "trades_table_reports_pnl": trade_pnl is not None,
         "trade_pnl_matches_strategy_arithmetic": (
@@ -216,7 +240,9 @@ if __name__ == "__main__":
                   f"losses={state['losses']}; equity_points={len(series)}; "
                   f"computed_sharpe={round(sharpe, 4)} reported={reported_sharpe}; "
                   f"computed_dd={round(computed_dd, 6)} "
-                  f"reported_dd={state['final']['max_drawdown_reported']}; "
+                  f"reported_dd={reported_drawdown} "
+                  f"strategy_dd={round(state['max_dd'], 6)} "
+                  f"live_portfolio_dd={live_drawdown}; "
                   f"trade_pnl={trade_pnl} strategy_pnl={round(strategy_pnl, 4)}; "
                   f"net_pnl={report.net_pnl}; final={state['final']}; "
                   f"overview={overview_ok}; tearsheet={tearsheet_ok}"))

@@ -187,8 +187,8 @@ class PrefetchContext:
         contract : str, optional
             Specific contract month code (e.g., "H25" for March 2025).
         continuous : str, optional
-            Continuous contract notation (e.g., quarterly ``ES.v.0`` or monthly
-            ``CL.c.0``).
+            Continuous contract notation ``ROOT.roll.rank`` — ``ES.c.0``
+            (calendar roll) or ``ES.v.0`` (volume roll).
         interval : str, optional
             Bar time interval. Default: "1m"
         """
@@ -224,8 +224,8 @@ class PrefetchContext:
         contract : str, optional
             Specific contract month code (e.g., "H25" for March 2025).
         continuous : str, optional
-            Continuous contract notation (e.g., quarterly ``ES.v.0`` or monthly
-            ``CL.c.0``).
+            Continuous contract notation ``ROOT.roll.rank`` — ``ES.c.0``
+            (calendar roll) or ``ES.v.0`` (volume roll).
         """
         if symbols:
             if isinstance(symbols, str):

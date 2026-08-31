@@ -18,7 +18,7 @@ users; see Migrating from KDB (§20).
 | | Values |
 |---|---|
 | Datasets / schemas | `HIVEQ_US_EQ` → `bars_1m`, `bars_1d`, `eq_trades`, `early_imbalance`; `HIVEQ_US_IND` → `indices_1m` |
-| Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES.v.0` (quarterly continuous future), `CL.c.0` (monthly continuous future) |
+| Symbols            | `AAPL`, `MSFT`, `NVDA` (equities); `ES.c.0` (calendar-roll continuous future), `ES.v.0` (volume-roll continuous future) |
 | Session            | `2025-10-13` … `2025-10-17`, `09:30:00`–`16:00:00` US/Eastern |
 | Live topics        | `market_data.equity.trades`, `signals.khawk.quant_features` |
 
@@ -1092,10 +1092,15 @@ Old-world continuous-futures notation `<ROOT><rank>!` maps to HiveQ
 The `hiveq.dd` keyword facade translates automatically; with the section API call
 `hiveq.symbol.translate(...)` yourself when needed.
 
-This translator preserves the legacy `.c` mapping for compatibility; it does
-not choose the modern convention by expiry frequency. For new configurations,
-write canonical symbols explicitly: `.v.0` for quarterly-expiring products
-such as `ES.v.0` and `NQ.v.0`, and `.c.0` for monthly-expiring products.
+The translator always emits the `.c` (calendar-roll) form, because that is what
+the legacy `<ROOT><rank>!` notation means. It does not pick a roll rule for you.
+If you want the volume-roll series instead, write the canonical symbol yourself
+(`ES.v.0`) rather than translating.
+
+Canonical continuous symbols are `ROOT.roll.rank`. The roll rule is yours to
+choose: `.c` rolls on the expiry calendar (deterministic roll dates), `.v` rolls
+when volume migrates to the next contract (tracks liquidity). Both are available
+for every root — `ES.c.0` and `ES.v.0` are both valid front-contract series.
 
 ```python
 from hiveq import symbol
@@ -1554,10 +1559,12 @@ ref.get_instruments(symbols=None, asset_class=None, start_date=None, end_date=No
                     exchange=None, currency=None, limit=None, offset=None)
 ```
 
-Continuous futures use `ROOT.RULE.POSITION`. Use `.v.0` as the standard front
-contract for quarterly-expiring products (for example `ES.v.0` and `NQ.v.0`),
-and `.c.0` for monthly-expiring products (for example `CL.c.0`). A symbol such
-as `ES.v.1` selects the volume-ranked second contract. Symbol parsing helpers live
+Continuous futures use `ROOT.RULE.POSITION`. `RULE` is the roll rule — `c` rolls
+on the expiry calendar (deterministic roll dates), `v` rolls when volume migrates
+to the next contract (tracks liquidity). `POSITION` is the rank in the chain, `0`
+being the front. So `ES.c.0` is the calendar-roll front contract, `ES.v.0` the
+volume-roll front contract, and `ES.v.1` the volume-ranked second contract. Both
+rules are available for every root; choose per strategy. Symbol parsing helpers live
 in `hiveq_data.instrument_reference.symbol_parser`, including
 `parse_futures_ticker`, `parse_continuous_symbol`, `parse_options_ticker`,
 `detect_asset_type`, `normalize_futures_symbol`, and `extract_root`.

@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -33,6 +34,14 @@ from hiveq.flow._payload import _TaskWrapper
 import hiveq.flow._payload as _payload_module  # noqa: E402
 
 cloudpickle.register_pickle_by_value(_payload_module)
+
+# A submitted callable can legitimately close over public SDK values re-exported
+# from this module (for example ``ScheduleFrequency``).  Executors intentionally
+# do not install the thin-client SDK, so such references must travel by value as
+# well.  This registration is lazy in practice: cloudpickle only embeds this
+# module when the submitted object graph actually references one of its values,
+# leaving ordinary Flow strategy payloads unchanged.
+cloudpickle.register_pickle_by_value(sys.modules[__name__])
 
 
 _DEFAULT_BASE_URL = "https://staging.hiveq.ai/api/orchestrator"
