@@ -1,4 +1,12 @@
-"""One remote strategy receives every supported market-data asset stream."""
+"""One remote strategy receives every supported market-data asset stream.
+
+Window: the six streams barely overlap. ``HIVEQ_US_EQ eq_trades`` holds nothing
+before 2026-06, and ``HIVEQ_US_EQ bars_1m`` has only two days in that era
+(2026-06-01, and 2026-07-20 for AAPL alone), so 2026-06-01..06-02 is the only
+window where all six deliver. Verified in-process 2026-08-31: eq1m=31, eq1d=2,
+trades=593117, futures=62, index=2062, snaps=335397. Do not widen to a month --
+every extra day adds rows for the other five streams but none for eq1m.
+"""
 from pathlib import Path
 import sys
 # Slice-assign, not sys.path.insert(...): the engine grafts only imports/defs/assignments
@@ -33,7 +41,7 @@ if __name__ == "__main__":
     schemas=[("HIVEQ_US_EQ","bars_1m"),("HIVEQ_US_EQ","bars_1d"),("HIVEQ_US_EQ","eq_trades"),
              ("HIVEQ_US_FUT","bars_1m"),("HIVEQ_US_IND","indices_values"),("HIVEQ_US_OPT","snaps_1s")]
     run=hf.run_backtest(strategy_configs=[StrategyConfig(name="SdkT03",type="SdkT03",symbols=["AAPL","MSFT"])],
-        symbols=["AAPL","MSFT"],start_date="2026-07-01",end_date="2026-07-31",
+        symbols=["AAPL","MSFT"],start_date="2026-06-01",end_date="2026-06-02",
         data_configs=[{"type":"hiveq_historical","dataset":d,"schema":[s]} for d,s in schemas],
         backtest_config=BacktestConfig(session_start="09:30", session_end="10:00"))
     s=completed_checkpoint(run,"t03_all_asset_types")
