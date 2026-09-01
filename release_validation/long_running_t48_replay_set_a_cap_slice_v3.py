@@ -10,7 +10,6 @@ sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import (
     export_run_artifacts,
     finish_validation,
-    open_positions,
     wait_for_final,
 )
 
@@ -181,6 +180,32 @@ def _write_table(value: Any, path: Path) -> None:
 def _total_trades_from_stats(stats: Any) -> Any:
     if stats is None:
         return None
+
+
+def _filled_order_net(orders: Any) -> dict[str, float]:
+    """Reconstruct final quantity per resolved symbol from public order rows."""
+    if orders is None or getattr(orders, "empty", True):
+        return {}
+    required = {"symbol", "side", "filled_qty"}
+    missing = required.difference(str(column) for column in orders.columns)
+    if missing:
+        raise AssertionError(
+            f"orders table cannot reconstruct final positions; missing {sorted(missing)}"
+        )
+    net: dict[str, float] = {}
+    for row in orders.to_dict("records"):
+        symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "").upper()
+        filled = float(row.get("filled_qty") or 0.0)
+        if side == "BUY":
+            signed = filled
+        elif side in {"SELL", "SHORT", "SELL_SHORT"}:
+            signed = -filled
+        else:
+            raise AssertionError(f"unknown filled order side {side!r}")
+        net[symbol] = net.get(symbol, 0.0) + signed
+    return {symbol: quantity for symbol, quantity in net.items()
+            if abs(quantity) > 1e-9}
     try:
         return stats.loc["Total Trades"]
     except Exception:
@@ -283,6 +308,7 @@ def main() -> None:
         getattr(report, "return_stats", None)
     )
     total_trades = len(trades)
+    final_open_positions = _filled_order_net(orders)
     validation = {
         "symbol": SYMBOL,
         # A string, not a bool: ``finish_validation`` turns every boolean in
@@ -292,7 +318,12 @@ def main() -> None:
         "orders": len(orders),
         "trades": total_trades,
         "positions": len(positions),
-        "open_positions": int(len(open_positions(positions))),
+        # run.positions() currently returns one historical opened-position row
+        # per completed trade for this replay, so it is not a current-position
+        # snapshot. Reconstruct the terminal net from filled public order rows.
+        "open_positions": len(final_open_positions),
+        "final_open_position_qty": final_open_positions,
+        "positions_table_semantics": "historical rows; final net reconstructed from orders",
         # Kept for visibility: return_stats has no "Total Trades" metric, so
         # this is expected to be None and must not gate the result.
         "total_trades_stat": total_trades_stat,
@@ -300,7 +331,7 @@ def main() -> None:
         "fixture_md5": fixture["md5"],
         "fixture_size": fixture["size"],
         "fixture_force_uploaded": fixture["uploaded"],
-        "passed": bool(total_trades and len(open_positions(positions)) == 0),
+        "passed": bool(total_trades and not final_open_positions),
     }
     artifacts = export_run_artifacts(run, validation=validation)
     print(f"total_trades={total_trades}")
