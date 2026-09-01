@@ -7,7 +7,7 @@ import math
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import open_positions as open_position_rows, completed_checkpoint, emit_checkpoint, finish
+from qa_common import completed_checkpoint, emit_checkpoint, finish
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -15,6 +15,24 @@ from hiveq.flow.config import AssetType
 
 
 SYMBOL = "ES.v.0"
+
+
+def _filled_order_net(orders) -> dict[str, float]:
+    """Reconstruct terminal quantity per contract from public order rows."""
+    net = {}
+    for row in orders.to_dict("records"):
+        symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "").upper()
+        filled = float(row.get("filled_qty") or 0.0)
+        if side == "BUY":
+            signed = filled
+        elif side in {"SELL", "SHORT", "SELL_SHORT"}:
+            signed = -filled
+        else:
+            raise AssertionError(f"unknown filled order side {side!r}")
+        net[symbol] = net.get(symbol, 0.0) + signed
+    return {symbol: quantity for symbol, quantity in net.items()
+            if abs(quantity) > 1e-9}
 
 
 class SdkT55FuturesSessionDailyBars:
@@ -176,7 +194,8 @@ if __name__ == "__main__":
     )
     print(f"run_id={run.run_id} task_id={run.task_id}", flush=True)
     state = completed_checkpoint(run, "t55_futures_session_daily_bars")
-    positions = run.positions()
+    orders = run.orders()
+    final_open_positions = _filled_order_net(orders)
     placed = state["orders_placed"]
     finish("t55_futures_session_daily_bars", {
         "ten_year_daily_data_present": state["daily_bars"] >= 2400,
@@ -209,5 +228,8 @@ if __name__ == "__main__":
         ),
         # Both legs are placed in the same session, so nothing may be held.
         "flat_after_every_session": state["final_position"] == 0.0,
-        "positions_reconcilable": open_position_rows(positions).empty,
-    }, extra=str(state))
+        # run.positions() is historical for this run (one opened-position row
+        # per completed trade), not a current-position snapshot. Independently
+        # reconcile flatness from the filled public orders per resolved contract.
+        "filled_orders_reconcile_flat": not final_open_positions,
+    }, extra=f"{state}; final_open_position_qty={final_open_positions}")
