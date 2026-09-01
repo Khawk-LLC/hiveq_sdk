@@ -94,11 +94,13 @@ def test_phase(test: Path) -> str:
     raise ValueError(f"validation has no suite prefix: {test.name}")
 
 
-def test_number(test: Path) -> int:
-    match = re.match(r"(?:baseline|long_running)_t([0-9]{2})_", test.name)
+def test_number(test: Path) -> tuple[int, str]:
+    # Companion cases (e.g. t10b, t10c) share the parent's numeric slot but
+    # sort after it via the letter suffix. Bare cases collate as "" first.
+    match = re.match(r"(?:baseline|long_running)_t([0-9]{2})([a-z]?)_", test.name)
     if not match:
         raise ValueError(f"invalid validation filename: {test.name}")
-    return int(match.group(1))
+    return int(match.group(1)), match.group(2)
 
 
 def baseline_passed(rows: list[dict]) -> bool:
@@ -382,10 +384,12 @@ def main() -> int:
     tests = []
     candidates = [
         *HERE.glob("baseline_t[0-9][0-9]_*.py"),
+        *HERE.glob("baseline_t[0-9][0-9][a-z]_*.py"),
         *HERE.glob("long_running_t[0-9][0-9]_*.py"),
+        *HERE.glob("long_running_t[0-9][0-9][a-z]_*.py"),
     ]
     for test in sorted(candidates, key=lambda path: test_number(path)):
-        number = test_number(test)
+        number, _suffix = test_number(test)
         if number < start_at:
             continue
         if number in skipped:

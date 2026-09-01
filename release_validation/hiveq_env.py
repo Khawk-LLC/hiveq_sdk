@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 
 PROFILES: dict[str, dict[str, str]] = {
-    "localhost": {
+    "local": {
         "HIVEQ_AUTH_URL": "http://localhost",
         "HIVEQ_BASE_URL": "http://localhost/api/orchestrator",
         "HIVEQ_DATA_URL": "http://localhost",

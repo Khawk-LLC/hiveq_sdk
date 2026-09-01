@@ -3,13 +3,13 @@
 ## Selecting a test environment
 
 Release validators remain environment-agnostic. Use the repository-only
-launcher to select `localhost`, `vm`, or `staging` without editing a validation
+launcher to select `local`, `vm`, or `staging` without editing a validation
 or sharing credentials between platforms:
 
 ```bash
 python release_validation/hiveq_env.py check vm
 python release_validation/hiveq_env.py run vm release_validation/long_running_t49_long_rollover_buy_hold.py
-python release_validation/hiveq_env.py run localhost release_validation/run_all.py --suite baseline
+python release_validation/hiveq_env.py run local release_validation/run_all.py --suite baseline
 ```
 
 The first use of a profile opens that platform's browser sign-in. Credentials
@@ -26,7 +26,7 @@ validation strategies, or public package code.
 
 The repository includes three shared run configurations under `.run/`:
 
-* `HiveQ Validation - Localhost`
+* `HiveQ Validation - Local`
 * `HiveQ Validation - VM`
 * `HiveQ Validation - Staging`
 
