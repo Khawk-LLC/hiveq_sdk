@@ -192,9 +192,10 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
     strategy result — retrying it keeps an unrelated gateway hiccup from being
     reported as a validation failure. A newly submitted run can also return
     404 briefly while its run metadata is materializing, so that specific
-    ``run.status()`` response is retried as well. Every retry is printed so a
-    flaky environment stays visible rather than silently absorbed. Other
-    client errors (4xx) and non-HTTP exceptions propagate unchanged.
+    ``run.status()`` response is retried silently. It is an expected propagation
+    delay immediately after a successful submit, not a useful warning. Other
+    transient faults remain visible, while non-transient client errors (4xx)
+    and non-HTTP exceptions propagate unchanged.
     """
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -213,11 +214,12 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
             if not transient:
                 raise
             last_exc = exc
-            print(
-                f"[RETRY] {what}: transient platform fault "
-                f"({status or exc.__class__.__name__}); attempt {attempt}/{attempts}",
-                flush=True,
-            )
+            if not (status == 404 and what == "run.status()"):
+                print(
+                    f"[RETRY] {what}: transient platform fault "
+                    f"({status or exc.__class__.__name__}); attempt {attempt}/{attempts}",
+                    flush=True,
+                )
             time.sleep(delay)
     raise last_exc
 

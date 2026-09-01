@@ -21,7 +21,7 @@ DEFAULT_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_TIMEOUT_SECONDS = 14400
 BASELINE_PREFIX = "baseline_"
 LONG_RUNNING_PREFIX = "long_running_"
-SUITE_CONCURRENCY = 1
+SUITE_CONCURRENCY = 2
 # Remote platform submissions: a timeout means the client gave up, not that the
 # run stopped -- an abandoned run can still be active server-side, so the suite
 # halts rather than submitting another strategy on top of it. Set to True only
@@ -51,7 +51,10 @@ def validation_environment(export_orders: bool) -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        if key.startswith("HIVEQ_"):
+        # An explicit launcher/shell profile wins over the legacy suite file.
+        # Otherwise `hiveq_env.py run vm .../run_all.py` can be silently
+        # redirected by release_validation/.env to a different platform.
+        if key.startswith("HIVEQ_") and key not in env:
             env[key] = value.strip().strip('"').strip("'")
     # qa_common applies this to every BacktestConfig constructed by a
     # validation. Local (in-memory) result readers require the streamed order
@@ -94,11 +97,13 @@ def test_phase(test: Path) -> str:
     raise ValueError(f"validation has no suite prefix: {test.name}")
 
 
-def test_number(test: Path) -> int:
-    match = re.match(r"(?:baseline|long_running)_t([0-9]{2})_", test.name)
+def test_number(test: Path) -> tuple[int, str]:
+    # Companion cases (e.g. t10b, t10c) share the parent's numeric slot but
+    # sort after it via the letter suffix. Bare cases collate as "" first.
+    match = re.match(r"(?:baseline|long_running)_t([0-9]{2})([a-z]?)_", test.name)
     if not match:
         raise ValueError(f"invalid validation filename: {test.name}")
-    return int(match.group(1))
+    return int(match.group(1)), match.group(2)
 
 
 def baseline_passed(rows: list[dict]) -> bool:
@@ -168,6 +173,9 @@ def write_html_report(rows: list[dict], report: Path, suite_id: str,
     if gate_failed:
         gate_text = "CLOSED — baseline failed; remaining validations were stopped"
         gate_class = "closed"
+    elif requested_suite == "long-running":
+        gate_text = "BYPASSED — running long validations directly"
+        gate_class = "neutral"
     elif len(baseline_rows) < expected_baseline:
         gate_text = "PENDING — baseline is still running"
         gate_class = "neutral"
@@ -241,7 +249,9 @@ def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
     line = ""
     output = ""
     unsafe_to_continue = False
-    for attempt in range(1, MAX_CONCURRENT_RETRIES + 1):
+    attempt = 0
+    while True:
+        attempt += 1
         try:
             timeout = (LONG_TEST_TIMEOUT_SECONDS if phase == "long-running"
                        else DEFAULT_TEST_TIMEOUT_SECONDS)
@@ -251,11 +261,17 @@ def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
             )
             output = (proc.stdout or "") + (proc.stderr or "")
             if is_max_concurrent(output):
+                attempt_text = (
+                    f"{attempt}/{MAX_CONCURRENT_RETRIES}"
+                    if LOCAL_RUNS else str(attempt)
+                )
                 print(
                     f"[WAIT ] {test.name}: platform concurrency limit "
-                    f"(attempt {attempt}/{MAX_CONCURRENT_RETRIES})",
+                    f"(attempt {attempt_text}; waiting for a free slot)",
                     flush=True,
                 )
+                if LOCAL_RUNS and attempt >= MAX_CONCURRENT_RETRIES:
+                    break
                 time.sleep(RETRY_DELAY_SECONDS)
                 continue
             result = [x for x in output.splitlines() if x.startswith("RESULT:")]
@@ -292,7 +308,7 @@ def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
     if not line:
         line = (
             f"RESULT: ERROR {test.name} — platform concurrency limit persisted "
-            f"after {MAX_CONCURRENT_RETRIES} retries"
+            f"after {MAX_CONCURRENT_RETRIES} local retries"
         )
         unsafe_to_continue = True
     status = line.split()[1] if len(line.split()) > 1 else "ERROR"
@@ -350,14 +366,25 @@ def run_phase(tests: list[Path], rows: list[dict], env: dict[str, str],
 
 
 def main() -> int:
+    global LOCAL_RUNS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--suite", choices=("baseline", "all"), default="all",
-        help="run the quick baseline only, or baseline then gated long-running tests",
+        "--suite", choices=("baseline", "all", "long-running"), default="all",
+        help="run the quick baseline, the gated full suite, or long-running tests directly",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--local-runs", dest="local_runs", action="store_true",
+        default=None,
+        help="treat runs as in-process engine executions",
+    )
+    mode.add_argument(
+        "--remote-runs", dest="local_runs", action="store_false",
+        help="treat runs as remote platform submissions",
     )
     parser.add_argument(
         "--export-orders", dest="export_orders", action="store_true",
-        default=LOCAL_RUNS,
+        default=None,
         help="stream every order event to a local CSV so in-memory runs can "
              "read back orders/fills (required for LOCAL_RUNS validations)",
     )
@@ -366,7 +393,12 @@ def main() -> int:
         help="disable local order-event capture",
     )
     args = parser.parse_args()
-    env = validation_environment(args.export_orders)
+    if args.local_runs is not None:
+        LOCAL_RUNS = args.local_runs
+    export_orders = (
+        LOCAL_RUNS if args.export_orders is None else args.export_orders
+    )
+    env = validation_environment(export_orders)
     start_at = int(env.get("RELEASE_VALIDATION_START", "0"))
     skipped = {
         int(item.strip()) for item in env.get("RELEASE_VALIDATION_SKIP", "").split(",")
@@ -382,10 +414,12 @@ def main() -> int:
     tests = []
     candidates = [
         *HERE.glob("baseline_t[0-9][0-9]_*.py"),
+        *HERE.glob("baseline_t[0-9][0-9][a-z]_*.py"),
         *HERE.glob("long_running_t[0-9][0-9]_*.py"),
+        *HERE.glob("long_running_t[0-9][0-9][a-z]_*.py"),
     ]
     for test in sorted(candidates, key=lambda path: test_number(path)):
-        number = test_number(test)
+        number, _suffix = test_number(test)
         if number < start_at:
             continue
         if number in skipped:
@@ -395,11 +429,17 @@ def main() -> int:
 
     baseline_tests = [test for test in tests if test_phase(test) == "baseline"]
     long_tests = [test for test in tests if test_phase(test) == "long-running"]
-    safe = run_phase(
-        baseline_tests, rows, env, log_dir, report, suite_id, args.suite,
-        len(baseline_tests),
-    )
-    gate_open = safe and baseline_passed(rows)
+    if args.suite == "long-running":
+        run_phase(
+            long_tests, rows, env, log_dir, report, suite_id, args.suite, 0,
+        )
+        write_html_report(rows, report, suite_id, args.suite, 0)
+    else:
+        safe = run_phase(
+            baseline_tests, rows, env, log_dir, report, suite_id, args.suite,
+            len(baseline_tests),
+        )
+        gate_open = safe and baseline_passed(rows)
     if args.suite == "all" and gate_open:
         print("Baseline passed; starting long-running validations.", flush=True)
         run_phase(
@@ -415,7 +455,7 @@ def main() -> int:
             })
         rows.sort(key=lambda item: item["test"])
         write_html_report(rows, report, suite_id, args.suite, len(baseline_tests))
-    else:
+    elif args.suite == "baseline":
         write_html_report(rows, report, suite_id, args.suite, len(baseline_tests))
     print("\n" + "=" * 78)
     print("HIVEQ SDK INSTALLED-WHEEL RELEASE SCORECARD")

@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
+from qa_common import finish_validation, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -79,9 +79,26 @@ def _state(value):
     return value if isinstance(value, dict) else {}
 
 
+def _filled_order_net(orders) -> dict[str, float]:
+    """Reconstruct terminal quantity from the public filled-order rows."""
+    net = {}
+    for row in orders.to_dict("records"):
+        symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "").upper()
+        filled = float(row.get("filled_qty") or 0.0)
+        if side == "BUY":
+            signed = filled
+        elif side in {"SELL", "SHORT", "SELL_SHORT"}:
+            signed = -filled
+        else:
+            raise AssertionError(f"unknown filled order side {side!r}")
+        net[symbol] = net.get(symbol, 0.0) + signed
+    return {symbol: quantity for symbol, quantity in net.items()
+            if abs(quantity) > 1e-9}
+
+
 def analyze(run) -> dict:
     orders = run.orders()
-    positions = run.positions()
     events = run.event_logs().sort_values("ts_event")
     snapshots = {}
     for phase in ("OVERNIGHT_BOUNDARY_POSITION", "AFTER_MIDNIGHT_POSITION",
@@ -92,16 +109,19 @@ def analyze(run) -> dict:
         state is not None and float(state.get("quantity", 0)) == QUANTITY
         for state in snapshots.values()
     )
-    open_positions = open_position_rows(positions)
+    open_positions = _filled_order_net(orders)
+    position_closed = bool((events["sub_event_type"] == "POSITION_CLOSED").any())
     all_filled = len(orders) == 2 and bool((orders["status"] == "FILLED").all())
     result = {
         "symbol": SYMBOL, "expected_quantity": QUANTITY, "orders": len(orders),
         "all_orders_filled": all_filled, "position_snapshots": snapshots,
         "held_at_boundary_midnight_and_pre_exit": held_at_every_checkpoint,
         "open_positions_after_exit": len(open_positions),
+        "final_open_position_qty": open_positions,
+        "position_closed_event": position_closed,
     }
     result["passed"] = bool(all_filled and held_at_every_checkpoint
-                            and len(open_positions) == 0)
+                            and position_closed and not open_positions)
     return result
 
 

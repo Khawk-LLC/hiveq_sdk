@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -9,7 +10,6 @@ sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import (
     export_run_artifacts,
     finish_validation,
-    open_positions,
     wait_for_final,
 )
 
@@ -38,6 +38,47 @@ OUTPUT_DIR = (
 )
 SENSITIVE_OUTPUT_COLUMNS = {"user_id", "user_name", "org_id", "trader_id", "account_id"}
 DEFAULT_BACKTEST_CONFIG = BacktestConfig()
+
+
+def upload_replay_fixture() -> dict[str, Any]:
+    """Force-upload and verify the replay CSV before submitting the backtest."""
+    suite_root = Path(__file__).resolve().parent
+    local_userdata = suite_root / USERDATA_PATH
+    if not local_userdata.is_file():
+        raise FileNotFoundError(
+            f"Required replay fixture is not bundled: {local_userdata}. "
+            "The backtest was not submitted."
+        )
+
+    local_md5 = hashlib.md5(local_userdata.read_bytes()).hexdigest()
+    upload = hf.upload_files(
+        str(local_userdata),
+        base=str(suite_root),
+        force=True,
+        progress=False,
+    )
+    remote = next(
+        (item for item in hf.list_files(str(Path(USERDATA_PATH).parent))
+         if item.get("path") == USERDATA_PATH),
+        None,
+    )
+    if remote is None:
+        raise RuntimeError(
+            f"Replay fixture upload did not create remote path {USERDATA_PATH!r}. "
+            "The backtest was not submitted."
+        )
+    remote_md5 = str(remote.get("md5") or "")
+    if remote_md5 != local_md5:
+        raise RuntimeError(
+            f"Replay fixture checksum mismatch at {USERDATA_PATH!r}: "
+            f"local={local_md5}, remote={remote_md5}. The backtest was not submitted."
+        )
+    return {
+        "path": USERDATA_PATH,
+        "md5": local_md5,
+        "size": local_userdata.stat().st_size,
+        "uploaded": USERDATA_PATH in upload.get("uploaded", []),
+    }
 
 
 class SdkT48ReplaySetACapSliceV3:
@@ -139,6 +180,32 @@ def _write_table(value: Any, path: Path) -> None:
 def _total_trades_from_stats(stats: Any) -> Any:
     if stats is None:
         return None
+
+
+def _filled_order_net(orders: Any) -> dict[str, float]:
+    """Reconstruct final quantity per resolved symbol from public order rows."""
+    if orders is None or getattr(orders, "empty", True):
+        return {}
+    required = {"symbol", "side", "filled_qty"}
+    missing = required.difference(str(column) for column in orders.columns)
+    if missing:
+        raise AssertionError(
+            f"orders table cannot reconstruct final positions; missing {sorted(missing)}"
+        )
+    net: dict[str, float] = {}
+    for row in orders.to_dict("records"):
+        symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "").upper()
+        filled = float(row.get("filled_qty") or 0.0)
+        if side == "BUY":
+            signed = filled
+        elif side in {"SELL", "SHORT", "SELL_SHORT"}:
+            signed = -filled
+        else:
+            raise AssertionError(f"unknown filled order side {side!r}")
+        net[symbol] = net.get(symbol, 0.0) + signed
+    return {symbol: quantity for symbol, quantity in net.items()
+            if abs(quantity) > 1e-9}
     try:
         return stats.loc["Total Trades"]
     except Exception:
@@ -155,19 +222,12 @@ def _total_trades_from_stats(stats: Any) -> Any:
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    local_userdata = Path(__file__).resolve().parent / "data" / USERDATA_PATH
     # A platform run executes remotely and cannot open a path on this machine,
     # so the replay fixture is streamed to the persistent-data store and then
     # referenced by USERDATA_PATH -- the relative name it is stored under.
     # Passing the absolute local path yields a run with no custom rows, hence no
     # replayed orders at all, and no error to say why.
-    upload_error = ""
-    try:
-        hf.upload_files(str(local_userdata),
-                        base=str(Path(__file__).resolve().parent / "data"),
-                        progress=False)
-    except Exception as exc:                               # noqa: BLE001
-        upload_error = str(exc)[:200]
+    fixture = upload_replay_fixture()
     backtest_config = BacktestConfig(
         symbols=[SYMBOL],
         start_date=START_DATE,
@@ -231,6 +291,7 @@ def main() -> None:
         "enable_auto_rollover": False,
         "auto_flatten_at_close": False,
         "task_name": TASK_NAME,
+        "fixture": fixture,
     }
     (OUTPUT_DIR / "run_metadata.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"
@@ -247,6 +308,7 @@ def main() -> None:
         getattr(report, "return_stats", None)
     )
     total_trades = len(trades)
+    final_open_positions = _filled_order_net(orders)
     validation = {
         "symbol": SYMBOL,
         # A string, not a bool: ``finish_validation`` turns every boolean in
@@ -256,12 +318,20 @@ def main() -> None:
         "orders": len(orders),
         "trades": total_trades,
         "positions": len(positions),
-        "open_positions": int(len(open_positions(positions))),
+        # run.positions() currently returns one historical opened-position row
+        # per completed trade for this replay, so it is not a current-position
+        # snapshot. Reconstruct the terminal net from filled public order rows.
+        "open_positions": len(final_open_positions),
+        "final_open_position_qty": final_open_positions,
+        "positions_table_semantics": "historical rows; final net reconstructed from orders",
         # Kept for visibility: return_stats has no "Total Trades" metric, so
         # this is expected to be None and must not gate the result.
         "total_trades_stat": total_trades_stat,
-        "upload_error": upload_error,
-        "passed": bool(total_trades and len(open_positions(positions)) == 0),
+        "fixture_path": fixture["path"],
+        "fixture_md5": fixture["md5"],
+        "fixture_size": fixture["size"],
+        "fixture_force_uploaded": fixture["uploaded"],
+        "passed": bool(total_trades and not final_open_positions),
     }
     artifacts = export_run_artifacts(run, validation=validation)
     print(f"total_trades={total_trades}")

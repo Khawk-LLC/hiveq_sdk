@@ -8,9 +8,9 @@ Field-level coverage for the trade DTO. Each field is classified:
 * KNOWN-EMPTY - legitimately always empty; asserted empty *with a reason* so the
                 field stays covered instead of silently dropping out of the suite
 
-The KNOWN-EMPTY class matters: ``trade_id`` has no engine field behind it, and
-``raw_trade_condition`` is only populated by the HiveQ adapter. Asserting them
-empty (rather than skipping) means this test fails loudly if that ever changes.
+The KNOWN-EMPTY class matters: ``trade_id`` has no engine field behind it.
+Asserting it empty (rather than skipping) means this test fails loudly if
+that ever changes.
 """
 from pathlib import Path
 import sys
@@ -39,7 +39,6 @@ class SdkT47:
             "exchange_values": {},
             "exchange_types": {},
             "aggressor_values": {},
-            "raw_condition_values": {},
             "exchange_raw_values": {},
             "condition_raw_values": {},
             "undefined_venue_ticks": 0,
@@ -122,13 +121,6 @@ class SdkT47:
                     s["last_price_other"] += 1
 
             # --- KNOWN-EMPTY -------------------------------------------------
-            rtc = t.raw_trade_condition
-            if isinstance(rtc, int):
-                self._bump("populated", "raw_trade_condition")
-                self._bump("raw_condition_values", str(rtc))
-            else:
-                self._bump("bad", "raw_trade_condition")
-
             if t.trade_id != "":
                 s["trade_id_nonempty"] += 1
             self._bump("populated", "trade_id")   # readable; emptiness asserted below
@@ -164,7 +156,6 @@ class SdkT47:
                     "size": float(t.size),
                     "last_price": float(lp),
                     "condition": str(getattr(cond, "name", cond)),
-                    "raw_trade_condition": rtc,
                     "exchange": str(getattr(exch, "name", exch)),
                     "market_center": str(getattr(t.market_center, "name", t.market_center)),
                     "aggressor_side": side,
@@ -187,8 +178,8 @@ if __name__ == "__main__":
         start_date="2026-08-12",
         end_date="2026-08-12",
         # eq_trades, not tbbo: the engine's TBBO parser hardcodes
-        # TradeCondition::Regular and never calls setExchange/setRawTradeCondition,
-        # so a tbbo-backed run cannot exercise condition/exchange/raw at all.
+        # TradeCondition::Regular and never calls setExchange, so a
+        # tbbo-backed run cannot exercise condition/exchange at all.
         # The eq_trades path runs resolveTradeCondition() and parseExchange().
         data_configs=[{
             "type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["eq_trades"],
@@ -203,7 +194,7 @@ if __name__ == "__main__":
     fields = [
         "symbol", "price", "size", "ts_event", "time", "time_utc",
         "condition", "exchange", "market_center", "aggressor_side",
-        "last_price", "raw_trade_condition", "trade_id", "exchange_raw", "condition_raw",
+        "last_price", "trade_id", "exchange_raw", "condition_raw",
     ]
 
     print(f"\ntrades observed: {n:,}")
@@ -216,7 +207,6 @@ if __name__ == "__main__":
     print(f"exchange types       : {state['exchange_types']}")
     print(f"exchange values      : {state['exchange_values']}")
     print(f"aggressor values     : {state['aggressor_values']}")
-    print(f"raw_trade_condition  : {state['raw_condition_values']}")
     print(f"exchange_raw values  : {state['exchange_raw_values']}")
     print(f"condition_raw values : {state['condition_raw_values']}")
     print(f"undefined venues     : {state['undefined_venue_ticks']:,} ticks, "
@@ -264,9 +254,6 @@ if __name__ == "__main__":
     # --- KNOWN-EMPTY: assert empty *with a reason* so a change fails loudly
     # engine TradeData has no per-print trade id field
     checks["trade_id_known_empty"] = state["trade_id_nonempty"] == 0
-    # the API returns the condition as a string (resolved into `condition`);
-    # the numeric raw code is not carried, so this stays 0 on this feed
-    checks["raw_condition_known_zero"] = set(state["raw_condition_values"]) == {"0"}
     # condition_raw must carry real text -- it is the only record of what the
     # feed actually sent, since the enum mapping is lossy.
     craw = state["condition_raw_values"]
