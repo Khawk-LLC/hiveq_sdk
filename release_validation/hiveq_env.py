@@ -225,7 +225,13 @@ def main(argv: list[str] | None = None) -> int:
         program = args.program.resolve()
         if not program.is_file():
             raise ProfileError(f"Validation program does not exist: {program}")
-        command = [args.python, str(program), *args.arguments]
+        program_arguments = list(args.arguments)
+        if program.name == "run_all.py" and not any(
+            argument in {"--local-runs", "--remote-runs"}
+            for argument in program_arguments
+        ):
+            program_arguments.append("--remote-runs")
+        command = [args.python, str(program), *program_arguments]
         print(f"running={' '.join(command)}", flush=True)
         return subprocess.call(command, env=child_environment(args.profile, key))
     except (KeyboardInterrupt, ProfileError) as error:

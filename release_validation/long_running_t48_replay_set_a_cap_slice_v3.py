@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -38,6 +39,47 @@ OUTPUT_DIR = (
 )
 SENSITIVE_OUTPUT_COLUMNS = {"user_id", "user_name", "org_id", "trader_id", "account_id"}
 DEFAULT_BACKTEST_CONFIG = BacktestConfig()
+
+
+def upload_replay_fixture() -> dict[str, Any]:
+    """Force-upload and verify the replay CSV before submitting the backtest."""
+    suite_root = Path(__file__).resolve().parent
+    local_userdata = suite_root / USERDATA_PATH
+    if not local_userdata.is_file():
+        raise FileNotFoundError(
+            f"Required replay fixture is not bundled: {local_userdata}. "
+            "The backtest was not submitted."
+        )
+
+    local_md5 = hashlib.md5(local_userdata.read_bytes()).hexdigest()
+    upload = hf.upload_files(
+        str(local_userdata),
+        base=str(suite_root),
+        force=True,
+        progress=False,
+    )
+    remote = next(
+        (item for item in hf.list_files(str(Path(USERDATA_PATH).parent))
+         if item.get("path") == USERDATA_PATH),
+        None,
+    )
+    if remote is None:
+        raise RuntimeError(
+            f"Replay fixture upload did not create remote path {USERDATA_PATH!r}. "
+            "The backtest was not submitted."
+        )
+    remote_md5 = str(remote.get("md5") or "")
+    if remote_md5 != local_md5:
+        raise RuntimeError(
+            f"Replay fixture checksum mismatch at {USERDATA_PATH!r}: "
+            f"local={local_md5}, remote={remote_md5}. The backtest was not submitted."
+        )
+    return {
+        "path": USERDATA_PATH,
+        "md5": local_md5,
+        "size": local_userdata.stat().st_size,
+        "uploaded": USERDATA_PATH in upload.get("uploaded", []),
+    }
 
 
 class SdkT48ReplaySetACapSliceV3:
@@ -155,19 +197,12 @@ def _total_trades_from_stats(stats: Any) -> Any:
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    local_userdata = Path(__file__).resolve().parent / "data" / USERDATA_PATH
     # A platform run executes remotely and cannot open a path on this machine,
     # so the replay fixture is streamed to the persistent-data store and then
     # referenced by USERDATA_PATH -- the relative name it is stored under.
     # Passing the absolute local path yields a run with no custom rows, hence no
     # replayed orders at all, and no error to say why.
-    upload_error = ""
-    try:
-        hf.upload_files(str(local_userdata),
-                        base=str(Path(__file__).resolve().parent / "data"),
-                        progress=False)
-    except Exception as exc:                               # noqa: BLE001
-        upload_error = str(exc)[:200]
+    fixture = upload_replay_fixture()
     backtest_config = BacktestConfig(
         symbols=[SYMBOL],
         start_date=START_DATE,
@@ -231,6 +266,7 @@ def main() -> None:
         "enable_auto_rollover": False,
         "auto_flatten_at_close": False,
         "task_name": TASK_NAME,
+        "fixture": fixture,
     }
     (OUTPUT_DIR / "run_metadata.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"
@@ -260,7 +296,10 @@ def main() -> None:
         # Kept for visibility: return_stats has no "Total Trades" metric, so
         # this is expected to be None and must not gate the result.
         "total_trades_stat": total_trades_stat,
-        "upload_error": upload_error,
+        "fixture_path": fixture["path"],
+        "fixture_md5": fixture["md5"],
+        "fixture_size": fixture["size"],
+        "fixture_force_uploaded": fixture["uploaded"],
         "passed": bool(total_trades and len(open_positions(positions)) == 0),
     }
     artifacts = export_run_artifacts(run, validation=validation)

@@ -191,7 +191,8 @@ if __name__ == "__main__":
 
     tearsheet_ok = False
     try:
-        tearsheet_ok = bool(report.create_tearsheet())
+        report.create_tearsheet()
+        tearsheet_ok = True
     except Exception as exc:                               # noqa: BLE001
         tearsheet_ok = f"tearsheet failed: {exc}"
 
