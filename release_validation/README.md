@@ -1,5 +1,42 @@
 # HiveQ SDK installed-wheel release validation
 
+## Selecting a test environment
+
+Release validators remain environment-agnostic. Use the repository-only
+launcher to select `localhost`, `vm`, or `staging` without editing a validation
+or sharing credentials between platforms:
+
+```bash
+python release_validation/hiveq_env.py check vm
+python release_validation/hiveq_env.py run vm release_validation/long_running_t49_long_rollover_buy_hold.py
+python release_validation/hiveq_env.py run localhost release_validation/run_all.py --suite baseline
+```
+
+The first use of a profile opens that platform's browser sign-in. Credentials
+are stored separately in `~/.hiveq/profiles/<profile>.env` with mode `0600`.
+The launcher clears inherited `HIVEQ_*` values before starting the validator,
+performs health and authentication checks, and passes configuration only via
+the child process environment. `login <profile>` forces credential renewal.
+
+This launcher is QA infrastructure, not public SDK functionality. It is outside
+`src/`, is not installed by setuptools, and must not be imported by examples,
+validation strategies, or public package code.
+
+### Running one validation from PyCharm
+
+The repository includes three shared run configurations under `.run/`:
+
+* `HiveQ Validation - Localhost`
+* `HiveQ Validation - VM`
+* `HiveQ Validation - Staging`
+
+Open the validation `.py` file you want to execute so it is the active editor
+file, select the desired configuration in PyCharm's run-configuration dropdown,
+and choose **Run** or **Debug**. The configuration passes PyCharm's `$FilePath$`
+macro to the same profile launcher used on the command line. It uses the
+project's configured Python interpreter and never adds environment logic to the
+selected validation file.
+
 This suite deduplicates and translates the validation behaviors from the 165
 Python files under `hiveq-flow/examples/bt`
 to the thin SDK's real execution model. Strategies run remotely, persist their

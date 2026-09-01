@@ -21,7 +21,7 @@ DEFAULT_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_TIMEOUT_SECONDS = 14400
 BASELINE_PREFIX = "baseline_"
 LONG_RUNNING_PREFIX = "long_running_"
-SUITE_CONCURRENCY = 1
+SUITE_CONCURRENCY = 2
 # Remote platform submissions: a timeout means the client gave up, not that the
 # run stopped -- an abandoned run can still be active server-side, so the suite
 # halts rather than submitting another strategy on top of it. Set to True only
