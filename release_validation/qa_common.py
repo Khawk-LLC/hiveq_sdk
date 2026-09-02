@@ -298,6 +298,42 @@ def _event_logs(run: Any) -> Any:
     return logs
 
 
+def event_logs_until(run: Any, sub_event_type: str, timeout: float = 180.0,
+                     poll_interval: float = 3.0) -> Any:
+    """Event logs, polled until ``sub_event_type`` is present.
+
+    A run reaching DONE/is_final does not mean its event_logs table has
+    finished materializing. The summary row a strategy emits from ``on_stop``
+    is the last to land, so a read taken immediately after ``wait_for_final``
+    can come back complete-looking but one row short and score a healthy run
+    as a failure -- t54 did exactly that on 2026-09-01: every threshold in its
+    SCALP_SUMMARY was satisfied, but ``analyze`` read before the row appeared
+    and reported ``summary={}``, while the artifact export moments later wrote
+    the full row to disk.
+
+    ``_read_with_retry`` does not cover this: it retries transient HTTP faults,
+    not a successful read of an incomplete table. Only polling for the specific
+    row does. Mirrors :func:`checkpoint`, which already waits this way.
+
+    Returns the frame as soon as the row appears, or the last frame read at
+    timeout (so the caller's own assertion reports the miss, with its own
+    diagnostics, rather than raising from here).
+    """
+    deadline = time.monotonic() + timeout
+    logs = _event_logs(run)
+    while True:
+        if (logs is not None and not getattr(logs, "empty", True)
+                and "sub_event_type" in logs
+                and (logs["sub_event_type"] == sub_event_type).any()):
+            return logs
+        if time.monotonic() >= deadline:
+            print(f"[WARN] {sub_event_type} still absent after {timeout:.0f}s "
+                  "of event-log persistence wait", flush=True)
+            return logs
+        time.sleep(poll_interval)
+        logs = _event_logs(run)
+
+
 def checkpoint(run: Any, name: str, timeout: float = 30.0) -> dict[str, Any]:
     """Read a checkpoint, allowing for asynchronous event-log persistence."""
     deadline = time.monotonic() + timeout

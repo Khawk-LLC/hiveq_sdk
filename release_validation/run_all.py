@@ -21,7 +21,11 @@ DEFAULT_TEST_TIMEOUT_SECONDS = 14400
 LONG_TEST_TIMEOUT_SECONDS = 14400
 BASELINE_PREFIX = "baseline_"
 LONG_RUNNING_PREFIX = "long_running_"
-SUITE_CONCURRENCY = 1
+# The platform accepts a small number of concurrent runs -- about two active at
+# once; submissions beyond the cap come back 429. Two is the default; override
+# with RELEASE_VALIDATION_CONCURRENCY (1 to serialise, higher only when the
+# platform is known to have more capacity).
+SUITE_CONCURRENCY = max(1, int(os.environ.get("RELEASE_VALIDATION_CONCURRENCY", "2")))
 # Remote platform submissions: a timeout means the client gave up, not that the
 # run stopped -- an abandoned run can still be active server-side, so the suite
 # halts rather than submitting another strategy on top of it. Set to True only
@@ -234,6 +238,23 @@ def artifacts_for_output(output: str, before: dict[Path, int]) -> list[Path]:
     return matched or changed_artifacts(before)
 
 
+def decoded(stream: str | bytes | None) -> str:
+    """Return captured output as text.
+
+    ``subprocess.TimeoutExpired`` carries the raw *bytes* it captured even when
+    the call asked for text, so concatenating its ``stdout`` and ``stderr``
+    used to raise ``TypeError: can't concat str to bytes``. That escaped
+    ``run_test``, propagated through ``future.result()`` and killed the whole
+    suite before the scorecard was written -- a timed-out validation took every
+    completed result down with it.
+    """
+    if stream is None:
+        return ""
+    if isinstance(stream, str):
+        return stream
+    return stream.decode("utf-8", "replace")
+
+
 def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
     phase = test_phase(test)
     started = time.monotonic()
@@ -282,7 +303,7 @@ def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
                 line = f"RESULT: ERROR {test.name} — rc={proc.returncode}; tail={tail[:300]}"
             break
         except subprocess.TimeoutExpired as exc:
-            output = (exc.stdout or "") + (exc.stderr or "")
+            output = decoded(exc.stdout) + decoded(exc.stderr)
             line = (
                 f"RESULT: ERROR {test.name} — timeout after {timeout}s; "
                 "continuing with the next validation"

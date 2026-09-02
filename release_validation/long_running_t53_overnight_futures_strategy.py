@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
+from qa_common import event_logs_until, finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -82,7 +82,7 @@ def _state(value):
 def analyze(run) -> dict:
     orders = run.orders()
     positions = run.positions()
-    events = run.event_logs().sort_values("ts_event")
+    events = event_logs_until(run, "PRE_EXIT_POSITION").sort_values("ts_event")
     snapshots = {}
     for phase in ("OVERNIGHT_BOUNDARY_POSITION", "AFTER_MIDNIGHT_POSITION",
                   "PRE_EXIT_POSITION"):
