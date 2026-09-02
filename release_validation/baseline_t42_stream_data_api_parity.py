@@ -1,13 +1,15 @@
-"""Remote callback bar counts match the underlying Data API for equity and futures.
+"""Remote callback bar counts match the data driver for equity and futures.
 
 Parity is asserted per ``(symbol, session day)`` on *distinct* bar timestamps,
 which is the claim that actually matters: every bar the Data API holds for a
 session is delivered to the callback, and none is invented.  Three properties of
 the two surfaces make a raw row-count comparison wrong:
 
-* The Data API resolves no continuous alias -- ``symbols=['ES.c.0']`` returns
-  nothing and ``chains=`` is rejected outright, so the outright contracts the
-  callbacks resolved to are what must be queried.
+* The callback count is compared with a direct ``hiveq.driver`` load in the
+  same platform image.  The test therefore exercises the supported data-driver
+  surface and has no dependency on the separately installed ``hiveq_data`` SDK.
+* The stream's resolved outright contracts are loaded rather than its continuous
+  aliases, so both sides compare the exact same instruments.
 * A continuous subscription is a spliced series: it delivers the front contract
   only, so it can never match a whole-window count for either outright.
 * ``bars_1m`` storage still carries exact duplicate rows for some sessions
@@ -51,6 +53,9 @@ class SdkT42Counting:
     symbols: list = []
     checkpoint_name = ""
     asset_type = AssetType.EQUITY
+    dataset = ""
+    session_start = ""
+    session_end = ""
 
     def on_start(self, ctx, event):
         if not hasattr(self, "seen"):
@@ -69,10 +74,26 @@ class SdkT42Counting:
         self.per_day[f"{bar.symbol}|{session_day(bar.time, self.overnight)}"] += 1
 
     def on_stop(self, ctx, event):
-        emit_checkpoint(ctx, self.checkpoint_name, {
+        stream = {
             "per_day": dict(self.per_day),
             "duplicate_deliveries": self.duplicates,
             "bars": sum(self.per_day.values()),
+        }
+        symbols = sorted({key.split("|", 1)[0] for key in stream["per_day"]})
+        api = driver_counts(
+            self.dataset,
+            symbols,
+            self.session_start,
+            self.session_end,
+            self.overnight,
+        )
+        exact, mismatched = compare(stream, api)
+        emit_checkpoint(ctx, self.checkpoint_name, {
+            "stream": stream,
+            "driver": api,
+            "symbols": symbols,
+            "exact": exact,
+            "mismatched": mismatched,
         })
 
 
@@ -81,6 +102,9 @@ class SdkT42A(SdkT42Counting):
     checkpoint_name = "t42_equity"
     asset_type = AssetType.EQUITY
     overnight = False
+    dataset = "HIVEQ_US_EQ"
+    session_start = "09:30:00"
+    session_end = "16:00:00"
 
 
 class SdkT42B(SdkT42Counting):
@@ -88,6 +112,9 @@ class SdkT42B(SdkT42Counting):
     checkpoint_name = "t42_futures"
     asset_type = AssetType.FUTURES
     overnight = True
+    dataset = "HIVEQ_US_FUT"
+    session_start = "18:00:00"
+    session_end = "17:00:00"
 
 
 def remote_counts(cls, name, dataset, session_start, session_end):
@@ -117,62 +144,69 @@ def in_session(moment, start_tod, end_tod, overnight):
     return start_tod <= tod <= end_tod
 
 
-def api_counts(dataset, symbols, first, last, start_tod, end_tod, overnight):
-    """Distinct (symbol, timestamp) API rows per symbol and session day.
+def driver_counts(dataset, symbols, start_tod, end_tod, overnight):
+    """Load bars through the platform data driver and count distinct stamps.
 
-    ``first``/``last`` bound the same window the run covered, and the query asks
-    for one minute past ``last`` because the Data API's session filter treats
-    its ``end`` as exclusive while the engine delivers a bar stamped exactly at
-    ``session_end`` -- a closing-auction minute exists in storage for some
-    sessions and not others, so the boundary has to be requested and then
-    trimmed here rather than assumed away.
-
-    Release validation runs in the development environment, where the
-    functional data-driver distribution is installed separately from the thin
-    SDK.  Import it directly: ``hiveq.driver`` is intentionally the thin
-    client's platform-only authoring stub and does not re-export it.
+    The historical endpoint treats the session end as exclusive, while the
+    stream can contain a bar stamped exactly at that boundary.  Ask for one
+    additional minute and trim back to ``last_dt`` below.
     """
-    import hiveq_data
+    if not symbols:
+        return {"per_day": {}, "duplicate_rows": 0, "bars": 0}
 
-    client = hiveq_data.Historical(timezone="America/New_York")
-    first_dt = datetime.strptime(first, STAMP)
-    last_dt = datetime.strptime(last, STAMP)
+    import collections
+    import hiveq.driver as dd
+    from hiveq.datetime import DateRange, TimeRange
+
+    first_date = (datetime.strptime(START_DATE, "%Y-%m-%d") - timedelta(days=1)
+                  if overnight else datetime.strptime(START_DATE, "%Y-%m-%d"))
+    first_dt = datetime.combine(first_date.date(),
+                                datetime.strptime(start_tod, "%H:%M:%S").time())
+    last_dt = datetime.combine(datetime.strptime(END_DATE, "%Y-%m-%d").date(),
+                               datetime.strptime(end_tod, "%H:%M:%S").time())
+    query_end_tod = (datetime.strptime(end_tod, "%H:%M:%S")
+                     + timedelta(minutes=1)).strftime("%H:%M:%S")
+
+    source = "T42Bars"
+    transport = "T42HiveQBars"
+    dd.init(config={
+        source: {"primary": transport},
+        transport: {
+            "transport": "HiveQ",
+            "dataset": dataset,
+            "schema": "bars_1m",
+            "filterMode": "session",
+            "splitSize": "1",
+            "timezone": "America/New_York",
+        },
+    })
+    Params = collections.namedtuple("T42Params", ["date", "time", "sym"])
+    params = Params(
+        DateRange(first_date.strftime("%Y-%m-%d"), END_DATE),
+        TimeRange(start_tod, query_end_tod),
+        list(symbols),
+    )
+    frame = dd.load(source, params_tuple=params, cache=dd.Cache.NO_CACHE)
+    rows = [] if frame is None else frame.to_dict("records")
     per_day = Counter()
     seen = defaultdict(set)
     duplicates = 0
-    offset = 0
-    page_size = 500_000
-    while True:
-        response = client.get_data(
-            dataset=dataset,
-            schema="bars_1m",
-            symbols=list(symbols),
-            start=first,
-            end=(last_dt + timedelta(minutes=1)).strftime(STAMP),
-            filter_mode="session",
-            limit=page_size,
-            offset=offset,
-        ) or {}
-        rows = response.get("data", [])
-        for row in rows:
-            symbol = row.get("symbol") or row.get("ticker") or row.get("instrument")
-            stamp = row.get("time") or row.get("ts_event")
-            if not symbol or not stamp:
-                continue
-            symbol = str(symbol)
-            moment = datetime.strptime(str(stamp)[:19], STAMP)
-            if moment < first_dt or moment > last_dt:
-                continue
-            if not in_session(moment, start_tod, end_tod, overnight):
-                continue
-            if stamp in seen[symbol]:
-                duplicates += 1
-                continue
-            seen[symbol].add(stamp)
-            per_day[f"{symbol}|{session_day(moment, overnight)}"] += 1
-        if len(rows) < page_size:
-            break
-        offset += page_size
+    for row in rows:
+        symbol = row.get("symbol") or row.get("ticker") or row.get("instrument")
+        stamp = row.get("time") or row.get("ts_event")
+        if not symbol or stamp is None:
+            continue
+        symbol = str(symbol)
+        moment = datetime.strptime(str(stamp)[:19], STAMP)
+        if moment < first_dt or moment > last_dt:
+            continue
+        if not in_session(moment, start_tod, end_tod, overnight):
+            continue
+        if moment in seen[symbol]:
+            duplicates += 1
+            continue
+        seen[symbol].add(moment)
+        per_day[f"{symbol}|{session_day(moment, overnight)}"] += 1
     return {"per_day": dict(per_day), "duplicate_rows": duplicates,
             "bars": sum(per_day.values())}
 
@@ -194,38 +228,24 @@ def compare(stream, api):
 
 
 if __name__ == "__main__":
-    eq_stream = remote_counts(SdkT42A, "t42_equity", "HIVEQ_US_EQ", "09:30", "16:00")
-    eq_api = api_counts("HIVEQ_US_EQ", EQUITY_SYMBOLS,
-                        f"{START_DATE} 09:30:00", f"{END_DATE} 16:00:00",
-                        "09:30:00", "16:00:00", False)
-    fut_stream = remote_counts(SdkT42B, "t42_futures", "HIVEQ_US_FUT",
+    eq_result = remote_counts(SdkT42A, "t42_equity", "HIVEQ_US_EQ", "09:30", "16:00")
+    fut_result = remote_counts(SdkT42B, "t42_futures", "HIVEQ_US_FUT",
                                "18:00", "17:00")
-    # The outright contracts the continuous aliases actually resolved to -- the
-    # Data API has no continuous form, so these are what it must be asked for.
-    fut_outrights = sorted({key.split("|")[0] for key in fut_stream["per_day"]})
-    # The run's first futures session opens at 18:00 on the evening *before*
-    # start_date -- the session named start_date -- so the API window has to
-    # start there or that whole session reads as missing.
-    futures_first = (datetime.strptime(START_DATE, "%Y-%m-%d")
-                     - timedelta(days=1)).strftime("%Y-%m-%d 18:00:00")
-    fut_api = (api_counts("HIVEQ_US_FUT", fut_outrights, futures_first,
-                          f"{END_DATE} 17:00:00", "18:00:00", "17:00:00", True)
-               if fut_outrights else {"per_day": {}, "duplicate_rows": 0, "bars": 0})
-
-    equity_exact, equity_gaps = compare(eq_stream, eq_api)
-    futures_exact, futures_gaps = compare(fut_stream, fut_api)
+    eq_stream, eq_api = eq_result["stream"], eq_result["driver"]
+    fut_stream, fut_api = fut_result["stream"], fut_result["driver"]
+    fut_outrights = fut_result["symbols"]
     finish("t42_stream_data_api_parity", {
         "equity_stream_nonempty": eq_stream["bars"] > 0,
         "equity_api_nonempty": eq_api["bars"] > 0,
-        "equity_counts_exact_per_session": equity_exact,
+        "equity_counts_exact_per_session": eq_result["exact"],
         "futures_stream_nonempty": fut_stream["bars"] > 0,
         "futures_continuous_resolved_to_outrights": bool(fut_outrights),
         "futures_api_nonempty": fut_api["bars"] > 0,
-        "futures_counts_exact_per_session": futures_exact,
+        "futures_counts_exact_per_session": fut_result["exact"],
     }, extra=(f"eq_stream={eq_stream}; eq_api_bars={eq_api['bars']} "
               f"eq_api_duplicate_rows={eq_api['duplicate_rows']}; "
-              f"eq_mismatched={equity_gaps}; "
+              f"eq_mismatched={eq_result['mismatched']}; "
               f"fut_outrights={fut_outrights}; fut_stream={fut_stream}; "
               f"fut_api_bars={fut_api['bars']} "
               f"fut_api_duplicate_rows={fut_api['duplicate_rows']}; "
-              f"fut_mismatched={futures_gaps}"))
+              f"fut_mismatched={fut_result['mismatched']}"))

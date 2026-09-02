@@ -1,5 +1,46 @@
 # HiveQ SDK installed-wheel release validation
 
+## Selecting a test environment
+
+Release validators remain environment-agnostic. Use the repository-only
+launcher to select `local`, `vm`, or `staging` without editing a validation
+or sharing credentials between platforms:
+
+```bash
+python release_validation/hiveq_env.py check vm
+python release_validation/hiveq_env.py run vm release_validation/long_running_t49_long_rollover_buy_hold.py
+python release_validation/hiveq_env.py run local release_validation/run_all.py --suite baseline
+```
+
+The first use of a profile opens that platform's browser sign-in. Credentials
+are stored separately in `~/.hiveq/profiles/<profile>.env` with mode `0600`.
+The launcher clears inherited `HIVEQ_*` values before starting the validator,
+performs health and authentication checks, and passes configuration only via
+the child process environment. `login <profile>` forces credential renewal.
+
+This launcher is QA infrastructure, not public SDK functionality. It is outside
+`src/`, is not installed by setuptools, and must not be imported by examples,
+validation strategies, or public package code.
+
+### Running one validation from PyCharm
+
+The repository includes three shared run configurations under `.run/`:
+
+* `HiveQ Validation - Local`
+* `HiveQ Validation - VM`
+* `HiveQ Validation - Staging`
+
+Open the validation `.py` file you want to execute so it is the active editor
+file, select the desired configuration in PyCharm's run-configuration dropdown,
+and choose **Run** or **Debug**. The configuration passes PyCharm's `$FilePath$`
+macro to the same profile launcher used on the command line. It uses the
+project’s configured Python interpreter and never adds environment logic to the
+selected validation file.
+
+When the selected file is `run_all.py`, the launcher automatically enables
+remote-run semantics and disables engine-only order CSV capture. An explicit
+`--local-runs` or `--remote-runs` argument overrides that default.
+
 This suite deduplicates and translates the validation behaviors from the 165
 Python files under `hiveq-flow/examples/bt`
 to the thin SDK's real execution model. Strategies run remotely, persist their
@@ -33,13 +74,23 @@ validation. It runs the baseline phase first and starts the long-running phase
 only when the baseline has no `FAIL`, `ERROR`, or `BLOCKED` result (`GAP` remains
 non-failing for optional data). Each process is isolated because a remote OMS
 run is process-scoped.
+
+Run the long-running phase directly, without collecting or gating on baseline
+tests, with `--suite long-running`. `RELEASE_VALIDATION_START` still selects an
+inclusive numeric resume point. For example, resume staging at t50 with:
+
+```bash
+RELEASE_VALIDATION_START=50 python release_validation/hiveq_env.py run staging release_validation/run_all.py --suite long-running
+```
 `baseline_t00_sdk_convention.py` is the first validation collected: a static audit (no
 platform run) that enforces `SdkTxx` strategy naming, matching
 `StrategyConfig.type`, platform submission via `run_backtest`, a public
 result/log evidence reader, and one validation per number.
 It runs exactly one validation process at a time, waits for its result, adds a
 short inter-test cooldown, and retries the same test on a max-concurrent
-response. Exiting 0 without printing a `RESULT:` line is recorded as `ERROR`,
+response. Remote suites keep retrying until a platform slot becomes available;
+local/in-process suites retain a bounded retry count. Exiting 0 without printing
+a `RESULT:` line is recorded as `ERROR`,
 not `PASS`: no RESULT line means `finish()` never ran and nothing was asserted.
 With `LOCAL_RUNS = True` (in-process runs, which die with their process) a
 timeout skips that validation and the suite continues, so the scorecard covers
@@ -187,7 +238,7 @@ result surfaces are validated end to end.
 | `baseline_t41_stop_limit_latch.py` | STOP_LIMIT remains triggered after a gap beyond its limit and fills on the return |
 | `baseline_t42_stream_data_api_parity.py` | exact equity/futures callback counts versus the Data API |
 | `baseline_t43_equity_trade_quote.py` | one `eq_trades` source drives valid trade and quote payloads |
-| `baseline_t44_cluster_analytics_data.py` | cluster-analytics custom rows or an explicit data-availability gap |
+| `baseline_t44_cluster_analytics_data.py` | staging cluster-analytics rows delivered through the custom-data callback |
 | `long_running_t45_multileg_options.py` | one week of daily four-leg 0DTE long/short basket entries, exits, flatness, and persisted trade evidence |
 | `baseline_t46_stop_bracket_orders.py` | STOP/STOP_LIMIT fills and manual bracket sibling cancellation |
 | `baseline_t47_trade_tick_fields.py` | public futures/equity trade-tick payload fields |

@@ -9,6 +9,8 @@ import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
 from hiveq.flow.config import AssetType
 
+CLUSTER_SYMBOL = "/ES 26M"
+
 
 class SdkT44:
     def on_start(self, ctx, event):
@@ -41,11 +43,10 @@ class SdkT44:
 
 
 if __name__ == "__main__":
-    # 2026-05-07, not 2026-07-07: the cluster rows this environment reads
-    # (qa_quant_001.clusters_v1) stop on 2026-05-11 -- the later date has none
-    # at all, so the case reported a data gap for a window past the end of the
-    # data. 2026-05-07 carries 5,257 `tag=ON` rows for the front ES contract
-    # across the whole session (verified in ClickHouse).
+    # staging_quant_001.clusters_v1 carries 5,261 `tag=ON` rows for the active
+    # ES contract on 2026-05-07. Analytics symbols use the source notation
+    # `/ES 26M`, not the engine/Data API notation `ESM6`, so filter by the exact
+    # stored value rather than applying continuous-contract resolution.
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT44", type="SdkT44", symbols=["ES.c.0"])],
         symbols=["ES.c.0"],
@@ -56,28 +57,18 @@ if __name__ == "__main__":
             {
                 "type": "hiveq_historical",
                 "dataset": "HIVEQ_QUANT_CLUSTERS",
-                "data_type": "custom",
                 "id": "clusters",
-                "filters": {
-                    "adapter": "HiveQUserDataAdapter",
-                    "dataset": "HIVEQ_QUANT_CLUSTERS",
-                    "schema": "clusters",
-                    "symbols": "ES.c.0",
-                    "symbolFilterKey": "sym",
-                    "symbolResolutionMode": "continuous_contract",
-                    "timestampColumn": "time",
-                    "extraFilters": "tag=ON",
-                },
+                "schema": ["clusters"],
+                "symbols": [CLUSTER_SYMBOL],
             },
         ],
         backtest_config=BacktestConfig(session_start="09:30", session_end="16:00"),
     )
     state = completed_checkpoint(run, "t44_cluster_analytics_data")
-    no_rows = state["rows"] == 0
     finish("t44_cluster_analytics_data", {
         "timeline_data_present": state["bars"] > 0,
-        "cluster_rows_or_documented_gap": state["rows"] > 0 or no_rows,
-        "symbols_present_when_rows_exist": no_rows or state["nonempty_sym"] == state["rows"],
-        "timestamps_present_when_rows_exist": no_rows or state["nonempty_time"] == state["rows"],
-        "payload_samples_persisted": no_rows or bool(state["samples"]),
-    }, extra=str(state), gap=no_rows)
+        "cluster_callbacks_present": state["rows"] > 0,
+        "symbols_present": state["nonempty_sym"] == state["rows"],
+        "timestamps_present": state["nonempty_time"] == state["rows"],
+        "payload_samples_persisted": bool(state["samples"]),
+    }, extra=str(state))
