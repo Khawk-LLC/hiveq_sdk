@@ -9,7 +9,7 @@ import sys
 import pandas as pd
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
+from qa_common import event_logs_until, finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -90,7 +90,7 @@ def _state(value):
 
 
 def analyze(run) -> dict:
-    events = run.event_logs().sort_values("ts_event")
+    events = event_logs_until(run, "ROLLOVER_COMPLETE").sort_values("ts_event")
     lifecycle = events[events["sub_event_type"].astype(str).str.startswith("ROLLOVER_")]
     done = lifecycle[lifecycle["sub_event_type"] == "ROLLOVER_DONE"]
     due = lifecycle[lifecycle["sub_event_type"] == "ROLLOVER_DUE"]

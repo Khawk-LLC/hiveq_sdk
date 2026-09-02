@@ -13,7 +13,7 @@ import sys
 import pandas as pd
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import finish_validation, open_positions as open_positions_rows, export_run_artifacts, wait_for_final
+from qa_common import event_logs_until, finish_validation, open_positions as open_positions_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -69,7 +69,7 @@ class SdkT49LongRolloverBuyHold:
 def analyze(run, continuous_symbol: str) -> dict:
     orders = run.orders()
     positions = run.positions()
-    events = run.event_logs()
+    events = event_logs_until(run, "ROLLOVER_DONE")
     rolls = events[events["sub_event_type"] == "ROLLOVER_DONE"].copy()
     rolls["ts_event"] = pd.to_datetime(rolls["ts_event"])
     rolls = rolls.sort_values("ts_event")

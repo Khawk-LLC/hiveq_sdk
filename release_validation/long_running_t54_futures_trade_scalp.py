@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from qa_common import finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
+from qa_common import event_logs_until, finish_validation, open_positions as open_position_rows, export_run_artifacts, wait_for_final
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
@@ -196,7 +196,7 @@ def _state(value):
 def analyze(run):
     orders = run.orders()
     positions = run.positions()
-    events = run.event_logs()
+    events = event_logs_until(run, "SCALP_SUMMARY")
     summaries = events[events["sub_event_type"] == "SCALP_SUMMARY"]
     summary = {} if summaries.empty else _state(summaries.iloc[-1]["state_variables"])
     open_positions = open_position_rows(positions)

@@ -45,7 +45,7 @@ NOTICE = """\
 
  Docs: run `hiveq docs`, then data_driver/llms.txt §1.1 (deploying driver
  code) and §1.2 (this contract: what is real vs what raises); llms.txt R13
- and §14.1, plus §11.0 / §11.6 for the job surface.
+ and §14.1, plus §11.6 for the job surface.
 
  Set HIVEQ_SUPPRESS_STUB_NOTICE=1 to silence this notice.
 ========================================================================"""

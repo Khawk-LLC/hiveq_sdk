@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 import pandas as pd
 import warnings
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from hiveq.flow import utils
 
@@ -342,6 +342,32 @@ class PerformanceReport:
     # The run identifier (payload_id for deployed runs). Lets callers query the
     # runs REST API or re-attach via hf.get_run(report.run_id).
     run_id: Optional[str] = None
+
+    @property
+    def stats(self) -> Dict[str, Any]:
+        """Metric name -> value, for direct key lookup.
+
+        ``return_stats`` is a long ``metric``/``value`` frame (it prints as a
+        table in ``__repr__``), which makes single-metric reads awkward. This
+        exposes the same rows as a plain dict so callers can just pull a key:
+
+        >>> report.stats["Total Trades"]
+        3789
+        >>> report.stats.get("Sharpe")
+        -0.24
+
+        Returns an empty dict when the report carries no return stats, so
+        ``report.stats.get(...)`` is always safe.
+        """
+        df = self.return_stats
+        if df is None or getattr(df, "empty", True):
+            return {}
+        if "metric" in df.columns and "value" in df.columns:
+            return dict(zip(df["metric"], df["value"]))
+        # Defensive: a wide single-row frame (older/alternate publish paths).
+        if len(df) == 1:
+            return df.iloc[0].to_dict()
+        return {}
 
     @classmethod
     def from_rest(cls, payload: dict) -> "PerformanceReport":

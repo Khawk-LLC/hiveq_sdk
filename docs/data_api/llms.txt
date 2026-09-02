@@ -292,7 +292,7 @@ Two things to know, both verified:
 * **This is how a job writes a file.** The volume is mounted in a job container
   but not writable by it (uid mismatch), so a job stages the file in `/tmp` and
   uploads it here; it then appears both in the store listing and on the mounted
-  volume. Full worked example: data-driver §1.2.
+  volume. Deploying the job that does this: data-driver §1.1.
 
 ---
 
