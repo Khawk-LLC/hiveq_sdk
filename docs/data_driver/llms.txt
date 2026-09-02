@@ -28,11 +28,11 @@ by searching for a line starting `## N.` (or `## II.N`).
 
 | § | Section | What's in it |
 |---|---|---|
-| 1 | Installation | `pip install`, extras (`[hiveq]`, `[kdb]`), pandas prerequisite. |
+| 1 | Installation | `pip install`, extras (`[kdb]`), pandas prerequisite. **§1.1 deploying driver code — the driver runs only on the platform; §1.2 what is real locally vs what raises.** |
 | 2 | Configuration | Config shape, how to supply it (inline dict/JSON/py/ini, auto-discovered `dd-config.ini`), the `[HiveQ]` credentials section. |
 | 3 | Storing data | `dd.save(id, df)` — write to a data source's configured target. |
 | 4 | Loading Data | `dd.load(id, params_tuple=..., cache=...)` — the core read call. |
-| 5 | Caching | The five `Cache` modes: `NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`. |
+| 5 | Caching | The five `Cache` modes: `NO_CACHE`, `ONLY_CACHE`, `CACHE_FORCE_PULL`, `PULL_UPDATE_CACHE`, `IN_MEMORY`; plus `dd.clear_cache()`. |
 | 6 | Python code to load and save the data | Minimal load→CSV round trip; column-name matching for cache filtering. |
 | 7 | Better parameter handling — passing params as a list | Passing multiple symbols as a list in `params_tuple`. |
 | 8 | Subscription support | Live HiveQ subscriptions via `dd.load(...)`: `pullDataSourceID` stitching, `time_out`, `forceRefresh`, dynamic `keyField` subscription, filtering. Largest section. |
@@ -63,6 +63,123 @@ pip install 'HiveQDataDriver[kdb]'      # legacy kdb+ transport (qpython3)
 
 The HiveQ client is vendored into `HiveQDataDriver`; there is no `[hiveq]` extra
 or separate `hiveq-data` install step. **Pre-requisite:** pandas >= 1.0.
+
+
+### 1.1 Deploying driver code (the driver runs ONLY on the platform)
+
+**`dd.load` / `dd.save` / `dd.init` / `dd.stop` / `dd.alert` cannot run on your
+laptop.** What the SDK ships locally is an import stub: the real driver — with
+the credentials, transports and data endpoints it needs — exists only inside a
+HiveQ platform container. Locally every one of those calls raises
+`PlatformOnlyError`. That is the designed contract, not a broken install (§1.2).
+
+So driver code is *written* locally and *run* on the platform: put it in a
+function and deploy the function.
+
+```python
+import hiveq.flow as hf                      # local: fine
+
+CFG = {'AaplBars': {'primary': 'HiveQBars1m'},
+       'HiveQBars1m': {'transport': 'HiveQ',
+                       'dataset': 'HIVEQ_US_EQ', 'schema': 'bars_1m'}}
+
+def load_aapl_bars():
+    # Keep driver imports INSIDE the function so they resolve against the
+    # container's real driver, not the local stubs.
+    import collections
+    from hiveq.driver.data_driver import Driver      # NOT `import hiveq.driver as dd`
+    from hiveq.driver import Cache
+    from hiveq.datetime import DateRange
+
+    d = Driver(config=CFG)                           # construct the Driver directly
+
+    Params = collections.namedtuple('Params', ['date', 'sym'])
+    params = Params(DateRange('2025-10-14', '2025-10-14'), ['AAPL'])
+
+    df = d.load('AaplBars', params_tuple=params, cache=Cache.NO_CACHE)
+    print(f"{len(df)} rows")                 # -> job.logs()
+    return {'rows': int(len(df))}            # -> job.result()
+
+if __name__ == "__main__":                   # the guard is required (llms.txt R14)
+    job = hf.deploy_job(load_aapl_bars, task_name='load-aapl-bars', wait=True)
+    print(job.result())
+```
+
+> ⚠️ **Use `Driver(config=...)`, not the module-level `dd.*` facade, in a
+> deployed job.** `dd.init(...)` / `dd.load(...)` route through
+> `hiveq.driver._bootstrap.get_driver()`, which calls `configure_logger()` and
+> does `os.makedirs('<cwd>/logs')`. In the job container the working directory
+> is **`/app`, which is read-only**, so the first `dd.*` call dies with:
+>
+> ```
+> OSError: [Errno 30] Read-only file system: '/app/logs'
+> ```
+>
+> Verified behaviour in a deployed `QUANT_SCRIPTS` job:
+>
+> | in-container call | result |
+> |---|---|
+> | `Driver(config=CFG)` then `d.load(...)` | **works** — returned 415 AAPL rows |
+> | `dd.init(config=CFG)` | `OSError` read-only `/app/logs` |
+> | `dd.init(config=CFG, storeBasePath='/tmp/dd/')` | `OSError` — `storeBasePath` does **not** move the log dir |
+> | `dd.load(...)` *after* a successful `Driver(...)` | still `OSError` — the constructor does not register the module singleton |
+> | `os.chdir('/tmp')` **before** any `dd.*` call | works — the log dir follows the cwd |
+>
+> So there are two options: construct `Driver` (recommended — no process-wide
+> side effect), or `os.chdir()` to a writable directory before the first `dd.*`
+> call if you must keep existing module-facade code. **Reading §2 onward:** its
+> examples are written against `dd.load` / `dd.save` / `dd.init`; in deployed
+> code call the same methods on your `Driver` instance (`d.load(...)`), with the
+> config passed to the constructor instead of `dd.init(...)`.
+
+Read results back from `job.result()` (the return value) and `job.logs()`
+(stdout). The job surface — `deploy_job`, `Job`, `Schedule` — is documented in
+`llms.txt` §11.6; the 2 GB per-container memory cap that applies to your driver
+code is `llms.txt` R13; the import stubs themselves are `llms.txt` §14.1.
+
+Everything from §2 onward describes what that deployed code does. Read the
+config and `dd.load` sections as the body of a deployed function, not as a
+local script.
+
+### 1.2 What is real locally, and what raises
+
+Authoring locally works — only *execution* is platform-only. Verified on the
+shipped SDK:
+
+The rule is simple: **every callable under `hiveq.driver` raises.** Only imports
+and pure value types are real. Verified against the shipped stub — 32 stubbed
+callables, one exception, noted below.
+
+| Locally | Behavior |
+|---|---|
+| `import hiveq.driver`, `import hiveq.driver.hiveq_data`, `import hiveq_data` | **work** — no ImportError |
+| `from hiveq.driver import Cache` | **works** — the enum is real, all five modes (§5) |
+| `from hiveq.datetime import DateRange, TimeRange` | **work** — real objects (`.start`, `.end`) |
+| building a `params_tuple` namedtuple, writing config dicts | **work** — plain Python |
+| `dd.init` · `dd.load` · `dd.save` · `dd.stop` · `dd.alert` · `dd.clear_cache` | **raise `PlatformOnlyError`** |
+| every helper in `hiveq.driver.date_time_utils` (`current_date_string`, `get_prev_date`, `get_nyse_holidays`, `get_date_list`, `convert_time_zone`, …) | **raise `PlatformOnlyError`** |
+| the transports and subscribers (`HiveQTransport`, `CsvTransport`, `HDF5Transport`, `KDBTransport`, `HiveQSubscriber`, `KDBSubscriber`, `Driver`) | **raise on construction** |
+| `hiveq.driver.hiveq_data.configure(...)` | the one exception — records credentials/endpoint only, no I/O, so it does not raise |
+
+> ⚠️ **Do not reach for the `date_time_utils` helpers as local utilities.** They
+> look like ordinary date math and the module is large enough to seem
+> implemented, but they are name-only stubs — every one raises. Use plain
+> `datetime` / `pandas` locally, and call these only inside deployed code.
+> Logging and env loading are **handled for you** — `config_property_manager`,
+> `configure_logger` and friends are internal plumbing the driver wires up
+> itself; they are not part of the surface you call.
+
+`PlatformOnlyError` names the call and points back here, e.g.
+`hiveq.driver.load() cannot run on a local machine — it is an import stub.`
+Treat it as "deploy this" (§1.1), never as a missing dependency: do not
+`pip install` anything else, and do not switch to a different import path.
+
+Import `Cache` from **`hiveq.driver`** (`from hiveq.driver import Cache`). The
+top-level `from hiveq import Cache` raises `ImportError` — `hiveq` is a shared
+namespace and does not re-export it.
+
+An import-time notice prints this same contract; silence it with
+`HIVEQ_SUPPRESS_STUB_NOTICE=1`.
 
 
 ---
@@ -170,7 +287,7 @@ section); the cache file template uses the same fields.
 
 ```python
 import collections
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 import hiveq.driver as dd
 
@@ -214,6 +331,18 @@ faster access. There are multiple cache options:
 These ensure that while real-time data is loaded from the primary source, the
 cache is automatically kept up to date.
 
+**Discarding a cache — `dd.clear_cache()`.** Takes no arguments and clears the
+driver's cache state for the configured sources; like every other `dd.*` call it
+runs only on the platform (§1.2). Reach for it inside deployed code when a
+cache has gone stale in a way `CACHE_FORCE_PULL` will not fix — for a single
+load, prefer passing `cache=Cache.CACHE_FORCE_PULL` (option 3) over clearing
+everything.
+
+```python
+import hiveq.driver as dd
+dd.clear_cache()                     # inside a deployed function — see §1.1
+```
+
 ```ini
 # AAPL 1-minute bars
 [AaplBars]
@@ -237,7 +366,7 @@ file      = csv/bars/{sym}/{date:%Y.%m.%d}.csv
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
@@ -286,7 +415,7 @@ filterMap = sym=symbol;date=trade_date   ; params field → df column
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 Params = collections.namedtuple('Params', ['date', 'sym'])
@@ -321,7 +450,7 @@ schema    = bars_1m
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 ParamTuple = collections.namedtuple('Params', ['date', 'sym'])
@@ -363,7 +492,7 @@ To retrieve data, use the same `dd.load(...)` construct used for pulls:
 ```python
 import collections, time
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange, TimeRange
 
 dd_params = collections.namedtuple('Input', ['sym', 'date', 'time'])
@@ -490,7 +619,7 @@ filtering.
 import collections
 from hiveq.datetime import DateRange, TimeRange
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 
 dd_input = collections.namedtuple('Input', ['date', 'sym', 'time'])
 dd_param = dd_input(DateRange('2025-10-14', '2025-10-14'), ['AAPL'],
@@ -597,7 +726,7 @@ wsPort    = 8765
 ```python
 import collections, time
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 
 # Publish
 dd.save('SignalsPub', signals_df)
@@ -759,7 +888,7 @@ config selection and storage paths.
 ```python
 import os, collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 A = collections.namedtuple('A', ['date', 'sym'])
@@ -793,7 +922,7 @@ Common setup shared by the examples below (shown once — each example continues
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 A = collections.namedtuple('A', ['date', 'sym'])
@@ -975,7 +1104,7 @@ Common setup shared by "Multiple calls..." and "Subscription and pulls" below:
 ```python
 import collections
 import hiveq.driver as dd
-from hiveq import Cache
+from hiveq.driver import Cache
 from hiveq.datetime import DateRange
 
 Params = collections.namedtuple('Params', ['date', 'sym'])

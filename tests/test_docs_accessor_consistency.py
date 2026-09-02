@@ -39,7 +39,10 @@ def _report_public_surface():
         n for n, _ in inspect.getmembers(PerformanceReport, predicate=inspect.isfunction)
         if not n.startswith("_")
     }
-    return fields | methods
+    # Properties too (e.g. `stats`) — mirrors _run_public_surface. Without this
+    # the doc may legitimately reference a property and still fail the guard.
+    props = {n for n, v in vars(PerformanceReport).items() if isinstance(v, property)}
+    return fields | methods | props
 
 
 def test_documented_run_accessors_exist():

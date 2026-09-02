@@ -9,14 +9,14 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.2`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.2.1`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
 
 | § | What's in it |
 |---|---|
-| 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades). |
+| 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades, the `__main__` guard). |
 | 1 | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
 | 2 | Entry points (module `hiveq.flow`) — `run_backtest`, engine config via `**kwargs`, the function registry / remote functions. |
 | 3 | Credentials — first-run sign-in flow, what NOT to do when generating deliverable code. |
@@ -97,9 +97,10 @@ R11 Run-output discipline: run_backtest deploys and returns the Run immediately 
 R12 A backtest that completes with 0 trades is NOT a deliverable. Design entry conditions so the
     strategy trades realistically within the requested window (thresholds/tolerances wide enough
     to actually trigger on real data — validate mentally against the symbols and date range before
-    running). After every run, check report.return_stats["Total Trades"]: if it is 0 (or wildly
-    below the strategy's natural frequency), treat the iteration as FAILED — diagnose via §11.5,
-    loosen/fix the conditions, and re-run until it trades — before presenting any results.
+    running). After every run, check report.stats["Total Trades"] (§10.1 — metric name ->
+    value): if it is 0 (or wildly below the strategy's natural frequency), treat the
+    iteration as FAILED — diagnose via §11.5, loosen/fix the conditions, and re-run until
+    it trades — before presenting any results.
 R13 A run gets 2 GB of RAM, and exceeding it KILLS the run. Every submission is an ephemeral
     container capped at 2 GB (HIVEQ_CONTAINER_MEMORY, default 2g); the kernel OOM-kills the
     process and the run dies with exit code 137 and no report. So a strategy must NOT accumulate
@@ -111,6 +112,21 @@ R13 A run gets 2 GB of RAM, and exceeding it KILLS the run. Every submission is 
     run.orders() / run.fills() / run.trades() (§10). One symbol-day of US equity trades is ~340k
     events; retained as dicts that is ~85 MB (~250 B each), so a 20-day single-symbol run holding
     them hits ~1.7 GB and dies. Details and the failure signature in §16.2.
+R14 EVERY run_backtest(...) call — and every line that uses its Run — MUST sit under
+    if __name__ == "__main__":. The executor re-executes your script to restore the
+    strategy class; it strips the run_backtest call but NOT the run.wait()/run.report()
+    lines after it, so unguarded driver code dies with
+    NameError: name 'run' is not defined (status ERROR, elapsed_ms=0, no report).
+    Guard the driver block ONLY — the strategy class and the module-level logger stay
+    at import level so the executor can restore them:
+        logger = _get_logger()          # module level (R10)
+        class MyStrategy: ...           # module level (R2)
+        if __name__ == "__main__":      # driver block, guarded
+            run = hf.run_backtest(...)
+            run.wait(progress=False)
+            report = run.report()
+    Do NOT add any other condition to the guard (no environment-variable check) — a
+    plain __main__ guard is correct and sufficient.
 ```
 
 ---
@@ -148,17 +164,24 @@ class BuyAndHold:
         if order.is_filled:
             fill = order.last_fill                   # -> SigmaFill (§7.4)
 
-# run_backtest returns a Run HANDLE (§10.0) immediately, not a PerformanceReport.
-run = hf.run_backtest(
-    strategy_configs=[StrategyConfig(name='BuyAndHold', type='BuyAndHold')],
-    symbols=['AAPL'],
-    start_date='2025-08-01',
-    end_date='2025-08-02',
-    data_configs=[{'type': 'hiveq_historical', 'dataset': 'HIVEQ_US_EQ', 'schema': ['bars_1m']}],
-)
-run.wait(progress=False)                             # block quietly until done (R11)
-report = run.report()                                # -> PerformanceReport (§10.1)
-print(report.return_stats.to_string())
+# EVERY run_backtest call goes under this guard — R14. Without it the executor
+# re-executes this file and the run dies with NameError before any data flows.
+if __name__ == "__main__":
+    # run_backtest returns a Run HANDLE (§10.0) immediately, not a PerformanceReport.
+    run = hf.run_backtest(
+        strategy_configs=[StrategyConfig(name='BuyAndHold', type='BuyAndHold')],
+        symbols=['AAPL'],
+        start_date='2025-08-01',
+        end_date='2025-08-02',
+        data_configs=[{'type': 'hiveq_historical', 'dataset': 'HIVEQ_US_EQ',
+                       'schema': ['bars_1m']}],
+    )
+    run.wait(progress=False)                         # block quietly until done (R11)
+    report = run.report()                            # -> PerformanceReport (§10.1)
+    print(report.return_stats.to_string())
+    # NB: this demo never sells, so it reports Total Trades == 0 and a Net PnL that
+    # comes from end-of-run liquidation (§10.1 phantom PnL). That is expected HERE;
+    # in a real strategy it is a FAILED iteration (R12) — give yours an exit path.
 ```
 
 > **First time you run this:** if no key is saved yet, a browser opens for the user to sign in and this call waits ~5 min — that is expected. Just tell the user a browser is opening to sign in (and give the bare link if it didn't); wait, don't debug it, and never show internal commands or set a key by hand. See §3.1.
@@ -199,11 +222,12 @@ login(*, timeout=300.0, open_browser=True) -> str   # Internal plumbing: browser
 **Canonical run pattern (R11)** — deploy, block quietly, read the report. This is the whole loop; nothing else needs to be printed or pulled on a healthy run:
 
 ```python
-run = hf.run_backtest(...)                    # returns immediately (silent by default)
-print(f"run {run.run_id} task {run.task_id}") # keep the ids (re-attach later via hf.get_run)
-run.wait(progress=False)                      # block quietly until terminal — no progress bar
-report = run.report()                         # the deliverable (§10.1)
-print(report.return_stats.to_string())
+if __name__ == "__main__":                        # REQUIRED — R14
+    run = hf.run_backtest(...)                    # returns immediately (silent by default)
+    print(f"run {run.run_id} task {run.task_id}") # keep the ids (re-attach via hf.get_run)
+    run.wait(progress=False)                      # block quietly until terminal — no progress bar
+    report = run.report()                         # the deliverable (§10.1)
+    print(report.return_stats.to_string())
 ```
 
 `run.wait()` without `progress=False` renders a live tqdm progress bar (day count / PnL / return) — right for a human watching a terminal or notebook, wrong for a scripted or agent-driven run, where the repeated bar redraws land in captured output. Only reach for `run.status()`, `run.logs()`, or `run.event_logs()` when debugging (§11.5).
@@ -1102,8 +1126,9 @@ run.download_logs(path: str) -> str        # stream the full gzipped executor lo
 ### 10.1 `PerformanceReport` (obtained via `run.report()`)
 | attribute | type |
 |---|---|
-| `return_stats` | DataFrame (Sharpe, Sortino, vol, drawdown, win rate, …) |
-| `returns_series` | Series (datetime-indexed equity returns; used for tearsheet) |
+| `stats` | **dict** — metric name → value (`Sharpe`, `Total Trades`, `Net PnL`, `Win Rate`, `Max Drawdown`, …). Use this for any single-metric read: `report.stats["Total Trades"]`. Empty dict when the run carried no stats, so `.get(...)` is always safe. |
+| `return_stats` | DataFrame backing `stats` — long/tidy, two columns `metric` \| `value`, one row per metric. Good for printing the whole table (`.to_string()`); use `stats` to pull one value. |
+| `returns_series` | Series (datetime-indexed equity returns, UTC; used for tearsheet) |
 | `positions` | DataFrame |
 | `fills` | DataFrame (order fills; also via `run.fills()`) |
 | `orders` | DataFrame |
@@ -1119,6 +1144,27 @@ run.download_logs(path: str) -> str        # stream the full gzipped executor lo
 
 DataFrame attrs may be `None`/empty — always guard (`if report.fills is not None and not report.fills.empty`).
 
+**Pull one metric with `report.stats`; print the table with `return_stats`.**
+
+```python
+report.stats["Total Trades"]        # 3789     <- the R12 canary
+report.stats.get("Sharpe")          # -0.24
+print(report.return_stats.to_string())          # the full metric/value table
+```
+
+> ⚠️ **Run-output timestamps are UTC — in-strategy time is ET.** Every datetime
+> column on these frames (`positions.ts_opened`/`ts_closed`, `trades.entry_ts`/
+> `exit_ts`, `fills`/`orders` timestamps, and `event_logs().ts_event` — §10.2)
+> comes back **UTC**, and the SDK passes them through without conversion.
+> Inside the strategy, `ctx.now()` and `bar.time` are the configured tz (ET by
+> default, R5/R6). So a strategy gated to 09:35–15:55 ET shows up as
+> 13:35–19:55 in `trades.entry_ts` — a 4/5-hour offset that is **correct**, not
+> a broken session gate. Convert before comparing against ET session times:
+> ```python
+> import pandas as pd
+> ts = pd.to_datetime(report.trades["entry_ts"], utc=True).dt.tz_convert("America/New_York")
+> ```
+
 > ⚠️ **Phantom PnL from stuck-open positions.** At end-of-backtest the engine
 > liquidates any still-open position and books the mark-to-market difference as
 > **realized** PnL in `total_realized_pnl` / `net_pnl`. If your exit logic
@@ -1126,7 +1172,7 @@ DataFrame attrs may be `None`/empty — always guard (`if report.fills is not No
 > a plausible-looking positive/negative PnL that is *not from your strategy* —
 > it's from the underlying's price move between your intended exit date and
 > the last day of the backtest. **Canary checks to catch this:**
-> - `return_stats["Total Trades"] == 0` alongside `net_pnl != 0` is the loudest
+> - `report.stats["Total Trades"] == 0` alongside `net_pnl != 0` is the loudest
 >   signal — "Total Trades" counts completed round-trips, not fills.
 > - `report.positions` (or `run.positions()`) row with `avg_px_close == 0`
 >   means that position never closed cleanly during the run.
@@ -1243,12 +1289,14 @@ run = hf.run_backtest(
 )
 ```
 
-**Step 3 — Guard `run_backtest` so the executor doesn't recurse.** The executor re-imports your script to restore the strategy class. Any unguarded `run_backtest(...)` at module level fires again inside the executor with no data, producing 0 bars. Wrap it:
+**Step 3 — Check the `__main__` guard (R14).** The executor re-executes your script to restore the strategy class, so any `run_backtest(...)` — and any line using its result — must sit under the guard:
 ```python
-import os
-if __name__ == "__main__" and os.environ.get("HIVEQ_SDK_CLIENT_RUN") == "1":
+if __name__ == "__main__":
     run = hf.run_backtest(...)
+    run.wait(progress=False)
+    report = run.report()
 ```
+Unguarded, the run fails immediately: status `ERROR`, `elapsed_ms=0`, and `run.logs()` shows `NameError: name 'run' is not defined` raised from `deploy_task.py` `_restore_from_source_bundle`. Note the *whole* driver block must be inside — the executor strips the `run_backtest(...)` call itself but not the `run.wait()` / `run.report()` lines that follow it, which is what raises the NameError. Guard nothing else: the strategy class and the module-level `logger` must stay at import level so the executor can restore them.
 
 **Step 4 — Read the raw executor log** (includes all `logger.*` output and any tracebacks):
 ```python
@@ -1272,8 +1320,7 @@ print(df[['time','symbol','message']])
 - `logger.debug` silent: using `logging.getLogger(__name__)` instead of the HiveQ logger (§5.9.1).
 - **`logger.info` silent**: expected — the executor default level is `WARNING` (§2.1), so `debug` and `info` lines never appear in a normal run's log. An empty log does NOT mean the strategy didn't run. When debugging, pass `config={'hiveq_log_level': 'DEBUG'}` explicitly (Step 2).
 - Pattern detected but no trade: detection fires on the last bar of the backtest — extend the date range so there are subsequent bars on which to act.
-- **Duplicate `on_bar` deliveries (framework bug, fix pending)**: over multi-week runs the engine has been observed firing `on_bar` 2×–3× for the same daily bar (identical `ts_event`, identical OHLCV, back-to-back within one tick). This is **NOT** caused by per-session re-init (`__init__` runs once — see §16.2) and **NOT** caused by subscription accumulation (`on_start` re-subscribes are deduped internally). It is a framework bug currently pending a fix. Symptoms: rolling deques and SMAs silently drift; strategies that produced trades in a short backtest produce different (or no) trades over longer windows. **Do not** add a permanent `ts_event` dedup to production strategy code; if you must work around it while the fix is in flight, mark it clearly as a temporary local workaround.
-- **Silent stuck position → phantom PnL**: `return_stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.
+- **Silent stuck position → phantom PnL**: `report.stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.
 
 ### 11.6 Deploy an arbitrary script/job (`QUANT_SCRIPTS`) — `deploy_job`
 
@@ -1365,7 +1412,7 @@ from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMST
 from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter
 ```
 
-**EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER EXECUTOR_EVENT SECURITY_EVENT`
+**EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED ORDER_PARTIALLY_FILLED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER IMBALANCE EXECUTOR_EVENT SECURITY_EVENT`
 
 **AssetType**: `EQUITY OPTIONS FUTURES CRYPTO INDEX`
 
@@ -1446,7 +1493,6 @@ e.g. `StrategyConfig(name=..., type=..., params={'rolloverExecutorType': 'TWAP',
 | `enable_auto_rollover` | bool | False |
 | `auto_flatten_at_close` | bool | False (§15 — force-closes non-option positions at session close; options always settle automatically regardless) |
 | `enable_tca` | bool | False |
-| `export_orders_csv` | bool | False |
 | `extra_config` | Dict[str, Any] | {} |
 
 **EngineConfig**

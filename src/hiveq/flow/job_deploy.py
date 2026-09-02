@@ -150,7 +150,7 @@ def deploy_job(
         as best-effort until the platform confirms it runs for every task type.
     schedule : Schedule, optional
         Recurring-execution config (see ``Schedule``/``ScheduleFrequency``,
-        §2.3) — registers the job for repeated firing via the platform's
+        §11.6) — registers the job for repeated firing via the platform's
         scheduler instead of a single run.
     wait : bool
         Block for a terminal result before returning (default ``False``).
