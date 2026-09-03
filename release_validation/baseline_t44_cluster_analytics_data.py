@@ -43,10 +43,15 @@ class SdkT44:
 
 
 if __name__ == "__main__":
-    # staging_quant_001.clusters_v1 carries 5,261 `tag=ON` rows for the active
-    # ES contract on 2026-05-07. Analytics symbols use the source notation
-    # `/ES 26M`, not the engine/Data API notation `ESM6`, so filter by the exact
-    # stored value rather than applying continuous-contract resolution.
+    # staging_quant_001.clusters_v1 carries `tag=ON` rows for the active ES
+    # contract on 2026-05-07 (verified via /api/read/v0/data). Analytics symbols
+    # use the source notation `/ES 26M`, not the engine/Data API notation `ESM6`,
+    # so filter by the exact stored value rather than applying continuous-contract
+    # resolution. CLUSTERS filters on the `sym` column (SIGNALS uses `symbol`),
+    # so override `symbol_filter_key` and carry `tag=ON` in `filters.extraFilters`.
+    # Top-level `schema` is required — without it, `_is_hiveq_user_data_config`
+    # returns False and the `[clusters]` INI section never receives the filter
+    # values, so the C++ HiveQUserDataAdapter runs unconfigured and returns 0 rows.
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT44", type="SdkT44", symbols=["ES.c.0"])],
         symbols=["ES.c.0"],
@@ -60,6 +65,9 @@ if __name__ == "__main__":
                 "id": "clusters",
                 "schema": ["clusters"],
                 "symbols": [CLUSTER_SYMBOL],
+                "symbol_filter_key": "sym",
+                "timestamp_column": "time",
+                "filters": {"extraFilters": "tag=ON"},
             },
         ],
         backtest_config=BacktestConfig(session_start="09:30", session_end="16:00"),
