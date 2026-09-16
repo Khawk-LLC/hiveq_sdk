@@ -68,6 +68,7 @@ from hiveq.flow.functions import (
 )
 from hiveq.flow._client import Schedule, ScheduleFrequency, terminate
 from hiveq.flow.job_deploy import Job, deploy_job
+from hiveq.flow.livesim import Deployment, deploy_livesim, get_deployment
 
 # --- credentials (lazy, from env) -------------------------------------------
 _trader_id: Optional[str] = None
@@ -399,6 +400,9 @@ __all__ = [
     "delete_function",
     # deploy + observe
     "run_backtest",
+    "deploy_livesim",
+    "get_deployment",
+    "Deployment",
     "deploy_job",
     "Job",
     "Schedule",
