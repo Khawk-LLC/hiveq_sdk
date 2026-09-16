@@ -199,15 +199,15 @@ run_backtest(
     data_configs: Optional[list[dict]] = None, # §9
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
-    requirements: Optional[list[str]] = None,   # accepted for future orchestrator package installs
+    requirements: Optional[list[str]] = None,   # installed before deserializing the task
     silent: bool = True,                        # default: deploy + return Run immediately (no blocking)
     **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
 #   silent=True (default) : deploy and return the Run immediately (run.run_id / run.task_id).
 #   silent=False          : block inside the call w/ a live progress bar until done (interactive use).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
-#   requirements: accepted for API compatibility; currently not sent by the
-#                 SDK backtest wrapper until orchestrator support lands.
+#   requirements: named package specs installed before task deserialization;
+#                 requires the matching orchestrator/executor release.
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 

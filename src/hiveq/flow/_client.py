@@ -198,13 +198,9 @@ class _Client:
         task for recurring execution instead of a single one-off run — the
         platform validates/stores it and Celery Beat drives future firings.
 
-        ``requirements`` (pip specs) are forwarded to the sandbox in the shape
-        the executor expects (``{"payload": ..., "requirements": [...]}`` inside
-        the cloudpickled blob) — the executor genuinely runs ``pip install``
-        with them. Whether the install *succeeds* depends on the sandbox's pip
-        index being reachable for what you ask for (e.g. a private-index-only
-        sandbox rejects public packages); treat that part as environment-
-        dependent rather than a client-side guarantee.
+        ``requirements`` travels in JSON outside the pickle so the updated
+        executor can install dependencies before deserializing user code.
+        Package availability and compatible binary wheels remain required.
         """
         task_type_value = (
             task_type.value
@@ -215,9 +211,10 @@ class _Client:
         wrapper = _TaskWrapper(
             target=task, entry_method=entry_method, args=args, kwargs=kwargs
         )
-        reqs = list(requirements) if requirements else None
-        to_pickle: Any = {"payload": wrapper, "requirements": reqs} if reqs else wrapper
-        payload_b64 = base64.b64encode(cloudpickle.dumps(to_pickle)).decode()
+        if requirements is not None and not isinstance(requirements, list):
+            raise ValueError("requirements must be a list of package specs")
+        reqs = list(requirements) if requirements is not None else None
+        payload_b64 = base64.b64encode(cloudpickle.dumps(wrapper)).decode()
 
         schedule_dict = (
             schedule.to_dict() if isinstance(schedule, Schedule) else schedule
