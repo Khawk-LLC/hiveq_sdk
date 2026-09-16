@@ -146,6 +146,101 @@ class Deployment:
             for entry in entries
         )
 
+    # --- lifecycle ---------------------------------------------------------
+
+    def _action(self, action: str, strategy: Optional[str] = None) -> Dict[str, Any]:
+        body: Dict[str, Any] = {"action": action}
+        if strategy:
+            body["instance_name"] = strategy
+        return _call(
+            "POST", f"/deployments/{self.deployment_id}/actions", json=body
+        )
+
+    def start(self, strategy: Optional[str] = None) -> Dict[str, Any]:
+        """Start this deployment's strategies."""
+        return self._action("start", strategy)
+
+    def stop(self, strategy: Optional[str] = None) -> Dict[str, Any]:
+        """Stop them, leaving the deployment in place."""
+        return self._action("stop", strategy)
+
+    def pause(self, strategy: Optional[str] = None) -> Dict[str, Any]:
+        """Pause them; resume with :meth:`start`."""
+        return self._action("pause", strategy)
+
+    def terminate(self, strategy: Optional[str] = None) -> Dict[str, Any]:
+        """Tear the deployment down.
+
+        Without ``strategy`` this removes the deployment entirely -- folder and
+        bookkeeping -- and is not reversible. With one, it stops that single
+        strategy and leaves the deployment.
+        """
+        return self._action("terminate", strategy)
+
+    # --- data --------------------------------------------------------------
+
+    def orders(self, **kwargs) -> Any:
+        """Orders for this deployment."""
+        return self._data("orders", **kwargs)
+
+    def trades(self, **kwargs) -> Any:
+        """Trades for this deployment."""
+        return self._data("trades", **kwargs)
+
+    def positions(self, **kwargs) -> Any:
+        """Positions for this deployment."""
+        return self._data("positions", **kwargs)
+
+    def metrics(self, **kwargs) -> Any:
+        """Per-strategy metrics for this deployment."""
+        return self._data("metrics", **kwargs)
+
+    def events(self, **kwargs) -> Any:
+        """Strategy event logs for this deployment."""
+        return self._data("event-logs", **kwargs)
+
+    def _data(
+        self,
+        resource: str,
+        *,
+        strategy: Optional[str] = None,
+        limit: int = 10_000,
+        offset: int = 0,
+        format: str = "json",
+    ) -> Any:
+        """Pull one data resource. Returns rows, or CSV text with format="csv".
+
+        A pull, not a stream: each call returns a complete snapshot.
+        """
+        if not self.deployment_id:
+            return [] if format == "json" else ""
+        params: Dict[str, Any] = {
+            "format": format,
+            "limit": limit,
+            "offset": offset,
+        }
+        if strategy:
+            params["strategy_id"] = strategy
+
+        import os
+
+        api_key = os.environ.get("HIVEQ_API_KEY")
+        response = requests.get(
+            f"{_base_url()}/deployments/{self.deployment_id}/{resource}",
+            headers={"X-API-Key": api_key} if api_key else {},
+            params=params,
+            timeout=300,
+        )
+        if not response.ok:
+            try:
+                body = response.json()
+            except ValueError:
+                body = {"message": response.text[:500]}
+            raise LivesimError(response.status_code, body)
+        if format == "csv":
+            return response.text
+        return response.json()["data"]
+
     def __repr__(self) -> str:
         if not self.deployment_id:
             return "<Deployment preview (dry run)>"
