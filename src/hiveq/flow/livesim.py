@@ -122,6 +122,30 @@ class Deployment:
             state = self.status()
         return state
 
+    def logs(
+        self, strategy: Optional[str] = None, tail: int = 500
+    ) -> str:
+        """Recent log lines for this deployment's strategies.
+
+        A snapshot, not a stream. ``strategy`` narrows it to one instance;
+        with several, each is headed by its instance name.
+        """
+        if not self.deployment_id:
+            return ""
+        params: Dict[str, Any] = {"tail": tail}
+        if strategy:
+            params["instance_name"] = strategy
+        data = _call(
+            "GET", f"/deployments/{self.deployment_id}/logs", params=params
+        )
+        entries = data.get("strategies") or []
+        if len(entries) == 1:
+            return entries[0].get("logs") or ""
+        return "\n".join(
+            f"=== {entry.get('instance_name')} ===\n{entry.get('logs') or ''}"
+            for entry in entries
+        )
+
     def __repr__(self) -> str:
         if not self.deployment_id:
             return "<Deployment preview (dry run)>"
