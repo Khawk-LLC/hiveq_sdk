@@ -18,7 +18,12 @@ MAX_CONCURRENT_RETRIES = 30
 RETRY_DELAY_SECONDS = 10
 BETWEEN_TEST_DELAY_SECONDS = 2
 DEFAULT_TEST_TIMEOUT_SECONDS = 14400
-LONG_TEST_TIMEOUT_SECONDS = 14400
+# Long-running validations are endurance runs, not health checks, and the
+# client deadline is not a platform verdict -- t51 repeatedly hit the old 4h
+# cap on vm while the backtest itself was still progressing normally (day 4 of
+# 5), so the red said "the client gave up", not "the platform failed". t51 runs
+# two sequential probes, so this has to cover both.
+LONG_TEST_TIMEOUT_SECONDS = 64800
 BASELINE_PREFIX = "baseline_"
 LONG_RUNNING_PREFIX = "long_running_"
 SUITE_CONCURRENCY = 2
@@ -87,6 +92,22 @@ def _relative_link(report: Path, target: Path, label: str) -> str:
         return f'<span class="missing">{html.escape(label)} missing</span>'
     href = os.path.relpath(target, report.parent)
     return f'<a href="{html.escape(href, quote=True)}">{html.escape(label)}</a>'
+
+
+def captured_text(stream: bytes | str | None) -> str:
+    """Decode a captured stream that may be bytes even in text mode.
+
+    ``subprocess.TimeoutExpired`` is raised from ``Popen._check_timeout``
+    before the text-mode decode happens, so its ``stdout``/``stderr`` are raw
+    bytes while ``stderr`` can also be ``None``. Concatenating those directly
+    raised ``TypeError: can't concat str to bytes`` inside the timeout handler
+    and killed the whole runner, discarding every row already scored.
+    """
+    if stream is None:
+        return ""
+    if isinstance(stream, (bytes, bytearray)):
+        return stream.decode("utf-8", "replace")
+    return stream
 
 
 def test_phase(test: Path) -> str:
@@ -298,7 +319,7 @@ def run_test(test: Path, env: dict[str, str], log_dir: Path) -> dict:
                 line = f"RESULT: ERROR {test.name} — rc={proc.returncode}; tail={tail[:300]}"
             break
         except subprocess.TimeoutExpired as exc:
-            output = (exc.stdout or "") + (exc.stderr or "")
+            output = captured_text(exc.stdout) + captured_text(exc.stderr)
             line = (
                 f"RESULT: ERROR {test.name} — timeout after {timeout}s; "
                 "continuing with the next validation"
