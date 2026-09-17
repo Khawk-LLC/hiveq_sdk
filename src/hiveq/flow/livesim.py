@@ -187,6 +187,86 @@ class Deployment:
         """
         return self._action("terminate", strategy)
 
+    # --- parameters --------------------------------------------------------
+
+    def params(
+        self, strategy: Optional[str] = None, *, live: bool = True
+    ) -> Dict[str, Any]:
+        """This deployment's strategy parameters, keyed by instance name.
+
+        Each entry carries ``params`` -- the deployment's stored values -- and,
+        when the engine answers, ``live`` with the values it is running right
+        now plus ``drift`` naming the keys where the two disagree. Pass
+        ``live=False`` to read only the stored ones, which also works while the
+        container is down.
+
+        ``live`` is the authoritative one. The engine keeps its own param
+        store, writes it on every change and reloads it at startup, so it --
+        not the stored configuration -- is what a container comes up on. The
+        stored values seed a strategy the first time it runs and are a record
+        afterwards, which is why ``drift`` is worth reading: it means the
+        engine has moved on from what was deployed.
+
+            for name, entry in deployment.params().items():
+                print(name, entry["params"], entry.get("drift"))
+        """
+        if not self.deployment_id:
+            return {}
+        query: Dict[str, Any] = {}
+        if strategy:
+            query["instance_name"] = strategy
+        if not live:
+            query["live"] = "false"
+        data = _call(
+            "GET", f"/deployments/{self.deployment_id}/params", params=query
+        )
+        return {
+            entry["instance_name"]: entry
+            for entry in (data.get("strategies") or [])
+        }
+
+    def set_params(
+        self, changes: Dict[str, Any], strategy: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Change parameter values on a running deployment.
+
+        The change is pushed into the running engine *and* written to the
+        deployment's stored configuration, so it takes effect immediately and
+        is still in force after a container restart. Your strategy's
+        ``on_param_change(name, old, new)`` fires for each one.
+
+        The push is the part that lasts: the engine records the new value in
+        its own param store, which is what it reloads at startup. That also
+        means this needs the engine to be running. On a stopped deployment the
+        stored configuration is updated but the engine never hears about it,
+        and the next start comes up on what the engine last had -- so set
+        params on a running deployment, or check ``drift`` afterwards.
+
+        Only parameters the strategy already declares can be set -- an unknown
+        name is rejected rather than quietly added, because a typo would
+        otherwise look like it worked and change nothing.
+
+        With several strategies, ``strategy`` picks one; omit it to apply the
+        same change to all of them. Returns the result per instance, including
+        ``changed`` and ``old_values``.
+
+            deployment.set_params({"max_position": 5, "threshold": 0.25})
+        """
+        if not self.deployment_id:
+            return {}
+        if not changes:
+            raise ValueError("set_params needs at least one parameter")
+        body: Dict[str, Any] = {"param_changes": changes}
+        if strategy:
+            body["instance_name"] = strategy
+        data = _call(
+            "PATCH", f"/deployments/{self.deployment_id}/params", json=body
+        )
+        return {
+            entry["instance_name"]: entry
+            for entry in (data.get("strategies") or [])
+        }
+
     # --- data --------------------------------------------------------------
 
     def orders(self, **kwargs) -> Any:

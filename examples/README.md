@@ -13,6 +13,7 @@ stubs; the canonical reference is the single-file spec at
 |---|---|---|
 | `deploy_buy_and_hold.py` | buy once, hold | the minimal deploy + results round-trip |
 | `deploy_livesim.py` | ping order on a timer | deploying straight to **LiveSim** (no backtest), then `status()` / `logs()` / `orders()` / lifecycle off the `Deployment` handle |
+| `livesim_param_restart.py` | ping order on a timer | changing a **parameter** on a running deployment (`params()` / `set_params()`) and proving it survives a container restart |
 | `intraday_momentum_equity.py` | long-only SMA crossover | per-symbol state (`deque`), numpy indicator, **EST time window + EOD flat** (R5/R6), `close_position` |
 | `global_dispatch.py` | buy-and-hold, single dispatch | the opt-in `on_hiveq_event(ctx, event)` contract (branch on `event.type`) vs per-event callbacks (§4) |
 | `global_portfolio.py` | multi-strategy | `ctx.portfolio()` (strategy-scoped) vs `ctx.global_portfolio()` (account-wide) accessors (§8) |

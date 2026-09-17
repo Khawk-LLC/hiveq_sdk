@@ -410,6 +410,53 @@ Confirm a `terminate()` by the handle ceasing to resolve — `status()` then
 raises `LivesimError` with `status == 404`. That is the only way to tell a
 termination that took from one that was merely accepted.
 
+#### Parameters  (owner only)
+
+```python
+deployment.params(strategy=None, live=True)   # -> {instance_name: {...}}
+deployment.set_params({"threshold": 0.25}, strategy=None)
+```
+
+`params()` returns one entry per strategy instance:
+
+| key | meaning |
+| --- | --- |
+| `params` | the deployment's **stored** values — the seed for a strategy's first run, and the record afterwards |
+| `live` | what the engine is running **right now** (Sigma stringifies every value) |
+| `drift` | the keys where the two disagree |
+| `live_available` / `live_note` | false + a reason when the engine could not be reached |
+
+Pass `live=False` to read only the stored values; that also works while the
+container is down.
+
+**`live` is authoritative.** The engine keeps its own param store, writes it on
+every change and reloads it at startup, so it — not the stored configuration — is
+what a container comes up on.
+
+`set_params()` pushes the change into the running engine **and** writes the
+deployment's stored configuration, so it applies immediately *and* is still in
+force after a container restart. Your `on_param_change(name, old, new)` fires for
+each one.
+
+The push is the part that lasts, so this needs the engine running. On a stopped
+deployment the stored configuration is updated but the engine never hears about
+it, and the next start comes up on what the engine last had. For the same reason,
+redeploying with a changed default does not displace a value the engine already
+holds — change it through `set_params()`, or `terminate` the strategy to clear
+the engine's store.
+
+Only parameters the strategy already declares can be set — an unknown name is
+rejected rather than quietly added, so a typo cannot look like it worked.
+
+With several strategies, `strategy=` picks one; omit it to apply the same change
+to all of them.
+
+**Non-zero `drift` means the engine has moved on from what was deployed** — a
+strategy changing its own params, or a change made anywhere other than
+`set_params()` or the viewer. The engine's values are the ones in force, and they
+survive a restart; `drift` is how you see that the stored record no longer
+describes what is running.
+
 #### Data  (always a pull, never a stream)
 
 ```python
