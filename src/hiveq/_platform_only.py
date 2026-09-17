@@ -30,18 +30,33 @@ NOTICE = """\
 
      import hiveq.flow as hf
 
+     CFG = {'MySection': {'primary': 'MySrc'},
+            'MySrc': {'transport': 'HiveQ',
+                      'dataset': 'HIVEQ_US_EQ', 'schema': 'bars_1m'}}
+
      def my_job():
-         import hiveq.driver as dd            # the real driver, in-container
+         # Imports go INSIDE the deployed function so they resolve
+         # against the container's real driver, not these stubs.
+         from hiveq.driver.data_driver import Driver
          from hiveq.driver import Cache
-         df = dd.load('MySection', cache=Cache.PULL_UPDATE_CACHE)
+
+         d = Driver(config=CFG)          # NOT dd.init() -- see below
+         df = d.load('MySection', cache=Cache.PULL_UPDATE_CACHE)
          print(f'{len(df)} rows')             # -> job.logs()
          return {'rows': len(df)}             # -> job.result()['result']
 
      job = hf.deploy_job(my_job, task_name='my-job', wait=True)
      print(job.result())
 
- Keep the `hiveq.driver` imports INSIDE the deployed function, so they
- resolve against the container's real driver instead of these stubs.
+ Construct `Driver` directly; do NOT use the module-level `dd.init` /
+ `dd.load` / `dd.save` facade in a deployed job. The facade builds its
+ file logger under the current directory, and in a job container the cwd
+ is `/app`, which is READ-ONLY -- so the first `dd.*` call dies with:
+
+     OSError: [Errno 30] Read-only file system: '/app/logs'
+
+ (`os.chdir('/tmp')` before the first `dd.*` call also works, but
+ constructing `Driver` has no process-wide side effect.)
 
  Docs: run `hiveq docs`, then data_driver/llms.txt §1.1 (deploying driver
  code) and §1.2 (this contract: what is real vs what raises); llms.txt R13

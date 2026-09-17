@@ -10,6 +10,15 @@ side needs to know where this class came from.
 The executor invokes the payload generically — it calls ``.run()`` and may read
 ``.target`` to reach the wrapped task — so this minimal shape is all it needs.
 """
+# PEP 563. This class is pickled BY VALUE, so its ``__annotations__`` travel in
+# every payload as live type objects. On Python 3.14 ``typing.Optional[str]`` is
+# a ``types.UnionType``, which cloudpickle reduces to ``types.UnionType[...]`` --
+# and that class is not subscriptable before 3.14, so the platform executor
+# (3.12) fails every payload with "type 'types.UnionType' is not subscriptable"
+# before it reads a line of user code. Keeping annotations as strings keeps type
+# objects out of the pickle entirely.
+from __future__ import annotations
+
 from typing import Any, Dict, Optional, Tuple
 
 
