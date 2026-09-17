@@ -76,17 +76,28 @@ class LivesimPing:
 
         # Imported here, not at module scope: importing the SDK before the
         # profile is applied would bind it to whatever ~/.hiveq/.env points at.
-        from hiveq.flow.trading_types import OrderType
+        from hiveq.flow.trading import price_utils
+        from hiveq.flow.trading_types import OrderSide, OrderType
 
-        ctx.buy_order(
+        # Round to the instrument's tick. ES ticks at 0.25, so a plain
+        # round(price, 2) is rejected OFF_TICK and the order never reaches the
+        # book -- the callback raises and nothing is placed.
+        limit = price_utils.adjust_tick_size(
+            trade.symbol, price * self.AWAY_FRACTION
+        )
+
+        # place_order takes side and order_type explicitly; buy_order /
+        # sell_order are the shorthands that fix the side for you.
+        ctx.place_order(
             trade.symbol,
-            quantity=1,
-            order_type=OrderType.LIMIT,
-            limit_price=round(price * self.AWAY_FRACTION, 2),
+            OrderSide.BUY,
+            1,
+            OrderType.LIMIT,
+            limit_price=limit,
         )
         self.sent += 1
         ctx.add_event_log(
-            message=f"ping #{self.sent}: resting buy below {price}",
+            message=f"ping #{self.sent}: resting buy at {limit} below {price}",
             symbol=trade.symbol,
         )
 
