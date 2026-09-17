@@ -44,12 +44,21 @@ SETTLED = frozenset(
 class LivesimError(RuntimeError):
     """A LiveSim API call was rejected. ``code`` is the platform error code."""
 
-    def __init__(self, status: int, body: Dict[str, Any]):
+    def __init__(self, status: int, body: Dict[str, Any], url: str = ""):
         error = body.get("error") or {}
         self.code = error.get("code", "UNKNOWN")
         self.status = status
+        self.url = url
         self.findings = (error.get("security") or {}).get("findings") or []
         message = error.get("message") or body.get("message") or body
+        if status == 404 and not self.code.startswith("LIVESIM_"):
+            # A bare 404 means the route is not there, which almost always
+            # means this platform does not have the LiveSim v1 API deployed --
+            # not that something of yours is missing.
+            message = (
+                f"no LiveSim v1 API at {url or 'the configured platform'}. "
+                f"Point HIVEQ_AUTH_URL at a platform that has it."
+            )
         if self.findings:
             detail = "; ".join(
                 f"{f.get('category')}: {f.get('message')}" for f in self.findings
@@ -74,15 +83,16 @@ def _call(method: str, path: str, **kwargs) -> Dict[str, Any]:
 
     headers = {"X-API-Key": api_key}
     headers.update(kwargs.pop("headers", {}))
+    url = f"{_base_url()}{path}"
     response = requests.request(
-        method, f"{_base_url()}{path}", headers=headers, timeout=300, **kwargs
+        method, url, headers=headers, timeout=300, **kwargs
     )
     if not response.ok:
         try:
             body = response.json()
         except ValueError:
             body = {"message": response.text[:500]}
-        raise LivesimError(response.status_code, body)
+        raise LivesimError(response.status_code, body, url)
     return response.json()["data"]
 
 
@@ -236,7 +246,7 @@ class Deployment:
                 body = response.json()
             except ValueError:
                 body = {"message": response.text[:500]}
-            raise LivesimError(response.status_code, body)
+            raise LivesimError(response.status_code, body, response.url)
         if format == "csv":
             return response.text
         return response.json()["data"]
