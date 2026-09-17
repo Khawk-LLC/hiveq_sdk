@@ -33,24 +33,52 @@ import time
 
 # --- strategy ---------------------------------------------------------------
 class LivesimPing:
-    """Place one small limit order per interval, so there is something to read."""
+    """Rest one passive limit order every interval, so there is order flow to see.
+
+    Driven by ``on_trade`` because the deployment subscribes to trades. The
+    limit sits well away from the market, so it produces orders to read without
+    ever filling or taking a position.
+    """
+
+    INTERVAL_S = 20.0
+    AWAY_FRACTION = 0.90  # far enough below the market that it will not trade
 
     def __init__(self):
-        self.last_ns = 0
+        self.last = 0.0
+        self.sent = 0
 
     def on_start(self, ctx, event):
+        # Subscriptions belong in on_start (R3). Listing symbols on the
+        # StrategyConfig alone does not subscribe you -- without this the
+        # strategy deploys, runs, and never receives a single event.
+        ctx.subscribe_futures_trades(symbols=ctx.symbols)
         ctx.add_event_log(message="LivesimPing started", symbol=ctx.symbols[0])
 
-    def on_bar(self, ctx, event):
-        bar = event.data()
-        interval_ns = 60 * 1_000_000_000
-        if bar.timestamp - self.last_ns < interval_ns:
+    def on_trade(self, ctx, event):
+        now = time.monotonic()
+        if now - self.last < self.INTERVAL_S:
             return
-        self.last_ns = bar.timestamp
-        ctx.place_order(
-            symbol=bar.symbol,
+        self.last = now
+
+        trade = event.data()
+        price = float(getattr(trade, "price", 0) or 0)
+        if price <= 0:
+            return
+
+        # Imported here, not at module scope: importing the SDK before the
+        # profile is applied would bind it to whatever ~/.hiveq/.env points at.
+        from hiveq.flow.trading_types import OrderType
+
+        ctx.buy_order(
+            trade.symbol,
             quantity=1,
-            limit_price=round(bar.close * 0.99, 2),
+            order_type=OrderType.LIMIT,
+            limit_price=round(price * self.AWAY_FRACTION, 2),
+        )
+        self.sent += 1
+        ctx.add_event_log(
+            message=f"ping #{self.sent}: resting buy below {price}",
+            symbol=trade.symbol,
         )
 
 
