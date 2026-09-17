@@ -32,6 +32,13 @@ import time
 
 
 # --- strategy ---------------------------------------------------------------
+# Module level, not a CLI arg: the strategy is shipped as source and rebuilt on
+# the platform, so anything it references has to be in that source.
+# Continuous front-month, which is what the platform's futures feeds
+# publish under. A dated contract like "ESU6" subscribes to nothing.
+SYMBOL = "ES.c.0"
+
+
 class LivesimPing:
     """Rest one passive limit order every interval, so there is order flow to see.
 
@@ -51,8 +58,10 @@ class LivesimPing:
         # Subscriptions belong in on_start (R3). Listing symbols on the
         # StrategyConfig alone does not subscribe you -- without this the
         # strategy deploys, runs, and never receives a single event.
-        ctx.subscribe_futures_trades(symbols=ctx.symbols)
-        ctx.add_event_log(message="LivesimPing started", symbol=ctx.symbols[0])
+        from hiveq.flow.config import AssetType
+
+        ctx.subscribe_trades([SYMBOL], AssetType.FUTURES)
+        ctx.add_event_log(message="LivesimPing started", symbol=SYMBOL)
 
     def on_trade(self, ctx, event):
         now = time.monotonic()
@@ -160,10 +169,6 @@ def main() -> int:
         # whatever the first left behind.
         default=f"LivesimPing{int(time.time()) % 100000}",
     )
-    parser.add_argument("--symbol", default="ESU6")
-    parser.add_argument(
-        "--asset", default="FUTURES", choices=["FUTURES", "EQUITY"]
-    )
     parser.add_argument(
         "--observe",
         type=int,
@@ -216,18 +221,18 @@ def main() -> int:
     strategy = StrategyConfig(
         name="LivesimPing",
         type="LivesimPing",
-        symbols=[args.symbol],
+        symbols=[SYMBOL],
         # Tag the asset so the platform places you on the right container.
         # With no backtest to infer from, an untagged strategy falls back to
         # the futures default.
-        params={"assetType": args.asset},
+        params={"assetType": "FUTURES"},
     )
 
     data_configs = [
         {
             "type": "live",
             "market_data_source": "Activ",
-            "schema": ["fut_trades"] if args.asset == "FUTURES" else ["eq_trades"],
+            "schema": ["fut_trades"],
         }
     ]
 
