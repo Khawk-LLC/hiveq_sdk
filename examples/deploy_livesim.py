@@ -16,16 +16,18 @@ Prerequisites
 2. Have a HiveQ API key available -- the only credential needed.
 
 Run:
-    python deploy_livesim.py               # deploy and inspect
-    python deploy_livesim.py --dry-run     # validate and plan, deploy nothing
-    python deploy_livesim.py --cleanup     # terminate it again at the end
+    python deploy_livesim.py --local            # against a local stack
+    python deploy_livesim.py --local --dry-run  # validate and plan, deploy nothing
+    python deploy_livesim.py --local --cleanup  # terminate it again at the end
+
+--local loads ~/.hiveq/profiles/local.env. Without it, the run targets whatever
+~/.hiveq/.env points at. Either way it prints the platform it chose, because a
+deploy going somewhere unintended is the easiest mistake to make here.
 """
 
 import argparse
+import os
 import time
-
-import hiveq.flow as hf
-from hiveq.flow import StrategyConfig
 
 
 # --- strategy ---------------------------------------------------------------
@@ -51,6 +53,22 @@ class LivesimPing:
         )
 
 
+def _load_profile(name: str) -> None:
+    """Load ~/.hiveq/profiles/<name>.env into the environment, overriding."""
+    path = os.path.join(
+        os.path.expanduser("~"), ".hiveq", "profiles", f"{name}.env"
+    )
+    if not os.path.isfile(path):
+        raise SystemExit(f"no such profile: {path}")
+    with open(path) as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ[key.strip()] = value.strip().strip('"').strip("'")
+
+
 def _await_status(deployment, expected: str, timeout: float = 30.0) -> str:
     """Poll until the deployment reports ``expected``, or the timeout expires."""
     deadline = time.time() + timeout
@@ -66,7 +84,36 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
     parser.add_argument("--instance-name", default="LivesimPingExample")
+    parser.add_argument(
+        "--profile",
+        help="Load ~/.hiveq/profiles/<name>.env for this run, overriding the "
+        "active ~/.hiveq/.env. Use this to target a platform other than the "
+        "one your profile currently points at.",
+    )
+    parser.add_argument(
+        "--local",
+        action="store_const",
+        const="local",
+        dest="profile",
+        help="Shorthand for --profile local",
+    )
     args = parser.parse_args()
+
+    # Applied before the SDK is imported: it reads ~/.hiveq/.env at import time
+    # and only fills in what is unset, so overriding afterwards is too late.
+    # The whole profile is loaded, not just the URL -- each platform has its own
+    # API key, and pointing the URL at one platform while still holding
+    # another's key just fails authentication.
+    if args.profile:
+        _load_profile(args.profile)
+
+    import hiveq.flow as hf
+    from hiveq.flow import StrategyConfig
+    from hiveq.flow.livesim import _base_url
+
+    # Print it every run. A deploy silently going to the wrong platform is the
+    # single easiest mistake to make here.
+    print(f"platform      : {_base_url()}")
 
     strategy = StrategyConfig(
         name="LivesimPing",
