@@ -40,65 +40,59 @@ SYMBOL = "ES.c.0"
 
 
 class LivesimPing:
-    """Rest one passive limit order every interval, so there is order flow to see.
+    """Rest one passive limit order per interval, so there is order flow to see.
 
-    Driven by ``on_trade`` because the deployment subscribes to trades. The
-    limit sits well away from the market, so it produces orders to read without
-    ever filling or taking a position.
+    Driven by a **timer**, not by trades. A trade-driven probe only fires when
+    ticks arrive, so it goes silent in a quiet overnight session and there is
+    nothing to check a pause against. A timer fires regardless.
+
+    The limit sits well below the market, so it produces orders to read without
+    filling or taking a position.
     """
 
-    INTERVAL_S = 20.0
+    TIMER_ID = "ping"
     AWAY_FRACTION = 0.90  # far enough below the market that it will not trade
 
     def __init__(self):
-        self.last = 0.0
+        self.last_price = 0.0
         self.sent = 0
 
     def on_start(self, ctx, event):
-        # Subscriptions belong in on_start (R3). Listing symbols on the
-        # StrategyConfig alone does not subscribe you -- without this the
-        # strategy deploys, runs, and never receives a single event.
+        from datetime import timedelta
+
         from hiveq.flow.config import AssetType
 
+        # Subscriptions belong in on_start (R3). Listing symbols on the
+        # StrategyConfig alone does not subscribe you.
         ctx.subscribe_trades([SYMBOL], AssetType.FUTURES)
+        ctx.set_timer(self.TIMER_ID, timedelta(seconds=20))
         ctx.add_event_log(message="LivesimPing started", symbol=SYMBOL)
 
     def on_trade(self, ctx, event):
-        now = time.monotonic()
-        if now - self.last < self.INTERVAL_S:
-            return
-        self.last = now
+        # Only track the last price here; the order goes out on the timer.
+        price = float(getattr(event.data(), "price", 0) or 0)
+        if price > 0:
+            self.last_price = price
 
-        trade = event.data()
-        price = float(getattr(trade, "price", 0) or 0)
-        if price <= 0:
+    def on_timer(self, ctx, event):
+        if self.last_price <= 0:
             return
 
-        # Imported here, not at module scope: importing the SDK before the
-        # profile is applied would bind it to whatever ~/.hiveq/.env points at.
         from hiveq.flow.trading import price_utils
         from hiveq.flow.trading_types import OrderSide, OrderType
 
         # Round to the instrument's tick. ES ticks at 0.25, so a plain
-        # round(price, 2) is rejected OFF_TICK and the order never reaches the
-        # book -- the callback raises and nothing is placed.
+        # round(price, 2) is rejected OFF_TICK and never reaches the book.
         limit = price_utils.adjust_tick_size(
-            trade.symbol, price * self.AWAY_FRACTION
+            SYMBOL, self.last_price * self.AWAY_FRACTION
         )
-
-        # place_order takes side and order_type explicitly; buy_order /
-        # sell_order are the shorthands that fix the side for you.
         ctx.place_order(
-            trade.symbol,
-            OrderSide.BUY,
-            1,
-            OrderType.LIMIT,
-            limit_price=limit,
+            SYMBOL, OrderSide.BUY, 1, OrderType.LIMIT, limit_price=limit
         )
         self.sent += 1
         ctx.add_event_log(
-            message=f"ping #{self.sent}: resting buy at {limit} below {price}",
-            symbol=trade.symbol,
+            message=f"ping #{self.sent}: resting buy at {limit}",
+            symbol=SYMBOL,
         )
 
 
