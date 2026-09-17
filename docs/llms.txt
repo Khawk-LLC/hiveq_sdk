@@ -209,6 +209,22 @@ run_backtest(
 #   requirements: named package specs installed before task deserialization;
 #                 requires the matching orchestrator/executor release.
 
+deploy_livesim(                                 # deploy straight to LiveSim — §2.3
+    strategy_configs: list[StrategyConfig],
+    *,
+    data_configs: Optional[list[dict]] = None,
+    instance_name: Optional[str] = None,        # defaults to the strategy's name
+    instances: int = 1,                         # 1..10
+    container_id: Optional[str] = None,         # needs livesim:select_target; omit to auto-route
+    parameter_overrides: Optional[list[dict]] = None,
+    signal_ids: Optional[list[str]] = None,
+    dry_run: bool = False,                      # validate + plan, materialize nothing
+    wait: bool = False,                         # block until it settles
+    **kwargs,
+) -> Deployment                                 # handle addressed by deployment_id (§2.3)
+
+get_deployment(deployment_id: str) -> Deployment  # re-attach to a deployment (§2.3)
+
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
 event_logs() -> pandas.DataFrame                # logs of the LAST run_backtest, fetched over REST (§10.2)
@@ -265,6 +281,107 @@ Credentials/identity (API key, user/org) are **not** set here — they resolve f
 > isn't running" from a quiet log, and never pass `'INFO'` on a normal run just
 > to see milestone lines. To investigate behavior, re-run with
 > `config={'hiveq_log_level': 'DEBUG'}` (§11.5).
+
+### 2.3 LiveSim deployment  (module: `hiveq.flow`)
+
+`deploy_livesim` is the live counterpart of `run_backtest`: it captures your
+strategy the same way, ships it, and returns a handle. **No backtest is
+involved** — this is not a promotion of a completed run.
+
+The handle is `deployment_id`. It is stable across container restarts and every
+later call is addressed by it. There is deliberately **no `run_id`** in this
+API: a LiveSim run id names one container *engine lifetime*, shared by every
+deployment on that container and regenerated on restart, so it does not
+identify yours.
+
+```python
+if __name__ == "__main__":                       # REQUIRED — same rule as R14
+    deployment = hf.deploy_livesim(
+        [StrategyConfig(name="MyStrategy", type="MyStrategy",
+                        symbols=["ESU6"],
+                        params={"assetType": "FUTURES"})],
+    )
+    print(deployment.deployment_id)
+    print(deployment.wait())                     # blocks until it settles
+```
+
+The `if __name__ == "__main__":` guard is **required**. Your module is shipped
+as source and re-imported to rebuild the strategy, so a deploy at import time
+re-runs itself during that restore and fails.
+
+**Tag the asset.** With no backtest to infer from, a strategy that does not set
+`assetType` (or `asset_type`) in its params falls back to the FUTURES default
+and lands on the wrong container.
+
+#### State
+
+```python
+deployment.status()   # -> dict: status, container_id, instance_names, owner, failure_reason, ...
+deployment.wait(timeout=180.0, poll_interval=3.0)   # block until settled, return the state
+deployment.logs(strategy=None, tail=500)            # -> str, each strategy's own log file
+```
+
+`status` is one of `scheduled | running | paused | stopped | terminated |
+failed`. `failed` means the engine could not bring the strategy up —
+`failure_reason` says what could not be loaded.
+
+#### Lifecycle  (owner only)
+
+```python
+deployment.start(strategy=None)      # start / resume
+deployment.stop(strategy=None)       # stop, leaving the deployment in place
+deployment.pause(strategy=None)      # pause; resume with start()
+deployment.terminate(strategy=None)  # remove the deployment — NOT reversible
+```
+
+Owner-only, checked per strategy instance. Belonging to the same organization
+does not grant control of a colleague's strategy.
+
+`terminate()` **without** a strategy name removes the whole deployment, folder
+and bookkeeping included, and cannot be undone. **With** one it stops that
+single strategy and leaves the deployment.
+
+Commands are applied asynchronously by the engine, so **poll for the state
+rather than sleeping**:
+
+```python
+deployment.pause()
+while deployment.status()["status"] != "paused":
+    time.sleep(1)
+```
+
+Confirm a `terminate()` by the handle ceasing to resolve — `status()` then
+raises `LivesimError` with `status == 404`. That is the only way to tell a
+termination that took from one that was merely accepted.
+
+#### Data  (always a pull, never a stream)
+
+```python
+deployment.orders(limit=10_000, offset=0, strategy=None, format="json")
+deployment.trades(...)
+deployment.positions(...)
+deployment.metrics(...)
+deployment.events(...)          # strategy event logs
+```
+
+Each returns a list of row dicts, or CSV text with `format="csv"`. Every call
+is a complete snapshot; there is no streaming in this version.
+
+Empty results are normal outside market hours — a deployment that has not
+traded yet returns zero rows and is not failing.
+
+#### Errors
+
+Failures raise `hiveq.flow.livesim.LivesimError`, carrying `.code` (e.g.
+`LIVESIM_INSTANCE_NAME_IN_USE`, `LIVESIM_SECURITY_POLICY_VIOLATION`,
+`LIVESIM_DEPLOYMENT_NOT_FOUND`), `.status`, and `.findings` when the security
+gate rejected the strategy — each finding naming the category and the import
+that was refused, so the code can be corrected.
+
+Instance names are unique within a container: redeploying a name that is still
+in use raises `LIVESIM_INSTANCE_NAME_IN_USE`.
+
+See `examples/deploy_livesim.py` for the whole loop end to end.
 
 ### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
 

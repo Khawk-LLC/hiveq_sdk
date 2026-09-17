@@ -153,6 +153,50 @@ run.logs()             # execution logs
 
 The same handle works for any past run — `hf.get_run(run_id)` reattaches to it.
 
+## Go live: deploy straight to LiveSim
+
+The same strategy, running on live market data — no backtest in the path:
+
+```python
+deployment = hf.deploy_livesim(
+    [StrategyConfig(name="MyStrategy", type="MyStrategy",
+                    symbols=["ESU6"], params={"assetType": "FUTURES"})],
+)
+deployment.wait()
+```
+
+You get a `Deployment` back, addressed by `deployment_id` — stable across
+container restarts, and the handle for everything after:
+
+```python
+deployment.status()      # scheduled | running | paused | stopped | terminated | failed
+deployment.logs()        # the strategy's own log file
+
+deployment.orders()      # rows, or CSV with format="csv"
+deployment.trades()
+deployment.positions()
+deployment.metrics()
+deployment.events()
+
+deployment.pause()       # and start() / stop() / terminate()
+```
+
+Reads are pulls — each call is a complete snapshot, not a stream.
+
+Lifecycle control is **owner only**: belonging to the same organization does
+not let you drive a colleague's strategy. Commands are applied asynchronously,
+so poll `status()` rather than sleeping, and confirm a `terminate()` by the
+handle no longer resolving.
+
+Two things worth knowing up front. Put the deploy under
+`if __name__ == "__main__":` — your module is shipped as source and re-imported
+to rebuild the strategy, so a deploy at import time re-runs itself. And tag the
+strategy with `assetType`: with no backtest to infer from, an untagged strategy
+falls back to the futures default and lands on the wrong container.
+
+`hf.get_deployment(deployment_id)` reattaches to anything already deployed.
+See `examples/deploy_livesim.py` for the full loop.
+
 ## The strategy model
 
 - **One class, callback methods.** Implement the events you care about —

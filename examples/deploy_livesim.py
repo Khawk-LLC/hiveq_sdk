@@ -16,7 +16,8 @@ Prerequisites
 2. Have a HiveQ API key available -- the only credential needed.
 
 Run:
-    python deploy_livesim.py --local            # against a local stack
+    python deploy_livesim.py --local                      # against a local stack
+    python deploy_livesim.py --local --observe 300        # wait longer for orders
     python deploy_livesim.py --local --dry-run  # validate and plan, deploy nothing
     python deploy_livesim.py --local --cleanup  # terminate it again at the end
 
@@ -69,6 +70,47 @@ def _load_profile(name: str) -> None:
             os.environ[key.strip()] = value.strip().strip('"').strip("'")
 
 
+def _order_count(deployment) -> int:
+    """How many orders this deployment has placed so far."""
+    return len(deployment.orders(limit=10_000))
+
+
+def _await_orders(deployment, timeout: float, poll: float = 10.0) -> int:
+    """Poll until the strategy places its first orders, or the window expires.
+
+    Returns the count seen. Zero is a legitimate outcome -- outside market
+    hours nothing will trade, and that is not a failure of the deployment.
+    """
+    deadline = time.time() + timeout
+    count = _order_count(deployment)
+    while count == 0 and time.time() < deadline:
+        remaining = int(deadline - time.time())
+        print(f"  ... none yet, {remaining}s left")
+        time.sleep(poll)
+        count = _order_count(deployment)
+    return count
+
+
+def _await_gone(deployment, timeout: float = 30.0) -> bool:
+    """True once the deployment stops resolving, which is what terminate means.
+
+    Checking the handle rather than trusting the call is the only way to tell a
+    termination that took from one that was merely accepted.
+    """
+    from hiveq.flow.livesim import LivesimError
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            deployment.status()
+        except LivesimError as exc:
+            if exc.status == 404:
+                return True
+            raise
+        time.sleep(2)
+    return False
+
+
 def _await_status(deployment, expected: str, timeout: float = 30.0) -> str:
     """Poll until the deployment reports ``expected``, or the timeout expires."""
     deadline = time.time() + timeout
@@ -83,7 +125,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
-    parser.add_argument("--instance-name", default="LivesimPingExample")
+    parser.add_argument(
+        "--instance-name",
+        # Unique per run: an instance name is unique within its
+        # container, so a fixed one makes the second run collide with
+        # whatever the first left behind.
+        default=f"LivesimPing{int(time.time()) % 100000}",
+    )
+    parser.add_argument("--symbol", default="ESU6")
+    parser.add_argument(
+        "--asset", default="FUTURES", choices=["FUTURES", "EQUITY"]
+    )
+    parser.add_argument(
+        "--observe",
+        type=int,
+        default=180,
+        help="Seconds to wait for the strategy to place its first orders "
+        "(default 180). Without orders a pause cannot be verified.",
+    )
+    parser.add_argument(
+        "--settle",
+        type=int,
+        default=60,
+        help="Seconds to hold after pausing and after resuming, to see "
+        "whether order flow actually stopped and restarted (default 60).",
+    )
     parser.add_argument(
         "--profile",
         help="Load ~/.hiveq/profiles/<name>.env for this run, overriding the "
@@ -115,22 +181,25 @@ def main() -> int:
     # single easiest mistake to make here.
     print(f"platform      : {_base_url()}")
 
+    # Futures by default: they trade nearly around the clock, so the pause and
+    # resume checks below have order flow to measure. An equities symbol only
+    # trades during US market hours, and outside them there is nothing to
+    # prove a pause against.
     strategy = StrategyConfig(
         name="LivesimPing",
         type="LivesimPing",
-        symbols=["AAPL"],
-        # Tag the asset so the platform places you on an equities container.
-        # With no backtest to infer from, a strategy that does not tag itself
-        # falls back to the futures default and lands on the wrong box.
-        params={"assetType": "EQUITY"},
+        symbols=[args.symbol],
+        # Tag the asset so the platform places you on the right container.
+        # With no backtest to infer from, an untagged strategy falls back to
+        # the futures default.
+        params={"assetType": args.asset},
     )
 
-    # The live data this strategy wants.
     data_configs = [
         {
             "type": "live",
             "market_data_source": "Activ",
-            "schema": ["eq_trades"],
+            "schema": ["fut_trades"] if args.asset == "FUTURES" else ["eq_trades"],
         }
     ]
 
@@ -166,36 +235,72 @@ def main() -> int:
     for line in logs.splitlines()[-5:]:
         print(f"  {line}")
 
-    # --- records ------------------------------------------------------------
-    # Empty until the strategy trades -- outside market hours that is expected,
-    # not a failure.
+    # --- watch it trade -----------------------------------------------------
+    # Wait for the strategy to actually place orders. Without this there is
+    # nothing to check a pause against: a deployment that has never traded
+    # looks identical whether it is running or paused.
+    print(f"\nwatching for orders (up to {args.observe}s):")
+    traded = _await_orders(deployment, args.observe)
+    if traded == 0:
+        print("  no orders yet -- the market is likely closed for this symbol.")
+        print("  lifecycle is still exercised below, but without order-flow")
+        print("  evidence the pause can only be checked by its reported state.")
+    else:
+        print(f"  {traded} orders placed")
+
     print("\nrecords:")
     for name in ("orders", "trades", "positions", "metrics", "events"):
-        rows = getattr(deployment, name)(limit=100)
+        rows = getattr(deployment, name)(limit=1000)
         print(f"  {name:10}: {len(rows)} rows")
-
-    # CSV instead of rows, for anything you want to keep.
-    csv = deployment.orders(limit=100, format="csv")
+    csv = deployment.orders(limit=1000, format="csv")
     print(f"  orders.csv: {len(csv.splitlines())} lines")
 
-    # --- lifecycle ----------------------------------------------------------
-    # Lifecycle commands travel to the engine and are applied asynchronously,
-    # so poll for the state rather than sleeping a fixed amount.
-    print("\nlifecycle:")
+    # --- pause, and prove it took ------------------------------------------
+    print("\npause:")
+    before = _order_count(deployment)
     deployment.pause()
-    print(f"  paused    -> {_await_status(deployment, 'paused')}")
-    deployment.start()
-    print(f"  started   -> {_await_status(deployment, 'running')}")
+    status = _await_status(deployment, "paused")
+    print(f"  status      : {status}")
+    print(f"  orders at pause: {before}")
 
-    if args.cleanup:
-        # Removes the deployment entirely. Not reversible.
-        deployment.terminate()
-        print("  terminated")
+    print(f"  holding {args.settle}s to see whether anything still trades...")
+    time.sleep(args.settle)
+    during = _order_count(deployment)
+    print(f"  orders after   : {during}")
+    if traded == 0:
+        print("  inconclusive: it was not trading before the pause either.")
+    elif during == before:
+        print("  PAUSED: no new orders while paused.")
     else:
-        print(f"\nstill running. terminate with:")
-        print(
-            f"  hf.get_deployment('{deployment.deployment_id}').terminate()"
-        )
+        print(f"  NOT PAUSED: {during - before} new orders arrived while paused.")
+
+    # --- resume, and prove that took too ------------------------------------
+    print("\nresume:")
+    deployment.start()
+    print(f"  status      : {_await_status(deployment, 'running')}")
+    if traded:
+        print(f"  holding {args.settle}s to see trading resume...")
+        time.sleep(args.settle)
+        after = _order_count(deployment)
+        print(f"  orders after   : {after}")
+        if after > during:
+            print(f"  RESUMED: {after - during} new orders since resuming.")
+        else:
+            print("  no new orders yet -- may simply be between intervals.")
+
+    # --- terminate, and confirm it is gone ----------------------------------
+    if args.cleanup:
+        print("\nterminate:")
+        deployment.terminate()
+        gone = _await_gone(deployment)
+        if gone:
+            print("  TERMINATED: the handle no longer resolves.")
+        else:
+            print("  still resolving -- termination did not take.")
+            return 1
+    else:
+        print("\nstill running. terminate with:")
+        print(f"  hf.get_deployment('{deployment.deployment_id}').terminate()")
     return 0
 
 
