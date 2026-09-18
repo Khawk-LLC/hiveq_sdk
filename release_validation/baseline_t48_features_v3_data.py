@@ -4,13 +4,18 @@ import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint, emit_checkpoint, finish
+from qa_fixtures import profile, require
 
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
 
+# The logical source id is profile-independent; the feature-set name and the
+# date that carries rows are not. HIVEQ_QUANT_FEATURES_V3 does not exist at all
+# on the vm profile, so qa_fixtures reports that as a GAP rather than letting
+# an empty run read as an SDK regression. Resolved under the __main__ guard,
+# never at import: the container imports this module for the strategy class.
 FEATURES_ID = "FeaturesTest"
-FEATURES_SYMBOL = "0930_NBV_Mom_Long_ES_V0"
 
 SIGNAL_COLUMNS = ("signal1", "signal2", "signal3")
 WEIGHT_COLUMNS = ("weight1", "weight2", "weight3")
@@ -100,6 +105,7 @@ class SdkT48:
 
 
 if __name__ == "__main__":
+    fixture = require("quant_features_v3", "t48_features_v3_data_example")
     # HIVEQ_QUANT_FEATURES_V3 returns a default set of fields per row
     # (`date,time,symbol,ticker,root,score,price,volume,freq,signal1`).
     # Additional columns like `signal2/3`, `weight1..3`, `stop_px`,
@@ -108,8 +114,8 @@ if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT48", type="SdkT48", symbols=["ES.c.0"])],
         symbols=["ES.c.0"],
-        start_date="2026-06-30",
-        end_date="2026-06-30",
+        start_date=fixture.start_date,
+        end_date=fixture.end_date,
         data_configs=[
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_FUT", "schema": ["bars_1m"]},
             {
@@ -117,7 +123,7 @@ if __name__ == "__main__":
                 "dataset": "HIVEQ_QUANT_FEATURES_V3",
                 "schema": ["quant_features_v3"],
                 "id": FEATURES_ID,
-                "symbols": [FEATURES_SYMBOL],
+                "symbols": [fixture.symbol],
                 # Request non-default columns (weights, extra signals, stop/target).
                 "filters": {
                     "fields": "date,time,symbol,signal1,signal2,signal3,weight1,weight2,weight3,stop_px,target_px",
@@ -138,4 +144,4 @@ if __name__ == "__main__":
         "weights_present": state["with_any_weight"] > 0,
         "weight_columns_projected": state["rows"] > 0 and state["projection_missing_weights"] == 0,
         "payload_samples_persisted": bool(state["samples"]),
-    }, extra=str(state))
+    }, extra=f"profile={profile()}, fixture={fixture}, {state}")

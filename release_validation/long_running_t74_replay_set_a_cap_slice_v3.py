@@ -81,7 +81,7 @@ def upload_replay_fixture() -> dict[str, Any]:
     }
 
 
-class SdkT48ReplaySetACapSliceV3:
+class SdkT74ReplaySetACapSliceV3:
     def __init__(self):
         self.custom_events = 0
         self.orders_requested = 0
@@ -245,7 +245,7 @@ def main() -> None:
         strategy_configs=[
             StrategyConfig(
                 name="ReplaySetACapSliceV3",
-                type="SdkT48ReplaySetACapSliceV3",
+                type="SdkT74ReplaySetACapSliceV3",
             )
         ],
         data_configs=[
@@ -338,7 +338,7 @@ def main() -> None:
     print(f"return_stats_total_trades={total_trades_stat}")
     print(f"saved_outputs={OUTPUT_DIR}")
     print(f"run_artifacts={artifacts}")
-    finish_validation("t48_replay_set_a_cap_slice_v3", validation)
+    finish_validation("t74_replay_set_a_cap_slice_v3", validation)
 
 
 if __name__ == "__main__":

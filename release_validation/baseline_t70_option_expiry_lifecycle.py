@@ -140,9 +140,12 @@ if __name__ == "__main__":
     fills = state["fills"]
 
     if state["snaps"] == 0:
-        finish("t70_option_expiry_lifecycle",
-               {"option_snaps_available": False}, gap=True,
-               extra="no 0dte option snaps delivered for the window")
+        # No scored check here: `finish` computes FAIL whenever any check is
+        # False, so a `{"option_snaps_available": False}` check outranked
+        # `gap=True` and reported this data gap as a red failure. The absence
+        # is the whole message, so it belongs in `extra`.
+        finish("t70_option_expiry_lifecycle", {}, gap=True,
+               extra="no 0dte option snaps delivered for the window; snaps=0")
         raise SystemExit(0)
 
     long_symbol = held.get("long", "")

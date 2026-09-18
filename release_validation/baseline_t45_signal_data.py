@@ -5,13 +5,19 @@ import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint, emit_checkpoint, finish
+from qa_fixtures import profile, require
 
 import hiveq.flow as hf
 from hiveq.flow import StrategyConfig
 from hiveq.flow.config import AssetType
 
+# The logical source id is the strategy's own handle for the subscription and
+# is profile-independent. The signal *name* and the date that carries rows are
+# not -- see qa_fixtures for the measured per-profile coverage. The fixture is
+# resolved under the __main__ guard, never at import: the container imports
+# this module to find the strategy class and has no launcher profile, so a
+# module-level resolve would abort the strategy instead of the submitter.
 SIGNAL_ID = "SignalTest"
-SIGNAL_SYMBOL = "Spy-ClusterDecay-5m-v2"
 
 
 class SdkT45:
@@ -54,6 +60,7 @@ class SdkT45:
 
 
 if __name__ == "__main__":
+    fixture = require("quant_signals", "t45_signal_data_example")
     # HIVEQ_QUANT_SIGNALS uses the simple shape (schema+symbols): its wire filter
     # column is `symbol`, which matches the default `symbolFilterKey` — no
     # explicit filters block needed. Signal payload fields (`ticker`, `flag`,
@@ -63,8 +70,8 @@ if __name__ == "__main__":
     run = hf.run_backtest(
         strategy_configs=[StrategyConfig(name="SdkT45", type="SdkT45", symbols=["AAPL"])],
         symbols=["AAPL"],
-        start_date="2024-08-27",
-        end_date="2024-08-27",
+        start_date=fixture.start_date,
+        end_date=fixture.end_date,
         data_configs=[
             {"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ", "schema": ["bars_1m"]},
             {
@@ -72,7 +79,7 @@ if __name__ == "__main__":
                 "dataset": "HIVEQ_QUANT_SIGNALS",
                 "schema": ["signals"],
                 "id": SIGNAL_ID,
-                "symbols": [SIGNAL_SYMBOL],
+                "symbols": [fixture.symbol],
             },
         ],
     )
@@ -87,4 +94,4 @@ if __name__ == "__main__":
         "signal_json_has_fields": state["with_json_fields"] > 0,
         "symbols_present": state["signals"] > 0 and state["nonempty_sym"] == state["signals"],
         "payload_samples_persisted": bool(state["samples"]),
-    }, extra=str(state))
+    }, extra=f"profile={profile()}, fixture={fixture}, {state}")

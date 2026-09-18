@@ -185,17 +185,57 @@ def emit_checkpoint(ctx: Any, name: str, state: dict[str, Any]) -> None:
     ctx.add_event_log(name, sub_event_type=CHECKPOINT_TYPE, state_variable=state)
 
 
+def _response_body(exc: Any, limit: int = 400) -> str:
+    """The HTTP body behind a ``requests`` error, which ``raise_for_status`` drops."""
+    response = getattr(exc, "response", None)
+    try:
+        return (response.text or "")[:limit]
+    except Exception:  # noqa: BLE001 - diagnostics must never mask the original error
+        return ""
+
+
+def _run_record_missing(exc: Any) -> bool:
+    """True when a 404 means "that run id is unknown", not "that URL is wrong".
+
+    ``/api/strategy/v0/runs/{id}/...`` answers the two cases differently, which
+    is what makes them separable (measured against vm 2026-09-18):
+
+      * correct route, unknown run -> JSON
+        ``{"data": {"code": "VALIDATION_FAILED", "message": "Run not found: <id>"}}``
+      * wrong route, wrong API version, or an unmounted service -> a bare
+        ``404 Not Found`` page with no JSON body
+
+    Only the first is worth waiting on. A bare 404 is a routing failure that no
+    amount of retrying fixes, so it must stay fatal rather than being retried
+    into a timeout that hides the real cause.
+    """
+    response = getattr(exc, "response", None)
+    if response is None or getattr(response, "status_code", None) != 404:
+        return False
+    body = _response_body(exc, limit=2000)
+    return "VALIDATION_FAILED" in body or "Run not found" in body
+
+
 def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0) -> Any:
     """Call a read-only platform endpoint, retrying transient server faults.
 
     A 5xx on ``/status`` or ``/event-logs`` is a platform read fault, not a
     strategy result — retrying it keeps an unrelated gateway hiccup from being
-    reported as a validation failure. A newly submitted run can also return
-    404 briefly while its run metadata is materializing, so that specific
-    ``run.status()`` response is retried silently. It is an expected propagation
-    delay immediately after a successful submit, not a useful warning. Other
-    transient faults remain visible, while non-transient client errors (4xx)
-    and non-HTTP exceptions propagate unchanged.
+    reported as a validation failure.
+
+    A "Run not found" 404 is also retried, on every endpoint rather than only on
+    ``run.status()``. The two handlers do not agree about when a run exists: on
+    2026-09-18 ``t34`` had ``/status`` return ``DONE`` for a finished run while
+    ``/event-logs`` answered "Run not found" for the same id three seconds after
+    that run's first log row was persisted, which killed the case outright. The
+    ``run.status()`` form stays silent because it is the ordinary propagation
+    delay after a submit; the others print, because a run whose logs are being
+    denied *after* it reports final is worth seeing in the log.
+
+    A bare 404 (see :func:`_run_record_missing`) and every other 4xx propagate
+    unchanged, with the response body printed first — ``raise_for_status``
+    discards it, and without it a routing 404 and a missing-record 404 are
+    indistinguishable after the fact.
     """
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -203,24 +243,39 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
             return read()
         except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
             status = getattr(getattr(exc, "response", None), "status_code", None)
+            record_missing = _run_record_missing(exc)
             transient = (
-                status == 404 and what == "run.status()"
-            ) or (status is not None and 500 <= int(status) < 600) or (
-                status is None
-                and exc.__class__.__name__ in {
-                    "ConnectionError", "Timeout", "ReadTimeout", "ChunkedEncodingError",
-                }
+                record_missing
+                or (status is not None and 500 <= int(status) < 600)
+                or (
+                    status is None
+                    and exc.__class__.__name__ in {
+                        "ConnectionError", "Timeout", "ReadTimeout", "ChunkedEncodingError",
+                    }
+                )
             )
             if not transient:
+                if status is not None:
+                    print(
+                        f"[ERROR] {what}: HTTP {status} is not retryable; "
+                        f"body={_response_body(exc)!r}",
+                        flush=True,
+                    )
                 raise
             last_exc = exc
-            if not (status == 404 and what == "run.status()"):
+            if not (record_missing and what == "run.status()"):
                 print(
                     f"[RETRY] {what}: transient platform fault "
-                    f"({status or exc.__class__.__name__}); attempt {attempt}/{attempts}",
+                    f"({status or exc.__class__.__name__}); attempt {attempt}/{attempts}"
+                    + (f"; body={_response_body(exc, 160)!r}" if record_missing else ""),
                     flush=True,
                 )
             time.sleep(delay)
+    print(
+        f"[ERROR] {what}: still failing after {attempts} attempts; "
+        f"body={_response_body(last_exc)!r}",
+        flush=True,
+    )
     raise last_exc
 
 
@@ -437,7 +492,7 @@ def finish(name: str, checks: dict[str, bool], extra: str = "", gap: bool = Fals
     status = ("GAP" if gap else "PASS") if not failed else "FAIL"
     detail = "; ".join(f"{key}={'ok' if ok else 'FAIL'}" for key, ok in checks.items())
     if extra:
-        detail = f"{detail}; {extra}"
+        detail = f"{detail}; {extra}" if detail else extra
     print(f"RESULT: {status} {name} — {detail}")
     if failed:
         raise AssertionError(f"{name}: failed checks: {', '.join(failed)}")
