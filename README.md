@@ -82,7 +82,9 @@ execution, settlement, analytics, and scale.
   reference it by name and version from any strategy or script. Indicators,
   signal models, and shared utilities live in one place, versioned — so research
   reuses production logic instead of re-implementing it, and you can roll forward
-  or back with confidence.
+  or back with confidence. What you push is readable across your organization by
+  default; keep a function private and share it with named teammates when you
+  choose, and give your namespace a friendly name like `quant.func`.
 - **Bring your own data.** Upload custom datasets to the platform and reference
   them from strategies the same way you reference market data.
 - **One console for everything.** The HiveQ platform gives you a single place to

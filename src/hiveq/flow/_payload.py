@@ -35,14 +35,25 @@ class _TaskWrapper:
         entry_method: Optional[str] = "run",
         args: Optional[Tuple] = None,
         kwargs: Optional[Dict[str, Any]] = None,
+        env: Optional[Dict[str, str]] = None,
     ):
         self.target = target
         self.entry_method = entry_method
         self.args = args or ()
         self.kwargs = kwargs or {}
+        # Process-local environment for the task (e.g. the schedule's timezone,
+        # so the script's own time checks agree with the schedule that woke it).
+        # Deliberately just os.environ entries: nothing here changes the
+        # process's clock or any other global the executor relies on.
+        self.env = env or {}
 
     def run(self) -> Any:
         """Execute the wrapped callable or its entry method."""
+        if self.env:
+            import os
+
+            for key, value in self.env.items():
+                os.environ.setdefault(str(key), str(value))
         if self.entry_method:
             method = getattr(self.target, self.entry_method)
             return method(*self.args, **self.kwargs)

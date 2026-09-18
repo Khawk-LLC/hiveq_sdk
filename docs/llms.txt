@@ -284,7 +284,7 @@ Credentials/identity (API key, user/org) are **not** set here — they resolve f
 
 ### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
 
-**What it is.** The *function registry* is a versioned store of reusable Python callables that live on the HiveQ platform rather than in any one script. You write a function once, `push_function(...)` it (cloudpickled, with its `requirements` and a semver `version`), and from then on it can be fetched and run from anywhere — other scripts, other machines, or inside platform jobs — by name and version. It's the building block for sharing indicators, signal functions, and utilities across strategies and teammates without copy-pasting code.
+**What it is.** The *function registry* is a versioned store of reusable Python callables that live on the HiveQ platform rather than in any one script. You write a function once, `push_function(...)` it (cloudpickled, with its `requirements` and a semver `version`), and from then on it can be fetched and run from anywhere — other scripts, other machines, or inside platform jobs — by name and version. It's the building block for sharing indicators, signal functions, and utilities across strategies and teammates without copy-pasting code. What you push is readable by your whole organization by default; mark it `private=True` to keep it to yourself, and open it up or share it with named people later (see **Who can see a function** below).
 
 **Why it's useful.**
 - **Reuse & versioning** — one canonical, immutable `name@version`; bump the version to publish changes (existing versions never change under you).
@@ -295,14 +295,18 @@ Functions are captured with cloudpickle; the registry host follows the same plat
 
 ```python
 push_function(func, *, version, name=None, requirements=None, docstring=None,
-              namespace=None, override=False, include_source=True) -> dict
+              namespace=None, override=False, include_source=True,
+              private=False) -> dict
 #   register a callable. version is semver ('1.0.0'). name defaults to func.__name__,
 #   docstring to func.__doc__. requirements: ['pandas>=2.0'] or {'packages': [...]}.
-#   Goes to YOUR namespace by default; namespace='default' publishes to public.
+#   Goes to YOUR namespace by default, readable by your whole ORGANIZATION.
+#   private=True keeps it to you (plus anyone you share_function it with).
+#   namespace='org' publishes into the organization's own shared namespace.
 #   -> {'function_id', 'namespace', 'name', 'version'}
 
 load_function(name, version=None, namespace=None) -> Callable
 #   fetch a registered function back as a callable (latest version by default).
+#   namespace may be an id or the name someone gave it (see name_namespace).
 
 run_function(func, *args, task_name=None, requirements=None, job_type=None,
              wait=True, timeout=None, poll_interval=2.0, **kwargs) -> Any
@@ -311,6 +315,23 @@ run_function(func, *args, task_name=None, requirements=None, job_type=None,
 #   requirements: pip specs installed in the sandbox, e.g. ['pandas>=2.0'].
 
 list_functions(namespace=None, name=None) -> list[dict]   # name = regex filter
+list_namespaces() -> dict   # {'namespaces','own_namespace','org_namespace',
+                            #  'public_namespace','shared_with_me','aliases'}
+                            #  aliases: {canonical_id: human_name} (see name_namespace)
+share_function(name, *, with_user=None, with_team=None, with_role=None,
+               namespace=None) -> dict
+#   give someone read access to ONE of your functions (exactly one of with_*).
+#   Only needed for a private=True function -- an ordinary one is already
+#   readable org-wide. Read only: a grantee can never overwrite or delete it.
+set_function_visibility(name, *, private, namespace=None) -> dict
+#   change your mind after publishing: private=True locks a function to you,
+#   private=False makes it readable by your whole organization. Applies to every
+#   version. Owner only. (No need to re-push just to change who can see it.)
+name_namespace(alias, namespace=None) -> dict
+#   give your namespace a name people can type instead of its id, e.g.
+#   name_namespace('quant.func'). Lowercase letters, digits and . _ - , starting
+#   with a letter. It is an ADDRESS, not a rename: the id keeps working and
+#   nothing already published, shared or granted is affected.
 function_versions(name, namespace=None) -> dict           # {'name','versions':[...],'latest'}
 get_function_source(name, version=None, namespace=None) -> dict
 delete_function(name, version=None, namespace=None) -> dict   # one version, or all
@@ -332,7 +353,23 @@ fn = hf.load_function("zscore", version="1.0.0")
 hf.run_function(fn, [1, 2, 3, 4, 5], window=3, requirements=["numpy"])   # -> value
 ```
 
-> **TBD — access control.** Function-level ACLs (who can read/run a function, fine-grained sharing across namespaces) are **not fully implemented yet**. Today: functions live in your own namespace by default; `namespace="default"` is the shared/public namespace. Treat cross-namespace permissions as subject to change.
+> **Who can see a function.** A function you push is readable by **everyone in your organization** — that is the point of a registry — and writable only by you. Pass `private=True` to keep one to yourself, and `set_function_visibility(name, private=False)` later to open it to the org (or `private=True` to close it again) — you never have to re-push to change your mind. For the case in between, `share_function(name, with_user=...)` gives specific people (or a team, or a role) read access to that **one** function — never your whole namespace, and never more than read. Nothing crosses an organization boundary: a function is only ever visible inside the organization it was pushed from.
+
+```python
+hf.push_function(my_signal, version="1.0.0")                     # org-wide, read-only to others
+hf.push_function(secret_alpha, version="1.0.0", private=True)    # just me
+hf.set_function_visibility("secret_alpha", private=False)        # ...now the whole org
+hf.share_function("secret_alpha", with_user="<their user id>")   # ...or just one person
+hf.list_namespaces()["shared_with_me"]                           # what others shared with me
+```
+
+> **Namespaces.** Every function lives in a namespace. Yours (`own_namespace`) is the default target; `namespace="org"` publishes to the organization's shared namespace (writable by developers and up, readable org-wide); `namespace="default"` is the platform-seeded public namespace, read-only for everyone. A namespace is addressed by an id (`user_<id>`, `org_<id>`), but you can give **your own** namespace a human name with `name_namespace("quant.func")` and then use that name anywhere the id would go — `push_function(fn, version="1.0.0", namespace="quant.func")`, `load_function("sma", namespace="quant.func")`. The name is an address the platform resolves to the id, so nothing you have already published, shared or granted changes, and the id keeps working. `list_namespaces()` returns every namespace you can reach plus an `aliases` map of the names in play.
+
+```python
+hf.name_namespace("quant.func")                                  # name your namespace once
+hf.push_function(sma, version="1.0.0", namespace="quant.func")   # then address it by name
+hf.load_function("sma", namespace="quant.func")                  # ...from anywhere
+```
 
 > **Need a non-blocking deploy, or a recurring schedule?** `run_function` always blocks and returns a value. For a fetch/compute/publish script you want to deploy and walk away from (optionally on a recurring `Schedule`), use `deploy_job` instead — §11.6.
 
@@ -1540,12 +1577,12 @@ job = hf.deploy_job(fetch_aapl, task_name="fetch-aapl-once", wait=True)
 job.result()   # -> {'status': 'completed', 'result': {'rows': 6}, ...}
 job.logs()     # -> the printed DataFrame, exactly as it ran on the executor
 
-# Recurring — fires every day at 16:05 US/Eastern, non-blocking (the default):
+# Recurring — fires every day at 16:05 US Eastern, non-blocking (the default).
+# Schedule times are Eastern unless you say otherwise; no timezone needed here:
 job = hf.deploy_job(
     fetch_aapl,
     task_name="fetch-aapl-scheduled",
-    schedule=hf.Schedule(frequency=hf.ScheduleFrequency.DAILY, start_time="16:05",
-                         timezone="US/Eastern"),
+    schedule=hf.Schedule(frequency=hf.ScheduleFrequency.DAILY, start_time="16:05"),
 )
 job.status()   # -> {'status': 'scheduled', ...} — check back later; won't reach a terminal state itself
 
@@ -1561,7 +1598,33 @@ def fetch_and_publish(multiplier=2):
 job = hf.deploy_job(fetch_and_publish, task_name="daily-signal", requirements=["pandas"])
 ```
 
-`Schedule` fields: `frequency` (`ScheduleFrequency`, §12), `start_time` (`"HH:MM"`/`"HH:MM:SS"`), `timezone` (default `"UTC"`), `days_of_week` (list of `0`=Mon..`6`=Sun, for `WEEKLY`/`INTERVAL`), `day_of_month` (for `MONTHLY`), `end_time`/`interval_minutes` (for `INTERVAL`), `end_date` (`"YYYY-MM-DD"`, stops the schedule entirely), `enabled` (default `True`). A plain dict with the same keys works too — `Schedule` is a convenience dataclass with `.to_dict()`.
+`Schedule` fields: `frequency` (`ScheduleFrequency`, §12), `start_time` (`"HH:MM"`/`"HH:MM:SS"`), `timezone` (default **US Eastern**, see below), `days_of_week` (list of `0`=Mon..`6`=Sun, for `WEEKLY`/`INTERVAL`), `day_of_month` (for `MONTHLY`), `end_time`/`interval_minutes` (for `INTERVAL`), `end_date` (`"YYYY-MM-DD"`, stops the schedule entirely), `enabled` (default `True`). A plain dict with the same keys works too — `Schedule` is a convenience dataclass with `.to_dict()`, and a dict gets the same timezone defaulting.
+
+> **Schedule times are US Eastern by default.** `start_time`/`end_time` are wall-clock times, and with no `timezone` they are `America/New_York` — the zone everything else on the platform is expressed in (session windows, in-strategy time, run output), so `start_time="16:05"` is 16:05 ET, the close, year-round. To use something else pass `timezone=` with an IANA name (`"Europe/London"`, `"UTC"`), an abbreviation (`"EST"`, `"ET"`, `"CT"`, `"PT"` — each aliased onto its **DST-aware** zone, so `"EST"` does not become a fixed −05:00 that drifts an hour every summer), or `"local"` for the client machine's own timezone. Setting `HIVEQ_SCHEDULE_TIMEZONE` (to a zone name, or to `local`) changes the default for every schedule; an explicit `timezone=` always wins. The value is resolved and validated when the `Schedule` is constructed — an unknown zone raises `ValueError` there, and `Schedule(...).timezone` always reads back as the concrete zone that will be sent.
+
+```python
+hf.Schedule(hf.ScheduleFrequency.DAILY, start_time="16:05")                    # 16:05 America/New_York
+hf.Schedule(hf.ScheduleFrequency.DAILY, start_time="16:05", timezone="EST")    # same thing (alias, DST-aware)
+hf.Schedule(hf.ScheduleFrequency.DAILY, start_time="16:05", timezone="local")  # this machine's timezone
+hf.Schedule(hf.ScheduleFrequency.DAILY, start_time="20:05", timezone="UTC")    # explicit UTC, if you want it
+```
+
+> **Time checks *inside* the script.** The sandbox a job runs in is pinned to `TZ=America/New_York`, so a bare `datetime.now()` inside a deployed script is already Eastern — but the *same function run on your own machine* while you develop it is not, and a schedule written in another zone doesn't move the container's clock. For a wall-clock check that reads the same in both places, use the job clock: `job_now()` returns an aware timestamp in the job's timezone (the schedule's, which `deploy_job` hands to the running job, else US Eastern), and `job_today()` the matching date. Both travel *inside* the payload, so they work on the executor even though no SDK is installed there — import them at module level and let the function close over them, as below; an `import` of them *inside* the deployed function would run on the executor, where there is nothing to import from. `datetime.now(timezone.utc)` is still UTC — the job clock is for wall-clock checks, not for timestamps.
+
+```python
+from hiveq.flow.jobs import deploy_job, job_now, job_today, Schedule, ScheduleFrequency
+
+def publish_after_the_close():
+    from hiveq import dd
+    if job_now().hour < 16:            # 16:00 Eastern, on your laptop and on the executor
+        return {"skipped": "before the close"}
+    df = dd.load(dataset="HIVEQ_US_EQ", schema="bars_1d", symbols=["AAPL"], date=str(job_today()))
+    dd.save(df, schema="quant_features", key="my_signal")
+    return {"rows": len(df), "asof": job_now().isoformat()}
+
+deploy_job(publish_after_the_close, task_name="daily-signal",
+           schedule=Schedule(ScheduleFrequency.WEEKDAYS, start_time="16:05"))
+```
 
 > **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them. Whether the install **succeeds** depends on the sandbox's package index being reachable for what you ask for; treat actual installation as environment-dependent rather than guaranteed by the SDK itself.
 
@@ -1683,6 +1746,7 @@ from hiveq.flow.trading.price_utils import adjust_tick_size, get_min_tick   # ro
 from hiveq.flow.utils.date_calendar import TradingCalendar   # trading-day / session helpers (US-only today)
 from hiveq.flow.jobs import submit, poll_result, get_status, get_logs, get_logs_gz, get_result, get_client, TaskType
 from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency, terminate   # arbitrary script deploy + scheduling (§11.6)
+from hiveq.flow.jobs import job_now, job_today, job_timezone   # the job clock — ET by default, for time checks inside a deployed script (§11.6)
 
 # Ancillary: data facade (§14.1 — only when clearly the right tool or user-requested)
 from hiveq import dd                           # keyword-style data load/save/subscribe

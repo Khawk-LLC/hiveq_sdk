@@ -72,6 +72,205 @@ class ScheduleFrequency(str, Enum):
     INTERVAL = "INTERVAL"
 
 
+# ---------------------------------------------------------------------------
+# Schedule timezone resolution
+#
+# A schedule's ``start_time`` is a wall-clock time, so it only means something
+# once a zone is attached to it.  HiveQ is a US-market platform and everything
+# else the user sees (session windows, run output, in-strategy time) is Eastern,
+# so a schedule is Eastern too unless the caller says otherwise -- a UTC default
+# silently fired "16:05" four or five hours off the close.
+#
+# Resolution order for ``Schedule.timezone``:
+#   1. what the caller passed,
+#   2. the ``HIVEQ_SCHEDULE_TIMEZONE`` env var (may itself be ``"local"``),
+#   3. ``America/New_York``.
+#
+# ``"local"`` resolves to the client machine's own zone (falling back to ET when
+# detection fails).  Abbreviations are aliased onto their IANA zone on purpose:
+# ``ZoneInfo("EST")`` is a *fixed* -05:00 with no DST, so a schedule written as
+# "EST" would drift an hour every summer.  "EST" here means US Eastern, DST and
+# all -- which is what anyone asking for an EST schedule means.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_SCHEDULE_TIMEZONE = "America/New_York"
+_LOCAL_TIMEZONE_ALIASES = ("local", "system", "machine", "auto")
+_TIMEZONE_ALIASES = {
+    "est": "America/New_York",
+    "edt": "America/New_York",
+    "et": "America/New_York",
+    "eastern": "America/New_York",
+    "us/eastern": "America/New_York",
+    "cst": "America/Chicago",
+    "cdt": "America/Chicago",
+    "ct": "America/Chicago",
+    "central": "America/Chicago",
+    "us/central": "America/Chicago",
+    "mst": "America/Denver",
+    "mdt": "America/Denver",
+    "mt": "America/Denver",
+    "us/mountain": "America/Denver",
+    "pst": "America/Los_Angeles",
+    "pdt": "America/Los_Angeles",
+    "pt": "America/Los_Angeles",
+    "pacific": "America/Los_Angeles",
+    "us/pacific": "America/Los_Angeles",
+}
+
+
+def _detect_local_timezone() -> str:
+    """The client machine's IANA zone name, or ET when it can't be detected."""
+    try:
+        from hiveq.flow.utils.timezone_utils import get_local_timezone
+
+        name = get_local_timezone()
+    except Exception:
+        name = None
+    if not name:
+        return _DEFAULT_SCHEDULE_TIMEZONE
+    # A detected zone can still be an abbreviation (e.g. TZ=EST) or unusable
+    # (e.g. 'localtime'); alias/validate it like any caller-supplied value.
+    try:
+        return resolve_schedule_timezone(name, _allow_local=False)
+    except ValueError:
+        return _DEFAULT_SCHEDULE_TIMEZONE
+
+
+def _timezone_validators() -> List[Any]:
+    """Zone-name lookups available in this interpreter (zoneinfo and/or pytz)."""
+    validators: List[Any] = []
+    try:
+        from zoneinfo import ZoneInfo
+
+        validators.append(ZoneInfo)
+    except ImportError:  # pragma: no cover — Python < 3.9
+        pass
+    try:
+        import pytz
+
+        validators.append(pytz.timezone)
+    except ImportError:
+        pass  # pytz is optional client-side; the platform always has it
+    return validators
+
+
+def resolve_schedule_timezone(
+    timezone: Optional[str] = None, _allow_local: bool = True
+) -> str:
+    """Resolve a schedule timezone to a validated IANA zone name.
+
+    ``None`` (or ``""``) picks up ``HIVEQ_SCHEDULE_TIMEZONE`` if it is set, and
+    otherwise ``"America/New_York"``. ``"local"`` resolves to this machine's own
+    zone. Common abbreviations (``"EST"``, ``"ET"``, ``"PT"``, ...) are aliased
+    onto the matching DST-aware IANA zone.
+
+    Raises ``ValueError`` on a name no timezone database knows.
+    """
+    name = (timezone or "").strip()
+    if not name:
+        name = (os.environ.get("HIVEQ_SCHEDULE_TIMEZONE") or "").strip()
+    if not name:
+        return _DEFAULT_SCHEDULE_TIMEZONE
+
+    key = name.lower()
+    if key in _LOCAL_TIMEZONE_ALIASES:
+        return _detect_local_timezone() if _allow_local else _DEFAULT_SCHEDULE_TIMEZONE
+    name = _TIMEZONE_ALIASES.get(key, name)
+    if name.upper() == "UTC":
+        return "UTC"
+
+    # Validate against every tz database we can reach. The platform scheduler
+    # resolves the name with pytz and falls back to UTC when it doesn't know it
+    # (and 400s an unknown zone on a ONCE schedule), so a name that only
+    # zoneinfo knows would fire at the wrong hour with nothing to show for it —
+    # better to fail here, at the call site that wrote it.
+    checked = False
+    for _load in _timezone_validators():
+        try:
+            _load(name)
+            checked = True
+        except Exception as e:
+            raise ValueError(
+                f"Unknown schedule timezone {timezone!r}: {e}. Pass an IANA "
+                f"name (e.g. 'America/New_York'), an abbreviation like "
+                f"'EST'/'ET', or 'local' for this machine's timezone."
+            )
+    # No tz database at all (neither zoneinfo nor pytz): pass the name through
+    # unvalidated rather than refusing to schedule.
+    return name
+
+
+# ---------------------------------------------------------------------------
+# The job clock
+#
+# A scheduled script almost always does its own time checks ("only publish
+# after the close", "skip if it's not a trading day"), and those have to agree
+# with the schedule that woke it up.
+#
+# On the platform they already do: the sandbox container is pinned to
+# TZ=America/New_York, so a bare ``datetime.now()`` inside a deployed job is
+# Eastern.  The two places that drift are (a) the *same function* run on the
+# author's own laptop while they develop it, where ``datetime.now()`` is
+# whatever the laptop is set to, and (b) a schedule deliberately written in
+# another zone, which the container's fixed ET clock knows nothing about.
+#
+# ``job_now()`` closes both: it returns an aware timestamp in the job's own
+# timezone -- the schedule's, when ``deploy_job`` propagated one, else the same
+# default a Schedule gets -- and it reads identically locally and on the
+# executor.  It is defined here, in a module cloudpickle serializes BY VALUE, so
+# a submitted function can call it on an executor that has no SDK installed.
+# ---------------------------------------------------------------------------
+
+#: Set inside the job process (by ``_TaskWrapper``) to the schedule's timezone.
+_JOB_TIMEZONE_ENV = "HIVEQ_SCHEDULE_TIMEZONE"
+
+
+def job_timezone() -> str:
+    """The timezone this job's wall-clock checks should use.
+
+    The schedule's timezone when running as a deployed job, otherwise the
+    same default a :class:`Schedule` gets (``HIVEQ_SCHEDULE_TIMEZONE`` if set,
+    else ``"America/New_York"``).
+    """
+    return resolve_schedule_timezone(None)
+
+
+def job_now(timezone: Optional[str] = None) -> "datetime.datetime":
+    """``now`` as a timezone-aware datetime on the job clock (US Eastern by default).
+
+    Use this instead of ``datetime.now()`` for any time check inside a script
+    you deploy, so the check reads the same on your machine as it does on the
+    executor. Import it at module level, like any other name the deployed
+    function closes over — the executor has no SDK to import it from, so it has
+    to travel inside the payload::
+
+        from hiveq.flow.jobs import job_now
+
+        def publish_after_the_close():
+            if job_now().hour < 16:      # 16:00 Eastern, wherever this runs
+                return {"skipped": "before the close"}
+
+    ``timezone`` overrides the job clock for one call (any name
+    ``Schedule(timezone=...)`` accepts).
+    """
+    import datetime as _datetime
+
+    name = resolve_schedule_timezone(timezone)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return _datetime.datetime.now(ZoneInfo(name))
+    except ImportError:  # pragma: no cover — Python < 3.9
+        import pytz
+
+        return _datetime.datetime.now(pytz.timezone(name))
+
+
+def job_today(timezone: Optional[str] = None) -> "datetime.date":
+    """Today's date on the job clock — the date the schedule is reasoning about."""
+    return job_now(timezone).date()
+
+
 @dataclass
 class Schedule:
     """Recurring-schedule config for a task, mirroring the platform's job schedule.
@@ -82,8 +281,15 @@ class Schedule:
         How often the task runs.
     start_time : str
         Time of day to run, ``"HH:MM"`` or ``"HH:MM:SS"``.
-    timezone : str
-        IANA/plain timezone name (default ``"UTC"``).
+    timezone : str, optional
+        Timezone ``start_time``/``end_time`` are written in. Defaults to US
+        Eastern (``"America/New_York"``) — the zone everything else on the
+        platform is expressed in — unless ``HIVEQ_SCHEDULE_TIMEZONE`` says
+        otherwise. Accepts an IANA name, an abbreviation (``"EST"``, ``"ET"``,
+        ``"PT"``, ... — aliased onto the DST-aware zone, so ``"EST"`` keeps
+        firing at the same wall-clock time through the summer), or ``"local"``
+        for this machine's own timezone. Resolved and validated on construction,
+        so ``Schedule(...).timezone`` is always the concrete zone that was sent.
     days_of_week : list[int], optional
         For ``WEEKLY``/``INTERVAL`` — days to run, ``0``=Monday..``6``=Sunday.
     day_of_month : int, optional
@@ -100,13 +306,18 @@ class Schedule:
 
     frequency: "ScheduleFrequency"
     start_time: str
-    timezone: str = "UTC"
+    timezone: Optional[str] = None
     days_of_week: Optional[List[int]] = None
     day_of_month: Optional[int] = None
     end_time: Optional[str] = None
     interval_minutes: Optional[int] = None
     end_date: Optional[str] = None
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        # Resolve here rather than in to_dict() so a bad zone fails at the call
+        # site that wrote it, and so the attribute always reads back concrete.
+        self.timezone = resolve_schedule_timezone(self.timezone)
 
     def to_dict(self) -> Dict[str, Any]:
         freq = self.frequency
@@ -121,6 +332,31 @@ class Schedule:
             "end_date": self.end_date,
             "enabled": self.enabled,
         }
+
+
+def _normalize_schedule(
+    schedule: Optional[Union["Schedule", Dict[str, Any]]]
+) -> Optional[Dict[str, Any]]:
+    """Schedule (or equivalent dict) -> the wire dict, with the timezone resolved.
+
+    A plain dict is accepted in place of :class:`Schedule`, so it gets the same
+    default and the same alias/validation treatment — otherwise a dict schedule
+    would land on the platform with no timezone at all.
+    """
+    if schedule is None:
+        return None
+    if isinstance(schedule, Schedule):
+        return schedule.to_dict()
+    if isinstance(schedule, dict):
+        out = dict(schedule)
+        out["timezone"] = resolve_schedule_timezone(out.get("timezone"))
+        freq = out.get("frequency")
+        if isinstance(freq, ScheduleFrequency):
+            out["frequency"] = freq.value
+        return out
+    raise TypeError(
+        f"schedule must be a Schedule or a dict, got {type(schedule).__name__}"
+    )
 
 
 class DuplicateTaskError(RuntimeError):
@@ -208,17 +444,26 @@ class _Client:
             else TaskType(task_type).value
         )
 
+        schedule_dict = _normalize_schedule(schedule)
+
+        # Let the task see the clock it was scheduled on: job_now() inside the
+        # script then reads the schedule's timezone rather than guessing.
+        task_env = (
+            {_JOB_TIMEZONE_ENV: schedule_dict["timezone"]}
+            if schedule_dict and schedule_dict.get("timezone")
+            else None
+        )
         wrapper = _TaskWrapper(
-            target=task, entry_method=entry_method, args=args, kwargs=kwargs
+            target=task,
+            entry_method=entry_method,
+            args=args,
+            kwargs=kwargs,
+            env=task_env,
         )
         if requirements is not None and not isinstance(requirements, list):
             raise ValueError("requirements must be a list of package specs")
         reqs = list(requirements) if requirements is not None else None
         payload_b64 = base64.b64encode(cloudpickle.dumps(wrapper)).decode()
-
-        schedule_dict = (
-            schedule.to_dict() if isinstance(schedule, Schedule) else schedule
-        )
 
         body = {
             "payload_b64": payload_b64,
