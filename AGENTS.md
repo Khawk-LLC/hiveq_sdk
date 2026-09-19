@@ -44,7 +44,7 @@ write a strategy or use this SDK, read these two, **in order**:
 - `run_backtest(...)` returns a **`Run`** handle; read results via
   `run.report()` / `run.orders()` / `run.trades()` / `run.tearsheet()` (PDF) / `run.event_logs()` / `run.logs()`.
 - `deploy_livesim(...)` deploys **straight to LiveSim — no backtest** — and returns a
-  **`Deployment`** handle addressed by `deployment_id` (§2.3 of `docs/llms.txt`).
+  **`Deployment`** handle addressed by `deployment_id` (§3.3 of `docs/llms.txt`).
   Read with `deployment.status()` / `.logs()` / `.orders()` / `.trades()` /
   `.positions()` / `.metrics()` / `.events()`; drive with `.start()` / `.stop()` /
   `.pause()` / `.terminate()`. Data calls are **pulls**, never streams — each returns a

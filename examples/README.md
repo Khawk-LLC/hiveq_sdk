@@ -48,9 +48,9 @@ stubs; the canonical reference is the single-file spec at
 
 | File | Shape | Teaches |
 |---|---|---|
-| `functions_push.py` | register a function | `hf.push_function(...)` → store a reusable function in your namespace (§2.2) |
-| `functions_run.py` | use it on the platform | `hf.run_function(job)` runs a QUANT_SCRIPTS task that loads the registered function and applies it (§2.2). Run after `functions_push.py`. |
-| `functions_share.py` | control who can see it | `private=True`, `hf.set_function_visibility(...)`, `hf.share_function(...)` — org-wide by default, private on request, shareable with named people (§2.2). |
+| `functions_push.py` | register a function | `hf.push_function(...)` → store a reusable function in your namespace (§3.2) |
+| `functions_run.py` | use it on the platform | `hf.run_function(job)` runs a QUANT_SCRIPTS task that loads the registered function and applies it (§3.2). Run after `functions_push.py`. |
+| `functions_share.py` | control who can see it | `private=True`, `hf.set_function_visibility(...)`, `hf.share_function(...)` — org-wide by default, private on request, shareable with named people (§3.2). |
 
 ## Conventions these examples model (the easy-to-get-wrong parts)
 

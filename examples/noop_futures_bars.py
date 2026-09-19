@@ -17,7 +17,7 @@ Notes on the details that actually matter here:
   - ``ctx.now()`` / ``bar.time`` are already ET wall clock — no tz math (R5).
   - one 1m bar == one minute of market time, so logging per bar IS the
     "every minute" print. ``logger.info`` is silent at the default WARNING
-    level (§2.1), so the run also writes an ``add_event_log`` row per bar —
+    level (§3.1), so the run also writes an ``add_event_log`` row per bar —
     those come back from ``run.event_logs()`` at any log level (§10.2). The
     run below passes ``hiveq_log_level='INFO'`` so the log lines show up too.
   - R12 ("0 trades == failed iteration") does not apply: this strategy is

@@ -18,8 +18,8 @@ Reference appendix rather than guessing — the platform fetches the data at run
 |---|---|
 | 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades, the `__main__` guard). |
 | 1 | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
-| 2 | Entry points (module `hiveq.flow`) — `run_backtest`, engine config via `**kwargs`, the function registry / remote functions. |
-| 3 | Credentials — first-run sign-in flow, what NOT to do when generating deliverable code. |
+| 2 | Credentials — first-run browser sign-in (`hiveq login`), what NOT to do when generating deliverable code. **Nothing below works before this**: every entry point, the function registry and LiveSim all authenticate with the key it mints. |
+| 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment (§3.3). |
 | 4 | Strategy contract — the class shape (`__init__`/`on_start`/`on_bar`/`on_order`/...), lifecycle facts (init-once, on_start-per-calendar-day). |
 | 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION). Largest section — by far the most common single lookup. |
 | 6 | The `Event` object — the small wrapper every callback receives. |
@@ -59,16 +59,16 @@ R5  Timestamps on payloads: ts_event / ts_init are int NANOSECONDS. Use .time (c
     .time_utc (UTC) for datetime. ctx.now() is configured-tz datetime; ctx.now_utc() is UTC.
 R6  session_start / session_end are ET (America/New_York) wall-clock "HH:MM" strings, always.
 R7  Quantities are floats. Buy with buy_order, sell/exit-long with sell_order, open short with short_order.
-R8  A HiveQ API key is the only credential required (§3); auth is fully automatic via browser sign-in. On the FIRST run with no key, sign-in opens a browser and BLOCKS ~5 min waiting for the user — this is expected, NOT a hang. The user's whole experience is "a browser opens, I sign in, done"; tell them only that, and (if the browser didn't open) the bare link. NEVER show the user internal commands (`hf.login()`, `hiveq-login`), env vars, or file paths; NEVER bisect, kill the process, or fall back to a manual/`export HIVEQ_API_KEY` key (§3.1). Trigger sign-in invisibly on the user's behalf; never put it in deliverable code.
+R8  A HiveQ API key is the only credential required (§2); auth is fully automatic via browser sign-in. On the FIRST run with no key, sign-in opens a browser and BLOCKS ~5 min waiting for the user — this is expected, NOT a hang. The user's whole experience is "a browser opens, I sign in, done"; tell them only that, and (if the browser didn't open) the bare link. NEVER show the user internal commands (`hf.login()`, `hiveq-login`), env vars, or file paths; NEVER bisect, kill the process, or fall back to a manual/`export HIVEQ_API_KEY` key (§2.1). Trigger sign-in invisibly on the user's behalf; never put it in deliverable code.
 R9  Prefer ctx.portfolio() (strategy-scoped) for P&L/position queries; ctx.global_portfolio() aggregates
     across all strategies. ctx also exposes shortcut aliases (ctx.net_position, ctx.is_flat, ...) — same data.
 R10 Every strategy MUST include logging via the HiveQ logger throughout all callbacks and decision
     branches. This is MANDATORY — not optional. Use logger.debug(...) for per-bar state, condition
     checks, and intermediate values; logger.info(...) for milestone events (signal triggered, order
-    placed, pattern detected). The engine default level is WARNING (§2.1), so BOTH debug and info
+    placed, pattern detected). The engine default level is WARNING (§3.1), so BOTH debug and info
     lines are silent in a normal run — a healthy run produces an essentially empty log, by design.
     The instrumentation costs nothing until it's needed: when the strategy misbehaves (or the user
-    asks to investigate), re-run with hiveq_log_level='DEBUG' or 'INFO' (§2.1) and all context
+    asks to investigate), re-run with hiveq_log_level='DEBUG' or 'INFO' (§3.1) and all context
     surfaces immediately — no code changes needed. Do NOT pass a log level on a normal run, and
     NEVER leave a hiveq_log_level override in delivered strategy/example code — it is a temporary
     investigation tool; strip it before presenting. Durable observability belongs in
@@ -184,11 +184,82 @@ if __name__ == "__main__":
     # in a real strategy it is a FAILED iteration (R12) — give yours an exit path.
 ```
 
-> **First time you run this:** if no key is saved yet, a browser opens for the user to sign in and this call waits ~5 min — that is expected. Just tell the user a browser is opening to sign in (and give the bare link if it didn't); wait, don't debug it, and never show internal commands or set a key by hand. See §3.1.
+> **First time you run this:** if no key is saved yet, a browser opens for the user to sign in and this call waits ~5 min — that is expected. Just tell the user a browser is opening to sign in (and give the bare link if it didn't); wait, don't debug it, and never show internal commands or set a key by hand. See §2.1.
 
 ---
 
-## 2. Entry points  (module: `hiveq.flow`)
+## 2. Credentials
+
+A **HiveQ API key** is the only credential required, and the SDK provisions it through browser sign-in — the user never creates, copies, exports, or manages a key by hand. Identity (user, org) is resolved from the key server-side.
+
+How it actually works: the SDK looks for a key in the environment / `~/.hiveq/.env`. If none is found, browser sign-in opens, mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run**.
+
+Users have two supported paths:
+
+```bash
+hiveq login
+```
+
+or simply run a backtest/deploy; the **first** `run_backtest`/`deploy_job` triggers the same sign-in automatically. `hiveq login` is useful before using direct data tools such as `hiveq_data` / the data driver, where there may be no backtest call to trigger sign-in.
+
+### 2.1 First run — the sign-in you will see, and what to do (AI agents: READ THIS)
+
+When you (the AI) run anything that initializes the client with no key saved yet — the first `run_backtest`, or the dedicated sign-in step below — the process prints a banner like this to stdout and then **blocks for up to 5 minutes** waiting for the user to finish signing in:
+
+```
+────────────────────────────────────────────────────────────────
+  Opening your browser to sign in to HiveQ…
+
+  If it doesn't open, paste this link into your browser:
+
+      https://<host>/cli-login?redirect_uri=http://127.0.0.1:<port>/callback&state=…&source=cli
+
+  Waiting for you to finish signing in…
+────────────────────────────────────────────────────────────────
+```
+
+A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the redirect, writes the key to `~/.hiveq/.env`, prints `Signed in as <email-or-name>` (or `Signed in to HiveQ` if the host does not return a profile label), and the run continues. **This wait is expected and correct** — it is not a hang, a crash, a missing dependency, or a bug to debug.
+
+**The whole experience the user should have is:** *they run `hiveq login` or start their first backtest, a browser opens, they sign in (or sign up), and their key is saved.* That is it. Do not ask them to copy/export a key or hand-edit files.
+
+**What you MUST do:**
+1. **Trigger the sign-in for the user**. For backtests, just run the first backtest (init signs in automatically). For direct data-driver work, use `hiveq login` first.
+2. **Tell the user only the human part, in plain words.** A browser window is opening for them to sign in; once they're signed in, they're all set. If the browser didn't open on its own, give them just the bare sign-in link to click:
+   > 👉 **A browser will open so you can sign in to HiveQ.** (If it doesn't open, click here: `<url>`) Once you've signed in, you're all set — nothing else to do.
+3. **Wait** for it to complete (the process prints `Signed in as <email-or-name>` once the key is written), then continue. Every later run reuses the saved key automatically — sign-in happens **once**.
+
+**What you MUST NOT do** (the real failure modes):
+- Treat the wait as a hang, kill the process, and start bisecting / debugging the SDK.
+- Conclude the key is "missing" and tell the user to create, paste, or `export` a key, or hand-edit a file.
+- Ask the user to run `hiveq-login`, `hf.login()`, manual Python snippets, env exports, or file edits. Use the public `hiveq login` command when an explicit login step is needed.
+- Retry the run in a loop or downgrade to a "manual API-key setup" workaround. Signup IS the browser flow — there is no manual key.
+
+> `HIVEQ_AUTH_URL` defaults to `https://staging.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
+
+### 2.2 When generating deliverable code or instructions, DO NOT:
+- tell the user to `export HIVEQ_API_KEY=...` (or set it in a shell/`.env`/`os.environ` by hand) — the sign-in does this;
+- add `hf.login()` to a strategy/backtest script — `run_backtest` already signs in on first use, and you handle first-run sign-in invisibly per §2.1;
+- add hedging comments like `# if not already saved via hf.login()` or `# make sure your API key is set`;
+- hard-code, print, or ask the user to paste a key;
+- surface `hf.login()` / `hiveq-login` to the user as something they should run. Use `hiveq login` only as a one-time terminal setup command, never inside strategy/backtest code.
+
+`hf.login()` / `hiveq-login` is internal plumbing. The user-facing command is `hiveq login`. A finished strategy/backtest script must still be runnable as-is, with **zero** credential code inside it.
+
+> **Everything below this section needs that key** — which is why sign-in is
+> documented first. `run_backtest`, `deploy_livesim` (§3.3), `run_function`
+> (§3.2) and `deploy_job` (§11.6) initialize the client, so they open the
+> browser sign-in themselves when no key is saved. The rest of the surface does
+> **not**: the registry calls (`push_function` / `load_function` /
+> `list_functions` / …) raise `RuntimeError: HIVEQ_API_KEY not found …
+> [Error: API_KEY_MISSING]`, and `get_deployment` / the `Deployment` methods
+> raise `LivesimError` with `.status == 401`. Both mean *not signed in yet*, not
+> a broken install — run `hiveq login` (or any of the four calls above) once.
+
+---
+
+## 3. Entry points  (module: `hiveq.flow`)
+
+Assumes a saved API key (§2) — sign in once, then everything here works.
 
 ```python
 run_backtest(
@@ -201,7 +272,7 @@ run_backtest(
     *,                                          # keyword-only below
     requirements: Optional[list[str]] = None,   # installed before deserializing the task
     silent: bool = True,                        # default: deploy + return Run immediately (no blocking)
-    **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §2.1
+    **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §3.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
 #   silent=True (default) : deploy and return the Run immediately (run.run_id / run.task_id).
 #   silent=False          : block inside the call w/ a live progress bar until done (interactive use).
@@ -209,28 +280,25 @@ run_backtest(
 #   requirements: named package specs installed before task deserialization;
 #                 requires the matching orchestrator/executor release.
 
-deploy_livesim(                                 # deploy straight to LiveSim — §2.3
+deploy_livesim(                                 # deploy straight to LiveSim — §3.3
     strategy_configs: list[StrategyConfig],
     *,
     data_configs: Optional[list[dict]] = None,
     instance_name: Optional[str] = None,        # defaults to the strategy's name
-    instances: int = 1,                         # 1..10
     container_id: Optional[str] = None,         # needs livesim:select_target; omit to auto-route
     parameter_overrides: Optional[list[dict]] = None,
-    signal_ids: Optional[list[str]] = None,
-    dry_run: bool = False,                      # validate + plan, materialize nothing
     wait: bool = False,                         # block until it settles
     **kwargs,
-) -> Deployment                                 # handle addressed by deployment_id (§2.3)
+) -> Deployment                                 # handle addressed by deployment_id (§3.3)
 
-get_deployment(deployment_id: str) -> Deployment  # re-attach to a deployment (§2.3)
+get_deployment(deployment_id: str) -> Deployment  # re-attach to a deployment (§3.3)
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
 event_logs() -> pandas.DataFrame                # logs of the LAST run_backtest, fetched over REST (§10.2)
 config() -> EngineConfig                        # the module EngineConfig (timezone + params)
 
-login(*, timeout=300.0, open_browser=True) -> str   # Internal plumbing: browser sign-in (loopback), opens a browser and BLOCKS ~5min for the user. You may invoke it invisibly on the user's behalf (§3.1); NEVER show it to the user or put it in deliverable scripts (§3).
+login(*, timeout=300.0, open_browser=True) -> str   # Internal plumbing: browser sign-in (loopback), opens a browser and BLOCKS ~5min for the user. You may invoke it invisibly on the user's behalf (§2.1); NEVER show it to the user or put it in deliverable scripts (§2).
 ```
 
 **Precedence note**: `symbols`, `start_date`, `end_date` may be passed as top-level args OR set on `BacktestConfig`. Top-level args, when provided, populate the effective config. Set them in exactly one place to avoid ambiguity.
@@ -248,7 +316,7 @@ if __name__ == "__main__":                        # REQUIRED — R14
 
 `run.wait()` without `progress=False` renders a live tqdm progress bar (day count / PnL / return) — right for a human watching a terminal or notebook, wrong for a scripted or agent-driven run, where the repeated bar redraws land in captured output. Only reach for `run.status()`, `run.logs()`, or `run.event_logs()` when debugging (§11.5).
 
-### 2.1 Engine configuration (via `**kwargs`)
+### 3.1 Engine configuration (via `**kwargs`)
 
 Engine behavior is tuned through `run_backtest`'s `**kwargs`, in either of two equivalent forms:
 
@@ -272,7 +340,7 @@ Recognized keys (all optional; sensible defaults apply):
 | `signals_datasets` | list[str] | `['HIVEQ_QUANT_SIGNALS']` | Datasets that key off `config['symbols']` rather than the run's symbol universe. |
 | `hiveq_data_page_size` | int | `100_000` | Max records per data request (raise for very dense schemas, e.g. options). |
 
-Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§3) and are intentionally not part of the engine config you pass.
+Credentials/identity (API key, user/org) are **not** set here — they resolve from the environment (§2) and are intentionally not part of the engine config you pass.
 
 > ⚠️ **The `WARNING` default means `logger.info(...)` is silent by design.** An
 > empty (or near-empty) `run.logs()` on a normal run does **not** mean the
@@ -282,7 +350,7 @@ Credentials/identity (API key, user/org) are **not** set here — they resolve f
 > to see milestone lines. To investigate behavior, re-run with
 > `config={'hiveq_log_level': 'DEBUG'}` (§11.5).
 
-### 2.2 Function registry & remote functions  (module: `hiveq.flow`)
+### 3.2 Function registry & remote functions  (module: `hiveq.flow`)
 
 **What it is.** The *function registry* is a versioned store of reusable Python callables that live on the HiveQ platform rather than in any one script. You write a function once, `push_function(...)` it (cloudpickled, with its `requirements` and a semver `version`), and from then on it can be fetched and run from anywhere — other scripts, other machines, or inside platform jobs — by name and version. It's the building block for sharing indicators, signal functions, and utilities across strategies and teammates without copy-pasting code. What you push is readable by your whole organization by default; mark it `private=True` to keep it to yourself, and open it up or share it with named people later (see **Who can see a function** below).
 
@@ -375,7 +443,7 @@ hf.load_function("sma", namespace="quant.func")                  # ...from anywh
 
 ---
 
-### 2.3 LiveSim deployment  (module: `hiveq.flow`)
+### 3.3 LiveSim deployment  (module: `hiveq.flow`)
 
 `deploy_livesim` is the live counterpart of `run_backtest`: it captures your
 strategy the same way, ships it, and returns a handle. **No backtest is
@@ -405,6 +473,79 @@ re-runs itself during that restore and fails.
 **Tag the asset.** With no backtest to infer from, a strategy that does not set
 `assetType` (or `asset_type`) in its params falls back to the FUTURES default
 and lands on the wrong container.
+
+#### Containers (deployment targets)
+
+Placement is automatic: the platform routes the deployment to an eligible
+container for the tagged asset. `container_id=` on `deploy_livesim` is an
+explicit override and needs the `livesim:select_target` permission — omit it in
+deliverable code. The container you actually landed on comes back on the handle
+(`deployment.container_id`) and in `deployment.status()["container_id"]`.
+
+Read the fleet with **`hf.containers()`** — every container with its asset,
+feed, schedule and live state:
+
+```python
+containers(
+    *,
+    asset: Optional[str] = None,      # "FUTURES" | "EQUITY" | "OPTIONS" (case-insensitive)
+    runtime: Optional[str] = None,    # "hiveq_flow" for a hiveq.flow strategy
+    livesim_only: bool = True,        # drop production containers — not deploy targets
+) -> list[dict]                       # one row per container, sorted by id
+```
+
+It is not on the LiveSim v1 API (`/api/strategy/v1/livesim` exposes only
+`deployments` and `artifacts`); the call reads the strategy service's v0 fleet
+routes, the org-readable one first and the admin-only one if that is refused.
+The same rows back the **Livesim Containers** widget in the web terminal, and
+are readable directly (same `X-API-Key`, host = `HIVEQ_AUTH_URL`) if you need
+them outside Python:
+
+| route (GET) | who can call it | shape |
+|---|---|---|
+| `/api/strategy/v0/run/livesim/containers` | **system admin only** (403 otherwise) | `{"data": [container, ...]}` |
+| `/api/strategy/v0/run/fleet/containers` | anyone with `production:read` | `{"containers": [container, ...]}` |
+
+Both return the declared fleet (`fleet.yaml`) joined with live state, under a
+different key — and with different contents: `fleet/containers` is a **superset**
+that also carries production containers (`type: prod`), which are not LiveSim
+targets. `containers()` filters them out for you unless you pass
+`livesim_only=False`. Per container:
+
+| field | meaning |
+| --- | --- |
+| `id` | the `container_id` you would pass to `deploy_livesim` |
+| `type` | `livesim` or `prod` — only a `livesim` container is a `deploy_livesim` target |
+| `asset` / `runtime` | what placement matches — a `hiveq.flow` (Python) strategy needs `runtime: hiveq_flow`; `sigma_cpp_plugin` containers host compiled plugins |
+| `capacity` / `available_capacity` | slots, and how many are free |
+| `enabled` | declared in the fleet at all |
+| `instance_count` / `active_deployments_count` / `strategy_types` | what is deployed on it right now |
+| `market_data_source`, `dataset`, `schemas`, `preload_market_data` | the feed the container comes up with |
+| `schedule` | `days_of_week`, `start_time`, `end_time`, `timezone` (ET) — when it is meant to be up |
+| `state` | `desired` / `actual` / `status` / `reason` (e.g. `day_of_week:SAT_not_in_CUSTOM`) |
+| `docker_state` | `status`, `is_running`, `exit_code`, `image`, `started_at` |
+| `heartbeat_state` | `status`, `is_alive`, `current_load`, `last_heartbeat` |
+
+```python
+for c in hf.containers(asset="FUTURES", runtime="hiveq_flow"):
+    print(c["id"], f"{c['available_capacity']}/{c['capacity']}",
+          c["state"]["status"], c["state"]["reason"], c["schedule"]["days_of_week"])
+# livesim-futures-1     10/10  stopped  day_of_week:SAT_not_in_CUSTOM  ['MON','TUE','WED','THU','SUN']
+# livesim-futures-depth 10/10  running  window:00:00-23:59             []
+```
+
+**Placement routes on asset and capacity, not on whether the container is up.**
+A deployment can land on a container that is scheduled off and sit idle until
+its window opens — `status()` will read `running` while nothing is processing.
+When you need it live now, pick a container whose `state["status"]` is
+`running` and pass it as `container_id=`.
+
+A container being `stopped` / `exited` is normal outside its schedule — a fleet
+scheduler converges Docker to `schedule` and brings the container up at
+`start_time`, and a `scheduled` deployment comes up with it. **Read
+`state.reason` before debugging a stopped container** (e.g.
+`day_of_week:SAT_not_in_CUSTOM` = policy, not a crash); starting it by hand
+off-schedule is reverted on the next tick.
 
 #### State
 
@@ -522,63 +663,6 @@ Instance names are unique within a container: redeploying a name that is still
 in use raises `LIVESIM_INSTANCE_NAME_IN_USE`.
 
 See `examples/deploy_livesim.py` for the whole loop end to end.
-
-## 3. Credentials
-
-A **HiveQ API key** is the only credential required, and the SDK provisions it through browser sign-in — the user never creates, copies, exports, or manages a key by hand. Identity (user, org) is resolved from the key server-side.
-
-How it actually works: the SDK looks for a key in the environment / `~/.hiveq/.env`. If none is found, browser sign-in opens, mints the key, **writes it to `~/.hiveq/.env`, and reuses it on every later run**.
-
-Users have two supported paths:
-
-```bash
-hiveq login
-```
-
-or simply run a backtest/deploy; the **first** `run_backtest`/`deploy_job` triggers the same sign-in automatically. `hiveq login` is useful before using direct data tools such as `hiveq_data` / the data driver, where there may be no backtest call to trigger sign-in.
-
-### 3.1 First run — the sign-in you will see, and what to do (AI agents: READ THIS)
-
-When you (the AI) run anything that initializes the client with no key saved yet — the first `run_backtest`, or the dedicated sign-in step below — the process prints a banner like this to stdout and then **blocks for up to 5 minutes** waiting for the user to finish signing in:
-
-```
-────────────────────────────────────────────────────────────────
-  Opening your browser to sign in to HiveQ…
-
-  If it doesn't open, paste this link into your browser:
-
-      https://<host>/cli-login?redirect_uri=http://127.0.0.1:<port>/callback&state=…&source=cli
-
-  Waiting for you to finish signing in…
-────────────────────────────────────────────────────────────────
-```
-
-A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the redirect, writes the key to `~/.hiveq/.env`, prints `Signed in as <email-or-name>` (or `Signed in to HiveQ` if the host does not return a profile label), and the run continues. **This wait is expected and correct** — it is not a hang, a crash, a missing dependency, or a bug to debug.
-
-**The whole experience the user should have is:** *they run `hiveq login` or start their first backtest, a browser opens, they sign in (or sign up), and their key is saved.* That is it. Do not ask them to copy/export a key or hand-edit files.
-
-**What you MUST do:**
-1. **Trigger the sign-in for the user**. For backtests, just run the first backtest (init signs in automatically). For direct data-driver work, use `hiveq login` first.
-2. **Tell the user only the human part, in plain words.** A browser window is opening for them to sign in; once they're signed in, they're all set. If the browser didn't open on its own, give them just the bare sign-in link to click:
-   > 👉 **A browser will open so you can sign in to HiveQ.** (If it doesn't open, click here: `<url>`) Once you've signed in, you're all set — nothing else to do.
-3. **Wait** for it to complete (the process prints `Signed in as <email-or-name>` once the key is written), then continue. Every later run reuses the saved key automatically — sign-in happens **once**.
-
-**What you MUST NOT do** (the real failure modes):
-- Treat the wait as a hang, kill the process, and start bisecting / debugging the SDK.
-- Conclude the key is "missing" and tell the user to create, paste, or `export` a key, or hand-edit a file.
-- Ask the user to run `hiveq-login`, `hf.login()`, manual Python snippets, env exports, or file edits. Use the public `hiveq login` command when an explicit login step is needed.
-- Retry the run in a loop or downgrade to a "manual API-key setup" workaround. Signup IS the browser flow — there is no manual key.
-
-> `HIVEQ_AUTH_URL` defaults to `https://staging.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
-
-### 3.2 When generating deliverable code or instructions, DO NOT:
-- tell the user to `export HIVEQ_API_KEY=...` (or set it in a shell/`.env`/`os.environ` by hand) — the sign-in does this;
-- add `hf.login()` to a strategy/backtest script — `run_backtest` already signs in on first use, and you handle first-run sign-in invisibly per §3.1;
-- add hedging comments like `# if not already saved via hf.login()` or `# make sure your API key is set`;
-- hard-code, print, or ask the user to paste a key;
-- surface `hf.login()` / `hiveq-login` to the user as something they should run. Use `hiveq login` only as a one-time terminal setup command, never inside strategy/backtest code.
-
-`hf.login()` / `hiveq-login` is internal plumbing. The user-facing command is `hiveq login`. A finished strategy/backtest script must still be runnable as-is, with **zero** credential code inside it.
 
 ---
 
@@ -873,7 +957,7 @@ ctx.log_parameter_change(param_name: str, old_value, new_value, symbol: Optional
 
 ### 5.9.1 Strategy logger
 
-Use the HiveQ logger — **not** the standard Python `logging` module — so your output is controlled by `hiveq_log_level` (§2.1):
+Use the HiveQ logger — **not** the standard Python `logging` module — so your output is controlled by `hiveq_log_level` (§3.1):
 
 ```python
 from hiveq.flow.logger import logger as _get_logger
@@ -890,7 +974,7 @@ logger.warning("...")  # visible at the default level
 logger.error("...")
 ```
 
-**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the engine default level is `WARNING` (§2.1), both `debug` and `info` lines are silent in normal runs and add zero noise — a healthy run's log is essentially empty, by design. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all instrumentation surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
+**Add copious `logger.debug(...)` calls throughout every callback from the very first version of the strategy** — in `on_start`, on every `on_bar`, at every decision branch, and around every order. Because the engine default level is `WARNING` (§3.1), both `debug` and `info` lines are silent in normal runs and add zero noise — a healthy run's log is essentially empty, by design. When a strategy produces no trades or behaves unexpectedly, re-run with `config={'hiveq_log_level': 'DEBUG', 'oms_console_log': True}` and all instrumentation surfaces immediately — no code changes required. See §11.5 for the complete debugging workflow.
 
 `ctx.add_event_log(...)` (above) is complementary: it writes a structured, queryable row into the event-log table (readable via `run.event_logs()`). Use it for milestone events (pattern detected, target set, regime change) rather than for fine-grained per-bar diagnostics. Use `logger.debug` for everything else.
 
@@ -1423,7 +1507,7 @@ if stats:
 
 ## 11. Remote deploy + observability  (`hiveq.flow.jobs`)
 
-One surface to deploy a job and pull its status/logs/results. A thin **direct-REST** client (built on `requests`) against the platform API — there is no `hiveq_orchestrator` package or any second install. Uses the same API key (§3).
+One surface to deploy a job and pull its status/logs/results. A thin **direct-REST** client (built on `requests`) against the platform API — there is no `hiveq_orchestrator` package or any second install. Uses the same API key (§2).
 
 ```python
 from hiveq.flow.jobs import (
@@ -1434,7 +1518,7 @@ from hiveq.flow.jobs import (
 ```
 
 ### 11.1 Deploy a backtest (high-level)
-Prefer **`hf.run_backtest(...)`** (§2) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`; silent deploy is the default). Observe via the Run (`run.wait(progress=False)`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
+Prefer **`hf.run_backtest(...)`** (§3) — it captures your strategy class automatically and returns a `Run` handle immediately (`run.run_id`, `run.task_id`; silent deploy is the default). Observe via the Run (`run.wait(progress=False)`, `run.report()`, §10.0) — no need to touch the lower-level `jobs` API for the common case.
 
 ```python
 run = hf.run_backtest(strategy_configs=[...], symbols=['AAPL'],
@@ -1519,17 +1603,17 @@ print(df[['time','symbol','message']])
 - `on_bar` fires but no orders: the strategy has logging but no actual `ctx.buy_order(...)` call on the signal path — trace with `logger.debug` to confirm the entry condition is reached.
 - 0 bars received: unguarded `run_backtest` at module level (Step 3 above).
 - `logger.debug` silent: using `logging.getLogger(__name__)` instead of the HiveQ logger (§5.9.1).
-- **`logger.info` silent**: expected — the executor default level is `WARNING` (§2.1), so `debug` and `info` lines never appear in a normal run's log. An empty log does NOT mean the strategy didn't run. When debugging, pass `config={'hiveq_log_level': 'DEBUG'}` explicitly (Step 2).
+- **`logger.info` silent**: expected — the executor default level is `WARNING` (§3.1), so `debug` and `info` lines never appear in a normal run's log. An empty log does NOT mean the strategy didn't run. When debugging, pass `config={'hiveq_log_level': 'DEBUG'}` explicitly (Step 2).
 - Pattern detected but no trade: detection fires on the last bar of the backtest — extend the date range so there are subsequent bars on which to act.
 - **Silent stuck position → phantom PnL**: `report.stats["Total Trades"] == 0` alongside `net_pnl != 0`, or a `positions` row with `avg_px_close == 0`, or a `trades` row with `exit_ts == '1970-01-01'`. Almost always the cancel + close race in §5.2 — your exit path returned `None` and end-of-backtest liquidation booked the position's mark-to-market. Use the two-phase exit pattern.
 
 ### 11.6 Deploy an arbitrary script/job (`QUANT_SCRIPTS`) — `deploy_job`
 
-For a plain fetch/compute/publish script (not a `hiveq.flow` strategy) — e.g. pull data with `hiveq.dd.load(...)` and push a signal with `hiveq.dd.save(...)`. This is the `QUANT_SCRIPTS` counterpart to `run_backtest`: same cloudpickle-and-REST capture, no platform-internal package. Unlike `run_function` (§2.2, which blocks and returns the function's value), `deploy_job` is a **stub like `deploy_backtest`** — it submits and returns a handle immediately (`wait=False` is the default).
+For a plain fetch/compute/publish script (not a `hiveq.flow` strategy) — e.g. pull data with `hiveq.dd.load(...)` and push a signal with `hiveq.dd.save(...)`. This is the `QUANT_SCRIPTS` counterpart to `run_backtest`: same cloudpickle-and-REST capture, no platform-internal package. Unlike `run_function` (§3.2, which blocks and returns the function's value), `deploy_job` is a **stub like `deploy_backtest`** — it submits and returns a handle immediately (`wait=False` is the default).
 
 > **When this is the right tool.** `deploy_job` is for *after* the script's logic is written and working, not for developing it. Write and iterate on the function itself first — call it directly, inspect its output, fix bugs — the ordinary way you develop any Python function, using `hiveq_data` (§14.1) for any data access you need to exercise while iterating (`hiveq.dd`, by contrast, is a stub client-side; its `load`/`save` only do real work once the function is actually running on the platform executor, §14.1). Reach for `deploy_job` once the function is correct and you're ready to run it on the platform itself — either as a one-off to validate it under real platform conditions (sandboxed execution, real data access, real credentials) before committing to a schedule, or to put it into production as a one-off or recurring (`schedule`d) job. It is not a development loop — each call is a full platform round-trip (submit → sandbox → logs), much slower than local iteration.
 
-> **Config: `HIVEQ_API_KEY` only — nothing else.** Exactly like `run_backtest`, identity and data access resolve **server-side** from the API key alone (§3). Do **not** generate code that sets `HIVEQ_DATA_URL`, `HIVEQ_USER_ID`, `HIVEQ_ORG_ID`, or `HIVEQ_USER_NAME` for a `deploy_job` call — none of them are read anywhere on this path. `HIVEQ_DATA_URL` in particular is a `run_backtest`-only concern (it gets baked into the `EngineConfig` the backtest payload carries); `deploy_job` never builds an `EngineConfig`, and the executor gets its own `HIVEQ_DATA_URL` injected server-side regardless of what the client sends. `HIVEQ_BASE_URL` only needs to be set to target a non-default platform host, exactly as with `run_backtest` — not something specific to `deploy_job`.
+> **Config: `HIVEQ_API_KEY` only — nothing else.** Exactly like `run_backtest`, identity and data access resolve **server-side** from the API key alone (§2). Do **not** generate code that sets `HIVEQ_DATA_URL`, `HIVEQ_USER_ID`, `HIVEQ_ORG_ID`, or `HIVEQ_USER_NAME` for a `deploy_job` call — none of them are read anywhere on this path. `HIVEQ_DATA_URL` in particular is a `run_backtest`-only concern (it gets baked into the `EngineConfig` the backtest payload carries); `deploy_job` never builds an `EngineConfig`, and the executor gets its own `HIVEQ_DATA_URL` injected server-side regardless of what the client sends. `HIVEQ_BASE_URL` only needs to be set to target a non-default platform host, exactly as with `run_backtest` — not something specific to `deploy_job`.
 
 ```python
 from hiveq.flow.jobs import deploy_job, Job, Schedule, ScheduleFrequency
@@ -1560,7 +1644,7 @@ class Job:                              # lighter than Run (§10.0) — no metri
 ```
 
 ```python
-import hiveq.flow as hf   # credentials: fully automatic, see §3 — do not add any setup for this
+import hiveq.flow as hf   # credentials: fully automatic, see §2 — do not add any setup for this
 
 def fetch_aapl():
     from hiveq import dd
@@ -1727,9 +1811,9 @@ e.g. `StrategyConfig(name=..., type=..., params={'rolloverExecutorType': 'TWAP',
 |---|---|---|
 | `oms` | str | "SIGMA" (use `OMSType.SIGMA.value`) |
 | `timezone` | Optional[str] | None (IANA name; auto-detected if None) |
-| `params` | Dict[str, Any] | {} (engine-behavior keys — see §2.1 for the recognized keys) |
+| `params` | Dict[str, Any] | {} (engine-behavior keys — see §3.1 for the recognized keys) |
 
-Pass an `EngineConfig` (or a plain `config={...}` dict) to `run_backtest` via `**kwargs`; the tunable `params` keys are listed in **§2.1**.
+Pass an `EngineConfig` (or a plain `config={...}` dict) to `run_backtest` via `**kwargs`; the tunable `params` keys are listed in **§3.1**.
 
 ---
 
@@ -1868,7 +1952,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - **Use per-event callbacks** (`on_start`/`on_bar`/`on_order`/…), not a single `on_hiveq_event` — that global form is opt-in only (§4).
 - **There is no `on_order_filled` callback** — handle fills in `on_order` and check `order.is_filled`.
 - **`run_backtest(...)` returns a `Run` immediately, not a `PerformanceReport`** — the deploy is non-blocking by default (`silent=True`). Call `run.wait(progress=False)` first, then `run.report()` (§10.0, R11). Reading the report before the run finishes yields empty/partial results (a warning is logged).
-- **A quiet `run.logs()` is normal, and 0 trades is not a result.** The executor log level defaults to `WARNING` (§2.1) so healthy runs log nothing — don't pull logs on a run that behaved (R11). Conversely, a report with `Total Trades == 0` is a failed iteration: debug (§11.5) and fix the entry conditions before presenting anything (R12).
+- **A quiet `run.logs()` is normal, and 0 trades is not a result.** The executor log level defaults to `WARNING` (§3.1) so healthy runs log nothing — don't pull logs on a run that behaved (R11). Conversely, a report with `Total Trades == 0` is a failed iteration: debug (§11.5) and fix the entry conditions before presenting anything (R12).
 - **No built-in indicators or rolling-history accessor** — maintain your own `collections.deque` windows and compute with `numpy`/`pandas` (§16). `ctx.instrument(symbol).last_bar` is the only built-in "latest price" accessor.
 - **Sizing helpers exist** (`ctx.close_position`/`order_to_target`/`flatten_all`, §5.2/§16.1) but **percent-of-equity sizing and native brackets do not** — build stop-loss/take-profit as explicit child orders (§16.4).
 - **Match the order mechanism to the need:** a single immediate market order or a signal backtest → direct `buy_order`/`sell_order` (§5.2). Sizeable/sliced orders, live order-chasing/replaces, or auction routing → an **executor** (§5.10/§16.6), which owns slicing/replaces/cancels/fill-aggregation. Don't wrap a one-shot order in an executor; don't hand-roll replace/retry logic when one fits. With executors, hold one handle per target and `replace_executor_params_by_id` to re-target — never `add_executor` a duplicate.

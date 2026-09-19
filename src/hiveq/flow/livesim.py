@@ -103,7 +103,6 @@ class Deployment:
     deployment_id: Optional[str]
     operation_id: Optional[str] = None
     artifact_id: Optional[str] = None
-    dry_run: bool = False
     container_id: Optional[str] = None
     asset: Optional[str] = None
     strategies: List[str] = field(default_factory=list)
@@ -111,7 +110,9 @@ class Deployment:
     def status(self) -> Dict[str, Any]:
         """Current state of the deployment, straight from the platform."""
         if not self.deployment_id:
-            return {"status": "preview", "dry_run": True}
+            raise LivesimError(
+                400, {"error": {"message": "deployment has no deployment_id"}}
+            )
         return _call("GET", f"/deployments/{self.deployment_id}")
 
     def wait(
@@ -122,9 +123,6 @@ class Deployment:
         Returns the last state seen if the timeout expires -- a slow start is
         not an error, so this reports rather than raises.
         """
-        if not self.deployment_id:
-            return self.status()
-
         deadline = time.time() + timeout
         state = self.status()
         while time.time() < deadline and state.get("status") not in SETTLED:
@@ -358,16 +356,113 @@ def upload_artifact(payload: bytes, filename: str = "strategy.pkl") -> str:
     return data["artifact_id"]
 
 
+def _fleet_get(path: str) -> Dict[str, Any]:
+    """GET a v0 fleet route.
+
+    The container surface is not on the v1 LiveSim API -- that one exposes only
+    artifacts and deployments -- so this talks to the strategy service's v0
+    fleet routes on the same host and with the same ``X-API-Key``.
+    """
+    import os
+
+    api_key = os.environ.get("HIVEQ_API_KEY")
+    if not api_key:
+        raise LivesimError(401, {"error": {"message": "HIVEQ_API_KEY is not set"}})
+
+    from hiveq.flow.config import platform_origin
+
+    origin = (platform_origin() or "http://localhost").rstrip("/")
+    url = f"{origin}/api/strategy/v0/run{path}"
+    response = requests.get(url, headers={"X-API-Key": api_key}, timeout=60)
+    if not response.ok:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"message": response.text[:500]}
+        raise LivesimError(response.status_code, body, url)
+    return response.json()
+
+
+def containers(
+    *,
+    asset: Optional[str] = None,
+    runtime: Optional[str] = None,
+    livesim_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """The fleet: every container, its asset, and its live state.
+
+    Placement is automatic, so you rarely need this to deploy -- it answers the
+    questions around a deploy instead: which asset a container serves, what feed
+    it comes up with, whether it is up right now and, when it is not, why.
+
+    Parameters
+    ----------
+    asset : str, optional
+        Keep only this asset (``"FUTURES"``, ``"EQUITY"``, ``"OPTIONS"``);
+        case-insensitive.
+    runtime : str, optional
+        Keep only this runtime. A ``hiveq.flow`` strategy needs
+        ``"hiveq_flow"``; ``"sigma_cpp_plugin"`` containers host compiled
+        plugins and ``"sigma_python_prod"`` is production, not LiveSim.
+    livesim_only : bool
+        Drop non-LiveSim containers (production ones). On by default, because
+        only a LiveSim container is a ``deploy_livesim`` target.
+
+    Returns
+    -------
+    list[dict]
+        One row per container, sorted by ``id``. Each carries ``id`` (what you
+        would pass as ``container_id``), ``asset``, ``runtime``, ``type``,
+        ``capacity`` / ``available_capacity``, ``enabled``,
+        ``market_data_source`` / ``dataset`` / ``schemas`` (the feed it comes up
+        with), ``instance_count`` / ``active_deployments_count`` /
+        ``strategy_types``, ``schedule`` (``days_of_week``, ``start_time``,
+        ``end_time``, ``timezone``), ``state`` (``desired`` / ``actual`` /
+        ``status`` / ``reason``), ``docker_state`` and ``heartbeat_state``.
+
+        A container that is ``stopped`` / ``exited`` outside its schedule is
+        normal, not broken: a fleet scheduler converges Docker to ``schedule``,
+        and ``state["reason"]`` says which rule applied (e.g.
+        ``day_of_week:SAT_not_in_CUSTOM``).
+
+        ``deploy_livesim`` routes on asset and capacity, NOT on whether the
+        container is up, so a deployment can land on one that is scheduled off
+        and sit idle until its window opens. Read ``state`` here first when you
+        need it running now.
+
+    Examples
+    --------
+    >>> for c in hf.containers(asset="FUTURES", runtime="hiveq_flow"):
+    ...     print(c["id"], c["state"]["status"], c["available_capacity"])
+    """
+    # The org-readable route first; fall back to the admin-only one, which
+    # carries the same rows under a different key.
+    try:
+        rows = _fleet_get("/fleet/containers").get("containers") or []
+    except LivesimError as e:
+        if e.status not in (401, 403):
+            raise
+        rows = _fleet_get("/livesim/containers").get("data") or []
+
+    def keep(c: Dict[str, Any]) -> bool:
+        if livesim_only and str(c.get("type") or "livesim").lower() != "livesim":
+            return False
+        if asset and str(c.get("asset") or "").upper() != asset.upper():
+            return False
+        if runtime and str(c.get("runtime") or "") != runtime:
+            return False
+        return True
+
+    return sorted((c for c in rows if keep(c)), key=lambda c: str(c.get("id") or ""))
+
+
 def deploy_livesim(
     strategy_configs: List[Any],
     *,
     data_configs: Optional[List[dict]] = None,
     instance_name: Optional[str] = None,
-    instances: int = 1,
     container_id: Optional[str] = None,
     parameter_overrides: Optional[List[dict]] = None,
-    signal_ids: Optional[List[str]] = None,
-    dry_run: bool = False,
     wait: bool = False,
     **kwargs,
 ) -> Deployment:
@@ -388,14 +483,9 @@ def deploy_livesim(
         Name for this instance, unique within its container. Becomes the
         ``strategy_id`` on every row the strategy publishes. Defaults to the
         strategy's own name.
-    instances : int
-        How many copies to run, 1..10.
     container_id : str, optional
         Pin placement. Needs the ``livesim:select_target`` permission; omit and
         the platform routes to an eligible container.
-    dry_run : bool
-        Validate and plan without materializing anything. The returned
-        deployment has no id, because nothing was written under one.
     wait : bool
         Block until the deployment settles before returning.
     """
@@ -411,8 +501,6 @@ def deploy_livesim(
 
     if not strategy_configs:
         raise ValueError("strategy_configs is required")
-    if not 1 <= instances <= 10:
-        raise ValueError("instances must be between 1 and 10")
 
     # Same capture path as run_backtest: the first-party import graph plus the
     # entry script, as source. No user code is cloudpickled.
@@ -443,16 +531,11 @@ def deploy_livesim(
     body: Dict[str, Any] = {
         "artifact_id": artifact_id,
         "instance_name": name,
-        "instances": instances,
     }
     if container_id:
         body["target"] = {"container_id": container_id}
     if parameter_overrides:
         body["parameter_overrides"] = parameter_overrides
-    if signal_ids:
-        body["signal_ids"] = signal_ids
-    if dry_run:
-        body["dry_run"] = True
 
     accepted = _call("POST", "/deployments", json=body)
     deployment = Deployment(
@@ -460,7 +543,6 @@ def deploy_livesim(
         asset=accepted.get("asset"),
         container_id=accepted.get("container_id"),
         deployment_id=accepted.get("deployment_id"),
-        dry_run=bool(accepted.get("dry_run")),
         operation_id=accepted.get("operation_id"),
         strategies=accepted.get("instance_names") or [],
     )

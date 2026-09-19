@@ -18,7 +18,6 @@ Prerequisites
 Run:
     python deploy_livesim.py --local                      # against a local stack
     python deploy_livesim.py --local --observe 300        # wait longer for orders
-    python deploy_livesim.py --local --dry-run  # validate and plan, deploy nothing
     python deploy_livesim.py --local --cleanup  # terminate it again at the end
 
 --local loads ~/.hiveq/profiles/local.env. Without it, the run targets whatever
@@ -159,7 +158,6 @@ def _await_status(deployment, expected: str, timeout: float = 30.0) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
     parser.add_argument(
         "--instance-name",
@@ -240,16 +238,10 @@ def main() -> int:
         [strategy],
         data_configs=data_configs,
         instance_name=args.instance_name,
-        dry_run=args.dry_run,
     )
     print(f"deployment    : {deployment}")
     print(f"  operation_id: {deployment.operation_id}")
     print(f"  artifact_id : {deployment.artifact_id}")
-
-    if args.dry_run:
-        # A preview materializes nothing, so it has no id to track.
-        print("\ndry run: validated and planned, nothing deployed")
-        return 0
 
     # --- wait for it to settle ---------------------------------------------
     state = deployment.wait(timeout=120)

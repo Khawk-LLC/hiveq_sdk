@@ -112,9 +112,9 @@ def test_set_params_rejects_an_empty_change(calls, deployment):
     assert calls == []
 
 
-def test_a_dry_run_deployment_has_no_params_to_read(calls):
-    preview = livesim.Deployment(deployment_id=None, dry_run=True)
+def test_a_deployment_without_an_id_has_no_params_to_read(calls):
+    orphan = livesim.Deployment(deployment_id=None)
 
-    assert preview.params() == {}
-    assert preview.set_params({"threshold": 0.4}) == {}
+    assert orphan.params() == {}
+    assert orphan.set_params({"threshold": 0.4}) == {}
     assert calls == []
