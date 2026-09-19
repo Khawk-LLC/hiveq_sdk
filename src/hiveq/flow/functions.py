@@ -125,17 +125,36 @@ def _request(method: str, url: str, what: str, **kwargs) -> requests.Response:
     ) from last_exc
 
 
-def _resolve_namespace(namespace: Optional[str]) -> str:
-    """Explicit namespace, else the caller's own namespace (cached)."""
-    if namespace:
-        return namespace
-    global _own_namespace
-    if _own_namespace:
-        return _own_namespace
+def _namespaces() -> Dict[str, Any]:
+    """The registry's namespace document for this caller."""
     resp = _request(
         "GET", _endpoint("namespaces"), "Resolve namespace", headers=_auth_headers()
     )
-    data = resp.json() or {}
+    return resp.json() or {}
+
+
+def _resolve_namespace(namespace: Optional[str]) -> str:
+    """Explicit namespace, else the caller's own namespace (cached).
+
+    ``"org"`` is shorthand for your organization's shared namespace, whose real
+    name encodes the organization id.
+    """
+    if namespace and namespace != "org":
+        # Either a canonical id or a name somebody claimed; the registry
+        # resolves a name to its id, so both are passed through untouched.
+        return namespace
+    if namespace == "org":
+        ns = _namespaces().get("org_namespace")
+        if not ns:
+            raise RuntimeError(
+                "This registry has no shared organization namespace; pass "
+                "namespace=... explicitly."
+            )
+        return ns
+    global _own_namespace
+    if _own_namespace:
+        return _own_namespace
+    data = _namespaces()
     ns = data.get("own_namespace") or data.get("ownNamespace")
     if not ns:
         raise RuntimeError(
@@ -168,6 +187,7 @@ def push_function(
     namespace: Optional[str] = None,
     override: bool = False,
     include_source: bool = True,
+    private: bool = False,
 ) -> dict:
     """Push a Python callable to the function registry.
 
@@ -185,12 +205,17 @@ def push_function(
     docstring : str, optional
         Defaults to the function's own docstring.
     namespace : str, optional
-        Target namespace; defaults to your own. Use ``"default"`` to publish to
-        the shared/public namespace.
+        Target namespace; defaults to your own. Pass ``"org"`` to publish to
+        your organization's shared namespace.
     override : bool
         Overwrite an existing ``name@version`` (default ``False``).
     include_source : bool
         Also store the function's source (best-effort via ``inspect``).
+    private : bool
+        Keep the function to yourself. By default a function you push is
+        readable by everyone in your organization — that is the point of a
+        registry — and ``private=True`` restricts it to you plus anyone you
+        ``share_function`` it with.
 
     Returns ``{"function_id", "namespace", "name", "version", ...}``.
     """
@@ -210,6 +235,7 @@ def push_function(
         "docstring": doc,
         "payload_b64": payload_b64,
         "override": bool(override),
+        "private": bool(private),
     }
     if include_source:
         try:
@@ -243,6 +269,113 @@ def list_functions(
         params=params,
     )
     return (resp.json() or {}).get("functions", [])
+
+
+def share_function(
+    name: str,
+    *,
+    with_user: Optional[str] = None,
+    with_team: Optional[str] = None,
+    with_role: Optional[str] = None,
+    namespace: Optional[str] = None,
+) -> dict:
+    """Give someone read access to one of your functions.
+
+    Only needed for a function you pushed with ``private=True``: an ordinary
+    function is already readable by everyone in your organization.
+
+        hf.push_function(my_signal, version="1.0.0", private=True)
+        hf.share_function("my_signal", with_user="<their user id>")
+
+    The share covers this one function, not your whole namespace, and grants
+    read access only — nobody else can overwrite or delete your function.
+
+    Parameters
+    ----------
+    name : str
+        The function to share.
+    with_user / with_team / with_role : str, optional
+        Exactly one of these — who to share it with.
+    namespace : str, optional
+        The namespace holding the function; defaults to your own.
+    """
+    targets = {"user": with_user, "team": with_team, "role": with_role}
+    named = {kind: value for kind, value in targets.items() if value}
+    if len(named) != 1:
+        raise ValueError(
+            "share_function: pass exactly one of with_user=, with_team=, with_role="
+        )
+    grantee_type, grantee_id = next(iter(named.items()))
+
+    ns = _resolve_namespace(namespace)
+    resp = _request(
+        "POST",
+        _endpoint(f"namespaces/{ns}/functions/{name}/shares"),
+        f"Share function '{name}'",
+        headers={**_auth_headers(), "Content-Type": "application/json"},
+        json={"grantee_id": grantee_id, "grantee_type": grantee_type},
+    )
+    logger.info(f"Shared {ns}/{name} with {grantee_type} {grantee_id}")
+    return resp.json() or {}
+
+
+def name_namespace(alias: str, namespace: Optional[str] = None) -> dict:
+    """Give your namespace a name people can type.
+
+        hf.name_namespace("quant.func")
+        hf.push_function(sma, version="1.0.0", namespace="quant.func")
+        hf.load_function("sma", namespace="quant.func")
+
+    Lowercase letters, digits and ``. _ -``, starting with a letter. The name
+    is an address, not a rename: the namespace keeps its id, so nothing you
+    have already published, shared or granted is affected, and the id keeps
+    working everywhere the name does.
+    """
+    ns = _resolve_namespace(namespace)
+    resp = _request(
+        "PUT",
+        _endpoint(f"namespaces/{ns}/alias"),
+        f"Name namespace '{ns}'",
+        headers={**_auth_headers(), "Content-Type": "application/json"},
+        json={"alias": alias},
+    )
+    logger.info(f"{ns} is now addressable as '{alias}'")
+    return resp.json() or {}
+
+
+def set_function_visibility(
+    name: str, *, private: bool, namespace: Optional[str] = None
+) -> dict:
+    """Make one of your functions private, or readable by your organization.
+
+        hf.set_function_visibility("zscore", private=True)    # just me
+        hf.set_function_visibility("zscore", private=False)   # the whole org
+
+    Applies to every version of the function — a function is private or it is
+    not; it is not private at v1.0.0 and shared at v1.0.1.
+    """
+    ns = _resolve_namespace(namespace)
+    resp = _request(
+        "PUT",
+        _endpoint(f"namespaces/{ns}/functions/{name}/visibility"),
+        f"Set visibility of '{name}'",
+        headers={**_auth_headers(), "Content-Type": "application/json"},
+        json={"private": bool(private)},
+    )
+    logger.info(
+        f"{ns}/{name} is now {'private' if private else 'readable by your organization'}"
+    )
+    return resp.json() or {}
+
+
+def list_namespaces() -> dict:
+    """Namespaces you can reach.
+
+    ``{"namespaces", "own_namespace", "org_namespace", "public_namespace",
+    "shared_with_me"}`` — where ``shared_with_me`` holds namespaces another
+    user has shared a function from.
+    """
+    return _namespaces()
 
 
 def load_function(

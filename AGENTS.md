@@ -43,5 +43,20 @@ write a strategy or use this SDK, read these two, **in order**:
   `oms/sigma/types/*.pyi`) — that is the authoritative `ctx`/payload API.
 - `run_backtest(...)` returns a **`Run`** handle; read results via
   `run.report()` / `run.orders()` / `run.trades()` / `run.tearsheet()` (PDF) / `run.event_logs()` / `run.logs()`.
+- `deploy_livesim(...)` deploys **straight to LiveSim — no backtest** — and returns a
+  **`Deployment`** handle addressed by `deployment_id` (§3.3 of `docs/llms.txt`).
+  Read with `deployment.status()` / `.logs()` / `.orders()` / `.trades()` /
+  `.positions()` / `.metrics()` / `.events()`; drive with `.start()` / `.stop()` /
+  `.pause()` / `.terminate()`. Data calls are **pulls**, never streams — each returns a
+  complete snapshot, or CSV with `format="csv"`.
+- **There is no `run_id` in the LiveSim API.** A LiveSim run id names one container
+  *engine lifetime*, shared by every deployment on that container and regenerated on
+  restart, so it does not identify yours. `deployment_id` is the handle.
+- **Tag the asset for LiveSim.** With no backtest to infer from, a strategy that does not
+  set `assetType` in its params falls back to the FUTURES default and lands on the wrong
+  container.
+- **Lifecycle is owner-only and asynchronous.** Belonging to the same organization does not
+  grant control of a colleague's strategy. Poll `status()` rather than sleeping, and confirm
+  a `terminate()` by the handle ceasing to resolve (`status()` raises with `.status == 404`).
 - **Do not invent API.** If a method/field/enum isn't in the spec or the `.pyi` stubs, it
   does not exist — don't guess.

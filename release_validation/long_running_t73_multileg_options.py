@@ -11,7 +11,7 @@ from hiveq.flow.trading.price_utils import adjust_tick_size
 from hiveq.flow.trading_types import OrderType
 
 
-class SdkT45:
+class SdkT73:
     def on_start(self, ctx, event):
         self.quotes = {"C": {}, "P": {}}
         self.legs = {}
@@ -101,12 +101,12 @@ class SdkT45:
                 role: float(ctx.net_position(leg["symbol"])) for role, leg in self.legs.items()
             },
         })
-        emit_checkpoint(ctx, "t45_multileg_options", self.state)
+        emit_checkpoint(ctx, "t73_multileg_options", self.state)
 
 
 if __name__ == "__main__":
     run = hf.run_backtest(
-        strategy_configs=[StrategyConfig(name="SdkT45", type="SdkT45", symbols=["SPXW"])],
+        strategy_configs=[StrategyConfig(name="SdkT73", type="SdkT73", symbols=["SPXW"])],
         symbols=["SPXW"],
         start_date="2025-06-02",
         end_date="2025-06-06",
@@ -115,13 +115,13 @@ if __name__ == "__main__":
         }],
         backtest_config=BacktestConfig(session_start="15:30", session_end="16:00"),
     )
-    state = completed_checkpoint(run, "t45_multileg_options")
+    state = completed_checkpoint(run, "t73_multileg_options")
     # orders_frame, not run.orders(): falls back to the streamed capture file so
     # an in-process run reports what it actually traded.
     order_rows = len(orders_frame(run))
     trade_rows = len(run.trades())
     roles = set(state["legs"])
-    finish("t45_multileg_options", {
+    finish("t73_multileg_options", {
         "call_and_put_wings_selected": roles == {"long_put", "short_put", "short_call", "long_call"},
         "four_entry_orders": state["entry_orders"] == 4,
         "four_entry_fills": len(state["entry_fills"]) == 4,

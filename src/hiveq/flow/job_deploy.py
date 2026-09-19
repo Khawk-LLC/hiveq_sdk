@@ -19,8 +19,9 @@ later, and optionally register a recurring ``schedule`` instead of a one-off run
         fetch_and_publish,
         task_name="my-daily-signal-job",
         requirements=["pandas"],
-        schedule=Schedule(frequency=ScheduleFrequency.DAILY, start_time="16:05",
-                          timezone="US/Eastern"),
+        # 16:05 US Eastern -- schedule times are Eastern by default; pass
+        # timezone="local" for this machine's zone, or any IANA name.
+        schedule=Schedule(frequency=ScheduleFrequency.DAILY, start_time="16:05"),
     )
     job.status()
     job.logs(limit=200)
@@ -151,7 +152,9 @@ def deploy_job(
     schedule : Schedule, optional
         Recurring-execution config (see ``Schedule``/``ScheduleFrequency``,
         §11.6) — registers the job for repeated firing via the platform's
-        scheduler instead of a single run.
+        scheduler instead of a single run. ``start_time`` is US Eastern unless
+        the schedule names another ``timezone`` (``"local"`` for this machine's
+        zone); ``HIVEQ_SCHEDULE_TIMEZONE`` changes that default.
     wait : bool
         Block for a terminal result before returning (default ``False``).
 

@@ -22,6 +22,147 @@ This launcher is QA infrastructure, not public SDK functionality. It is outside
 `src/`, is not installed by setuptools, and must not be imported by examples,
 validation strategies, or public package code.
 
+### Per-profile invocation
+
+Three profiles are defined in `hiveq_env.py`; nothing else needs editing to
+switch platforms:
+
+| profile   | auth / data host          | orchestrator                                  |
+|-----------|---------------------------|-----------------------------------------------|
+| `local`   | `http://localhost`        | `http://localhost/api/orchestrator`           |
+| `vm`      | `http://vm.hiveq.ai`      | `http://vm.hiveq.ai/api/orchestrator`         |
+| `staging` | `https://staging.hiveq.ai`| `https://staging.hiveq.ai/api/orchestrator`   |
+
+Every command takes the same three forms — `check` (preflight only), `run`
+(preflight, then execute), `login` (force credential renewal):
+
+```bash
+# Preflight a platform before committing to a suite
+python release_validation/hiveq_env.py check vm
+python release_validation/hiveq_env.py check staging
+python release_validation/hiveq_env.py check local
+
+# Full release validation (baseline first, long-running only if baseline is clean)
+python release_validation/hiveq_env.py run vm      release_validation/run_all.py --suite all
+python release_validation/hiveq_env.py run staging release_validation/run_all.py --suite all
+
+# Quick platform-health gate
+python release_validation/hiveq_env.py run staging release_validation/run_all.py --suite baseline
+
+# Endurance phase only, resuming at t50
+RELEASE_VALIDATION_START=50 python release_validation/hiveq_env.py run vm \
+    release_validation/run_all.py --suite long-running
+
+# Skip known-bad numbers (comma separated) on any profile
+RELEASE_VALIDATION_SKIP=42,44 python release_validation/hiveq_env.py run staging \
+    release_validation/run_all.py --suite baseline
+
+# One validation file
+python release_validation/hiveq_env.py run vm \
+    release_validation/baseline_t05_order_lifecycle.py
+
+# Score every row instead of halting at the first red one
+RELEASE_VALIDATION_CONTINUE_ON_FAIL=1 python release_validation/hiveq_env.py run vm \
+    release_validation/run_all.py --suite all
+```
+
+A green preflight prints `health=ok authentication=ok` plus the resolved
+`auth_url` / `orchestrator`; read those two lines before trusting a scorecard,
+because they are the only proof the suite hit the platform you meant.
+
+Credentials are per profile and never shared. Each one lives in
+`~/.hiveq/profiles/<profile>.env` (mode `0600`); the global `~/.hiveq/.env` is
+*not* a profile and a key minted on one platform is rejected by the others
+(staging keys return `401 INVALID_API_KEY` on `vm`). The first `check`/`run`
+against a profile with no stored credential opens that platform's browser
+sign-in, so run it interactively once per platform before scheduling anything
+unattended; `login <profile>` re-mints on demand.
+
+Two environment details the launcher handles, worth knowing when a run targets
+the wrong platform anyway:
+
+* Inherited `HIVEQ_*` variables are stripped from the child environment, so
+  exported shell credentials (e.g. in `~/.bashrc`) cannot override the profile.
+  Invoking a validation *without* the launcher leaves those exports in place and
+  is the usual cause of a `401` on submit.
+* `release_validation/.env` only supplies `HIVEQ_*` values that are not already
+  set, so the launcher's profile always wins over that legacy file.
+
+Choose the interpreter with `--python` when the candidate wheel is installed
+somewhere other than the current `python`:
+
+```bash
+python release_validation/hiveq_env.py run vm --python /path/to/venv/bin/python \
+    release_validation/run_all.py --suite baseline
+```
+
+Remote-run semantics are implied for `run_all.py`: the launcher appends
+`--remote-runs` unless `--local-runs` or `--remote-runs` is given explicitly.
+Platform profiles (`vm`, `staging`) must stay remote — only `local` is a
+sensible target for `--local-runs`.
+
+### What a suite run actually does per profile
+
+Three behaviours decide what you get back, and all three have bitten a real run:
+
+**The baseline gate.** `--suite all` runs baseline first and starts the
+long-running phase *only if baseline is clean*. One red baseline row prints
+`Baseline gate closed; not run` for every long-running validation, so a
+scorecard can read `PASS: 62, FAIL: 1, SKIPPED: 12` where the 12 were never
+attempted. If a baseline row is known-red on a platform, exclude it or the
+endurance phase never runs there:
+
+```bash
+# t72 needs hosted signals, which only resolve on `local` today
+RELEASE_VALIDATION_SKIP=72 python release_validation/hiveq_env.py run vm \
+    release_validation/run_all.py --suite all
+```
+
+**Halt on first failure.** The runner stops at the first red row unless told
+otherwise. Use `RELEASE_VALIDATION_CONTINUE_ON_FAIL=1` when you want the whole
+board rather than a prefix of it — a partial scorecard reads like a full one:
+
+```bash
+RELEASE_VALIDATION_CONTINUE_ON_FAIL=1 python release_validation/hiveq_env.py run vm \
+    release_validation/run_all.py --suite all
+```
+
+**Timeouts are client deadlines, not platform verdicts.** Two independent caps
+apply and both must be large enough, or the smaller one silently wins:
+
+| cap | where | value |
+|---|---|---|
+| baseline validation | `run_all.py DEFAULT_TEST_TIMEOUT_SECONDS` | 4h |
+| long-running validation | `run_all.py LONG_TEST_TIMEOUT_SECONDS` | 18h |
+| memory probe (per probe) | `_memory_probe_impl.py --timeout` | 4h default; t58 passes 4h, t51 passes 8h |
+
+The long-running cap has to clear the *sum* of a validation's probes, not one
+of them: t51 runs two 8h probes sequentially, so its worst case is 16h and an
+18h runner cap is what keeps the smaller cap from silently winning.
+
+`RESULT: ERROR ... timeout after Ns` means the *client* gave up. The remote run
+usually keeps going server-side, so re-submitting stacks a second strategy on
+top of the first — check the run is actually finished before retrying. A
+validation that wraps `_memory_probe_impl.py` must pass `--timeout` explicitly;
+inheriting the 4h default is how t51 kept failing on `vm` while the backtest was
+still progressing normally at day 4 of 5 The same thing recurred at 6h on
+2026-09-16, that time on day 5 of 5 — and because t51 runs its probes under
+`check=True`, the first probe's deadline aborted the test before the windowed
+session ran at all, so a timeout there costs the comparison, not just one row.
+
+### Per-profile data availability
+
+The profiles are not interchangeable: they resolve to different platforms, and
+a validation can only be as good as the data that platform can serve.
+
+| validation | local | vm | why |
+|---|---|---|---|
+| `baseline_t72_nanosecond_timestamps` | runs | `signals_delivered=FAIL` | `HIVEQ_QUANT_SIGNALS` returns no rows on vm |
+
+When a validation fails for want of data rather than a defect, the fix is a
+`signals_delivered`-style check that names the missing input — never relaxing
+the assertion, which turns a red into a false green.
+
 ### Running one validation from PyCharm
 
 The repository includes three shared run configurations under `.run/`:

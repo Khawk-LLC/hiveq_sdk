@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 # t00 is this audit: static, strategy-free, and therefore not subject to the
 # convention it enforces.
 SELF_NAME = "baseline_t00_sdk_convention.py"
-EXPECTED_NUMBERS = range(1, 72)
+EXPECTED_NUMBERS = range(1, 75)
 EXCEPTIONS = {
     "long_running_t51_memory_session_comparison.py": "sequential wrapper around the strategy-bearing memory probe",
     "long_running_t58_100_symbol_monthly_short_session.py": "wrapper around the strategy-bearing 100-symbol memory probe",

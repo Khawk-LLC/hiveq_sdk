@@ -10,6 +10,15 @@ side needs to know where this class came from.
 The executor invokes the payload generically — it calls ``.run()`` and may read
 ``.target`` to reach the wrapped task — so this minimal shape is all it needs.
 """
+# PEP 563. This class is pickled BY VALUE, so its ``__annotations__`` travel in
+# every payload as live type objects. On Python 3.14 ``typing.Optional[str]`` is
+# a ``types.UnionType``, which cloudpickle reduces to ``types.UnionType[...]`` --
+# and that class is not subscriptable before 3.14, so the platform executor
+# (3.12) fails every payload with "type 'types.UnionType' is not subscriptable"
+# before it reads a line of user code. Keeping annotations as strings keeps type
+# objects out of the pickle entirely.
+from __future__ import annotations
+
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -26,14 +35,25 @@ class _TaskWrapper:
         entry_method: Optional[str] = "run",
         args: Optional[Tuple] = None,
         kwargs: Optional[Dict[str, Any]] = None,
+        env: Optional[Dict[str, str]] = None,
     ):
         self.target = target
         self.entry_method = entry_method
         self.args = args or ()
         self.kwargs = kwargs or {}
+        # Process-local environment for the task (e.g. the schedule's timezone,
+        # so the script's own time checks agree with the schedule that woke it).
+        # Deliberately just os.environ entries: nothing here changes the
+        # process's clock or any other global the executor relies on.
+        self.env = env or {}
 
     def run(self) -> Any:
         """Execute the wrapped callable or its entry method."""
+        if self.env:
+            import os
+
+            for key, value in self.env.items():
+                os.environ.setdefault(str(key), str(value))
         if self.entry_method:
             method = getattr(self.target, self.entry_method)
             return method(*self.args, **self.kwargs)

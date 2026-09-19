@@ -62,12 +62,22 @@ from hiveq.flow.functions import (
     run_function,
     load_function,
     list_functions,
+    list_namespaces,
+    name_namespace,
+    set_function_visibility,
+    share_function,
     function_versions,
     get_function_source,
     delete_function,
 )
 from hiveq.flow._client import Schedule, ScheduleFrequency, terminate
 from hiveq.flow.job_deploy import Job, deploy_job
+from hiveq.flow.livesim import (
+    Deployment,
+    deploy_livesim,
+    containers,
+    get_deployment,
+)
 
 # --- credentials (lazy, from env) -------------------------------------------
 _trader_id: Optional[str] = None
@@ -228,8 +238,8 @@ def run_backtest(
     ``run.wait(progress=False)`` (quiet — for scripts/agents), then read
     results via ``run.report()`` etc. Pass ``silent=False`` to block inside
     this call with a live progress line and return the finished ``Run``.
-    ``requirements`` is accepted for API compatibility; package installation
-    is handled by the remote orchestrator once supported.
+    ``requirements`` supplies named package specs installed in the executor
+    before deserialization. Pin versions compatible with the platform runtime.
     """
     result = _deploy(
         strategy_configs,
@@ -238,6 +248,7 @@ def run_backtest(
         end_date=end_date,
         data_configs=data_configs,
         backtest_config=backtest_config,
+        requirements=requirements,
         task_name=task_name,
         allow_duplicate=allow_duplicate,
         duplicate_action=duplicate_action,
@@ -273,6 +284,7 @@ def _deploy(
     allow_duplicate=True,
     duplicate_action='override',
     publish=True,
+    requirements=None,
     **kwargs,
 ) -> dict:
     """Capture the caller's strategy code and submit it to the HiveQ platform.
@@ -377,7 +389,7 @@ def _deploy(
             'end_date': backtest_config.end_date,
             'symbols': backtest_config.symbols,
         },
-        requirements=[],
+        requirements=requirements,
         allow_duplicate=allow_duplicate,
         duplicate_action=duplicate_action,
         run_config=run_config,
@@ -392,11 +404,19 @@ __all__ = [
     "run_function",
     "load_function",
     "list_functions",
+    "list_namespaces",
+    "name_namespace",
+    "set_function_visibility",
+    "share_function",
     "function_versions",
     "get_function_source",
     "delete_function",
     # deploy + observe
     "run_backtest",
+    "deploy_livesim",
+    "containers",
+    "get_deployment",
+    "Deployment",
     "deploy_job",
     "Job",
     "Schedule",
@@ -432,4 +452,4 @@ __all__ = [
     "logger",
 ]
 
-__version__ = "1.0.2.1"
+__version__ = "1.0.3"

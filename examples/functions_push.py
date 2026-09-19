@@ -33,3 +33,15 @@ if __name__ == "__main__":
     # Inspect what's there.
     print("Versions :", hf.function_versions("zscore"))
     print("In namespace:", [f.get("name") for f in hf.list_functions()])
+
+    # Who can see it. By default a function you push is readable by everyone in
+    # your organization. To keep one to yourself and share it deliberately:
+    #
+    #   hf.push_function(zscore, version="1.0.0", private=True)   # just you
+    #   hf.set_function_visibility("zscore", private=False)       # ...open to the org
+    #   hf.share_function("zscore", with_user="<their user id>")  # ...or one person
+    #
+    # And a namespace can have a friendly name instead of its id:
+    #
+    #   hf.name_namespace("quant.func")
+    #   hf.push_function(zscore, version="1.0.0", namespace="quant.func")

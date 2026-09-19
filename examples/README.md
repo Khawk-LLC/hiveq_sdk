@@ -12,6 +12,8 @@ stubs; the canonical reference is the single-file spec at
 | File | Shape | Teaches |
 |---|---|---|
 | `deploy_buy_and_hold.py` | buy once, hold | the minimal deploy + results round-trip |
+| `deploy_livesim.py` | ping order on a timer | deploying straight to **LiveSim** (no backtest), then `status()` / `logs()` / `orders()` / lifecycle off the `Deployment` handle |
+| `livesim_param_restart.py` | ping order on a timer | changing a **parameter** on a running deployment (`params()` / `set_params()`) and proving it survives a container restart |
 | `intraday_momentum_equity.py` | long-only SMA crossover | per-symbol state (`deque`), numpy indicator, **EST time window + EOD flat** (R5/R6), `close_position` |
 | `global_dispatch.py` | buy-and-hold, single dispatch | the opt-in `on_hiveq_event(ctx, event)` contract (branch on `event.type`) vs per-event callbacks (§4) |
 | `global_portfolio.py` | multi-strategy | `ctx.portfolio()` (strategy-scoped) vs `ctx.global_portfolio()` (account-wide) accessors (§8) |
@@ -46,8 +48,9 @@ stubs; the canonical reference is the single-file spec at
 
 | File | Shape | Teaches |
 |---|---|---|
-| `functions_push.py` | register a function | `hf.push_function(...)` → store a reusable function in your namespace (§2.2) |
-| `functions_run.py` | use it on the platform | `hf.run_function(job)` runs a QUANT_SCRIPTS task that loads the registered function and applies it (§2.2). Run after `functions_push.py`. |
+| `functions_push.py` | register a function | `hf.push_function(...)` → store a reusable function in your namespace (§3.2) |
+| `functions_run.py` | use it on the platform | `hf.run_function(job)` runs a QUANT_SCRIPTS task that loads the registered function and applies it (§3.2). Run after `functions_push.py`. |
+| `functions_share.py` | control who can see it | `private=True`, `hf.set_function_visibility(...)`, `hf.share_function(...)` — org-wide by default, private on request, shareable with named people (§3.2). |
 
 ## Conventions these examples model (the easy-to-get-wrong parts)
 
