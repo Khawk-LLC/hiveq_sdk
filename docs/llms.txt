@@ -225,7 +225,7 @@ A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the red
 **What you MUST do:**
 1. **Trigger the sign-in for the user**. For backtests, just run the first backtest (init signs in automatically). For direct data-driver work, use `hiveq login` first.
 2. **Tell the user only the human part, in plain words.** A browser window is opening for them to sign in; once they're signed in, they're all set. If the browser didn't open on its own, give them just the bare sign-in link to click:
-   > 👉 **A browser will open so you can sign in to HiveQ.** (If it doesn't open, click here: `<url>`) Once you've signed in, you're all set — nothing else to do.
+   > **A browser will open so you can sign in to HiveQ.** (If it doesn't open, click here: `<url>`) Once you've signed in, you're all set — nothing else to do.
 3. **Wait** for it to complete (the process prints `Signed in as <email-or-name>` once the key is written), then continue. Every later run reuses the saved key automatically — sign-in happens **once**.
 
 **What you MUST NOT do** (the real failure modes):
