@@ -13,10 +13,12 @@ stubs; the canonical reference is the single-file spec at
 |---|---|---|
 | `deploy_buy_and_hold.py` | buy once, hold | the minimal deploy + results round-trip |
 | `deploy_livesim.py` | ping order on a timer | deploying straight to **LiveSim** (no backtest), then `status()` / `logs()` / `orders()` / lifecycle off the `Deployment` handle |
+| `deploy_noop_futures.py` | no-op ES tick/bar counter | the **LiveSim-only** smoke test: continuous `ES.c.0`, explicit `assetType`, untouched payload clocks, no orders (§3.3) |
 | `livesim_param_restart.py` | ping order on a timer | changing a **parameter** on a running deployment (`params()` / `set_params()`) and proving it survives a container restart |
 | `intraday_momentum_equity.py` | long-only SMA crossover | per-symbol state (`deque`), numpy indicator, **EST time window + EOD flat** (R5/R6), `close_position` |
 | `global_dispatch.py` | buy-and-hold, single dispatch | the opt-in `on_hiveq_event(ctx, event)` contract (branch on `event.type`) vs per-event callbacks (§4) |
 | `global_portfolio.py` | multi-strategy | `ctx.portfolio()` (strategy-scoped) vs `ctx.global_portfolio()` (account-wide) accessors (§8) |
+| `requires_example.py` | LightGBM + XGBoost smoke test | **third-party packages**: pinned specs in `requirements=`, imported *inside* the callback (§3.4) |
 
 ## Orders & execution
 
@@ -57,6 +59,9 @@ stubs; the canonical reference is the single-file spec at
 - **Time is EST/EDT.** `ctx.now()` is already the configured-tz (ET) datetime, and
   all delivered timestamps are ET. Compare wall-clock directly — **never** convert
   to/from UTC (R5/R6). Use `.time_utc` / `ctx.now_utc()` only if you explicitly need UTC.
+- **Third-party packages go in `requirements=`, their `import` goes inside the callback.**
+  The package is installed on the platform and exists nowhere else — a module-level
+  import fails on *your* machine when the script submits the job (§3.4).
 - **Fills arrive in `on_order`** (check `order.is_filled`), not a separate callback.
 - **No engine history buffer, no TA library, no native brackets** — keep your own
   rolling window (`deque`), compute indicators with numpy/pandas, and build

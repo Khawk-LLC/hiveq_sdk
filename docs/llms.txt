@@ -19,7 +19,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 | 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades, the `__main__` guard). |
 | 1 | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
 | 2 | Credentials — first-run browser sign-in (`hiveq login`), what NOT to do when generating deliverable code. **Nothing below works before this**: every entry point, the function registry and LiveSim all authenticate with the key it mints. |
-| 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment (§3.3). |
+| 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment (§3.3), extra Python packages via `requirements=` (§3.4). |
 | 4 | Strategy contract — the class shape (`__init__`/`on_start`/`on_bar`/`on_order`/...), lifecycle facts (init-once, on_start-per-calendar-day). |
 | 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION). Largest section — by far the most common single lookup. |
 | 6 | The `Event` object — the small wrapper every callback receives. |
@@ -270,15 +270,16 @@ run_backtest(
     data_configs: Optional[list[dict]] = None, # §9
     backtest_config: Optional[BacktestConfig] = None,
     *,                                          # keyword-only below
-    requirements: Optional[list[str]] = None,   # installed before deserializing the task
+    requirements: Optional[list[str]] = None,   # extra pip packages, installed before your code is loaded — §3.4
     silent: bool = True,                        # default: deploy + return Run immediately (no blocking)
     **kwargs,                                   # engine configuration: config={...} / engine_config=EngineConfig(...) — §3.1
 ) -> Run                                        # ALWAYS returns a Run handle (§10.0), never a bare report
 #   silent=True (default) : deploy and return the Run immediately (run.run_id / run.task_id).
 #   silent=False          : block inside the call w/ a live progress bar until done (interactive use).
 #   In every mode: run.report() -> PerformanceReport (§10.1); run.positions()/.trades()/... -> DataFrame.
-#   requirements: named package specs installed before task deserialization;
-#                 requires the matching orchestrator/executor release.
+#   requirements: pip specs for packages BEYOND the executor image (numpy/pandas are there).
+#                 They must exist in the org package index, and the strategy must import
+#                 them INSIDE a callback, not at module level. Full rules + example: §3.4.
 
 deploy_livesim(                                 # deploy straight to LiveSim — §3.3
     strategy_configs: list[StrategyConfig],
@@ -663,6 +664,102 @@ Instance names are unique within a container: redeploying a name that is still
 in use raises `LIVESIM_INSTANCE_NAME_IN_USE`.
 
 See `examples/deploy_livesim.py` for the whole loop end to end.
+
+### 3.4 Extra Python packages — `requirements=`
+
+Strategies that need a package beyond the executor's own stack (the image
+already carries `numpy`/`pandas`) declare it per job with the keyword-only
+`requirements=` list of pip specs. The same keyword, same shape, appears on
+`hf.submit` (§11.2), `deploy_job` (§11.6), `push_function` and `run_function`
+(§3.2). It must be a **list** of specs — anything else raises
+`ValueError: requirements must be a list of package specs` at submit time.
+
+`requirements` rides in the submission JSON *outside* the payload, so the
+executor can `pip install` it **before** it deserializes and re-executes your
+code (R14). That ordering is the whole design, and it drives both rules below.
+
+```python
+import hiveq.flow as hf
+from hiveq.flow import BacktestConfig, StrategyConfig
+from hiveq.flow.config import AssetType
+from hiveq.flow.logger import logger as _get_logger
+
+logger = _get_logger()
+
+MODULES = ["lightgbm==4.7.0", "xgboost==3.0.5"]   # declared here, installed on the platform
+
+
+class MLDependencyBacktest:
+    def on_start(self, ctx, event):
+        # Imported HERE, inside the callback — NOT at module level. These names
+        # resolve only on the platform, only after the install step above.
+        import numpy as np
+        import lightgbm as lgb
+        import xgboost as xgb
+
+        X = np.arange(16, dtype=float).reshape(8, 2)
+        y = np.arange(8, dtype=float)
+        self.model = lgb.train({"objective": "regression", "verbosity": -1,
+                                "num_threads": 1, "min_data_in_leaf": 1},
+                               lgb.Dataset(X, label=y), num_boost_round=2)
+        logger.info(f"trained on {lgb.__version__} / xgboost {xgb.__version__}")
+        ctx.subscribe_bars(["AAPL"], asset_type=AssetType.EQUITY, interval="1m")
+
+    def on_bar(self, ctx, event):
+        import numpy as np                      # cheap: already imported, cached
+        bar = event.data()
+        score = float(self.model.predict(np.array([[bar.close, bar.volume]]))[0])
+        logger.debug(f"{bar.time} close={bar.close} score={score}")
+
+
+if __name__ == "__main__":                       # R14
+    run = hf.run_backtest(
+        strategy_configs=[StrategyConfig(name="ML_Import",
+                                         type="MLDependencyBacktest")],
+        symbols=["AAPL"], start_date="2025-11-03", end_date="2025-11-03",
+        data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_EQ",
+                       "schema": ["bars_1m"]}],
+        backtest_config=BacktestConfig(session_start="09:30", session_end="16:00"),
+        requirements=MODULES,                    # <- the only place modules are named
+    )
+    run.wait(progress=False)
+    print(run.report().stats)
+```
+
+**1. The package must already be available in the HiveQ package repository.**
+The executor installs from the organization's internal CodeArtifact / pip index,
+so `requirements` is a request against *that* index — whether a given spec
+resolves is a property of the index, not of this SDK. A package, version or
+platform wheel it does not carry fails on the executor, never on your machine:
+the submission succeeds, and the run then dies during setup, before your code is
+loaded and with no report. `run.logs()` (§11.5) is where the pip output lands.
+If something you need isn't in the index, that's a platform-team request, not a
+code change. **Pin exact versions** (`"lightgbm==4.7.0"`) so the run is
+reproducible and so a resolver surprise can't change what your strategy trains
+on.
+
+**2. Import inside the callback, never at module level.** The strategy module is
+executed in two places, and only one of them has the package:
+
+- **your machine**, when you run the script to submit the job — the package is
+  *not* installed here, and a module-level `import lightgbm` raises
+  `ModuleNotFoundError` before a single byte is submitted;
+- **the executor**, after the `pip install` step — this is the only environment
+  where the name resolves.
+
+So put the import in the callback that uses it (`on_start` for setup/training,
+the hot callback for the rest). Python caches modules after the first import, so
+re-importing per callback costs a dict lookup — do that rather than stashing the
+module object on `self`. This is *only* about the packages you declare in
+`requirements`: `hiveq.flow`, the logger and the stdlib stay at module level as
+usual (R10/R14).
+
+> ⚠️ **R13 still applies.** ML libraries are memory-hungry and the run gets 2 GB,
+> hard. Train on bounded state, keep the model small, and never accumulate a
+> growing frame of bars to fit on — a 137 exit code is the whole error message
+> you get.
+
+See `examples/requires_example.py` for the runnable version.
 
 ---
 
@@ -1710,7 +1807,7 @@ deploy_job(publish_after_the_close, task_name="daily-signal",
            schedule=Schedule(ScheduleFrequency.WEEKDAYS, start_time="16:05"))
 ```
 
-> **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them. Whether the install **succeeds** depends on the sandbox's package index being reachable for what you ask for; treat actual installation as environment-dependent rather than guaranteed by the SDK itself.
+> **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them — so whether the install **succeeds** depends on the org package index carrying the specs you ask for, and a failure surfaces on the executor (a dead job), never client-side. The same two rules as for backtests apply here: the package must be published in the index, and the script must import it **inside** the deployed callable rather than at module level. See §3.4.
 
 > **`status()` fallback.** `GET /status/{task_id}` is backed by a task-history pipeline that may not have a row yet for every deployment target — `Job.status()` falls back to `get_result()` automatically in that case, so this is transparent in normal use; it's only worth knowing if you drop to the low-level `get_status()` directly (§11.3).
 
@@ -1964,6 +2061,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.v.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.v.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.v.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.
 - **`enable_auto_rollover=False` (the default) does not mean "no rollover happens" — it means the held position is not protected across the roll, and the mechanics differ by data type.** The roll executors (POV/TWAP, §13) size and price child orders off NBBO quotes/trade ticks — they have nothing to work with on bar data, so bar-subscribed backtests never route through an executor at all; instead the old-contract position is force-closed directly at the roll date via a synthetic fill, regardless of the flag (only *re-opening* in the new contract requires `enable_auto_rollover=True`). With tick/trade data (`subscribe_futures_trades`, schema `fut_trades`), where an executor *can* run, the flag gates the rollover mechanism entirely, so a held position rides through the roll untouched — no close, no error. If you hold a continuous-symbol futures position across a roll date, either enable rollover or close/re-open the position yourself in `on_rollover`.
 - **End-of-day flatten is opt-in, not automatic.** By default, futures/equity positions carry across sessions — call `ctx.flatten_all()` / `close_position()` yourself (e.g. gated on `ctx.trading_day` or a session-end timer) if you want a flat book at day end. To have the engine do it instead, set `BacktestConfig(auto_flatten_at_close=True)` (§13) — it force-closes non-option positions at session close using the best available price (last trade, else last bar close). The one exception either way is **options**: expiring option positions are settled automatically by the platform — no config or strategy code needed.
+- **A third-party package goes in `requirements=`, and its `import` goes inside the callback.** Module-level `import lightgbm` breaks the *submit*, not the run: the driver script executes on your machine, where the package isn't installed, so it raises `ModuleNotFoundError` before anything reaches the platform. Declare the pinned spec once in `requirements=[...]` (it must already exist in the org package index) and import it in `on_start`/`on_bar` (§3.4).
 - Set `symbols`/`start_date`/`end_date` in one place (top-level args OR `BacktestConfig`), not both.
 - **A tearsheet file defaults to PDF, not HTML — via `run.tearsheet()`, with no `output=` needed.** Don't reach for `report.create_tearsheet()` to produce a saved report: that method returns an HTML/text *string* meant for inline notebook display (§10.0), and writing that string to a `.html` file yourself is not "the default," it's calling the wrong API. If you actually want an HTML file, pass `run.tearsheet(output='report.html')` explicitly.
 
