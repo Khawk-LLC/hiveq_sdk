@@ -199,6 +199,28 @@ falls back to the futures default and lands on the wrong container.
 `hf.get_deployment(deployment_id)` reattaches to anything already deployed.
 See `examples/deploy_livesim.py` for the full loop.
 
+### Prior days: `livesim_history`
+
+A `Deployment` handle reaches only its current container session and stops
+resolving once terminated. For earlier days — or when you don't have the
+`deployment_id` — read by date, strategy and container instead:
+
+```python
+day = hf.livesim_history("2026-09-25")                         # all of yours that day
+day = hf.livesim_history("2026-09-25", strategy="MyStrategy")  # one strategy, every container
+day = hf.livesim_history("2026-09-25", container="livesim-futures-1",
+                         strategy="MyStrategy")                # that strategy in that container
+
+day.runs()        # the day's container sessions — one per restart
+day.orders()      # and trades() / positions() / metrics() / events()
+```
+
+`date` is an America/New_York calendar day. A container restart starts a new
+session, so a day can hold several; every row carries its `run_id`,
+`container_id` and `strategy_id`. You see your own rows; organization owners,
+managers and admins see the whole organization. See
+`examples/livesim_history.py`.
+
 ## The strategy model
 
 - **One class, callback methods.** Implement the events you care about —

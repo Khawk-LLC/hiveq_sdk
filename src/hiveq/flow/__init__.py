@@ -74,9 +74,11 @@ from hiveq.flow._client import Schedule, ScheduleFrequency, terminate
 from hiveq.flow.job_deploy import Job, deploy_job
 from hiveq.flow.livesim import (
     Deployment,
+    LivesimHistory,
     deploy_livesim,
     containers,
     get_deployment,
+    livesim_history,
 )
 
 # --- credentials (lazy, from env) -------------------------------------------
@@ -417,6 +419,8 @@ __all__ = [
     "containers",
     "get_deployment",
     "Deployment",
+    "livesim_history",
+    "LivesimHistory",
     "deploy_job",
     "Job",
     "Schedule",
@@ -452,4 +456,4 @@ __all__ = [
     "logger",
 ]
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"

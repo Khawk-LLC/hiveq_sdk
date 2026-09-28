@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.3`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.4`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -19,7 +19,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 | 0 | Hard rules / invariants — read first, always. The non-negotiables (strategy shape, `event.data()` typing, subscription timing, timezone, logging level, run-output discipline, must-produce-trades, the `__main__` guard). |
 | 1 | Minimal working example (canonical) — a complete runnable strategy + `run_backtest` call. |
 | 2 | Credentials — first-run browser sign-in (`hiveq login`), what NOT to do when generating deliverable code. **Nothing below works before this**: every entry point, the function registry and LiveSim all authenticate with the key it mints. |
-| 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment (§3.3), extra Python packages via `requirements=` (§3.4). |
+| 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment and prior-day LiveSim data via `livesim_history` (§3.3), extra Python packages via `requirements=` (§3.4). |
 | 4 | Strategy contract — the class shape (`__init__`/`on_start`/`on_bar`/`on_order`/...), lifecycle facts (init-once, on_start-per-calendar-day). |
 | 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION). Largest section — by far the most common single lookup. |
 | 6 | The `Event` object — the small wrapper every callback receives. |
@@ -293,6 +293,13 @@ deploy_livesim(                                 # deploy straight to LiveSim —
 ) -> Deployment                                 # handle addressed by deployment_id (§3.3)
 
 get_deployment(deployment_id: str) -> Deployment  # re-attach to a deployment (§3.3)
+
+livesim_history(                                # a day's LiveSim data without a deployment_id (§3.3)
+    date: Union[str, datetime.date],            # "YYYY-MM-DD", an America/New_York calendar day
+    *,
+    strategy: Optional[str] = None,             # one strategy instance, in every container
+    container: Optional[str] = None,            # bare container name, e.g. "livesim-futures-1"
+) -> LivesimHistory
 
 get_run(run_id: str, task_id: Optional[str] = None) -> Run   # re-attach to an existing run (§10.0)
 
@@ -651,6 +658,46 @@ is a complete snapshot; there is no streaming in this version.
 
 Empty results are normal outside market hours — a deployment that has not
 traded yet returns zero rows and is not failing.
+
+#### Data for prior days  (no `deployment_id` needed)
+
+A deployment handle reaches only its **current** container session and stops
+resolving once terminated, so it cannot answer "what did my strategy do last
+Tuesday". `livesim_history` can — it is addressed by date, strategy and
+container instead:
+
+```python
+day = hf.livesim_history("2026-09-25")                      # everything of yours that day
+day = hf.livesim_history("2026-09-25", strategy="ESMarketMaker_1")
+day = hf.livesim_history("2026-09-25", container="livesim-futures-1")
+day = hf.livesim_history("2026-09-25", strategy="ESMarketMaker_1",
+                         container="livesim-futures-1")
+
+day.runs()        # the day's container sessions — one per restart
+day.orders(limit=10_000, offset=0, format="json")
+day.trades(...)
+day.positions(...)
+day.metrics(...)
+day.events(...)   # strategy event logs
+```
+
+| you pass | you get |
+| --- | --- |
+| `date` only | all your rows that day, across every container and every restart |
+| `+ container` | only that container's sessions |
+| `+ strategy` | that strategy in every container |
+| `+ both` | that strategy in that container |
+
+- `date` is an **America/New_York** calendar day (`"YYYY-MM-DD"` or a
+  `datetime.date`). Orders land on the day they were created, trades on the day
+  they closed.
+- A container restart starts a new session with a new `run_id`, so one day can
+  hold several; every row carries `run_id`, `container_id` (the full identity,
+  `<container>:liveSim:<host>:<port>`) and `strategy_id` to tell them apart.
+  `day.runs()` lists them with each session's strategies and first/last event.
+- `container` is the **bare** name (`livesim-futures-1`), matching every session
+  of that container; passing the full identity raises `ValueError`.
+- You see your own rows; organization owners and managers see the whole org.
 
 #### Errors
 

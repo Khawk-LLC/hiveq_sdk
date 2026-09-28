@@ -96,6 +96,28 @@ def _call(method: str, path: str, **kwargs) -> Dict[str, Any]:
     return response.json()["data"]
 
 
+def _pull(path: str, params: Dict[str, Any], format: str) -> Any:
+    """GET one data resource: rows, or CSV text with format="csv"."""
+    import os
+
+    api_key = os.environ.get("HIVEQ_API_KEY")
+    response = requests.get(
+        f"{_base_url()}{path}",
+        headers={"X-API-Key": api_key} if api_key else {},
+        params=params,
+        timeout=300,
+    )
+    if not response.ok:
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"message": response.text[:500]}
+        raise LivesimError(response.status_code, body, response.url)
+    if format == "csv":
+        return response.text
+    return response.json()["data"]
+
+
 @dataclass
 class Deployment:
     """A LiveSim deployment, addressed by ``deployment_id``."""
@@ -309,25 +331,9 @@ class Deployment:
         }
         if strategy:
             params["strategy_id"] = strategy
-
-        import os
-
-        api_key = os.environ.get("HIVEQ_API_KEY")
-        response = requests.get(
-            f"{_base_url()}/deployments/{self.deployment_id}/{resource}",
-            headers={"X-API-Key": api_key} if api_key else {},
-            params=params,
-            timeout=300,
+        return _pull(
+            f"/deployments/{self.deployment_id}/{resource}", params, format
         )
-        if not response.ok:
-            try:
-                body = response.json()
-            except ValueError:
-                body = {"message": response.text[:500]}
-            raise LivesimError(response.status_code, body, response.url)
-        if format == "csv":
-            return response.text
-        return response.json()["data"]
 
     def __repr__(self) -> str:
         if not self.deployment_id:
@@ -560,3 +566,117 @@ def get_deployment(deployment_id: str) -> Deployment:
         deployment_id=state.get("deployment_id"),
         strategies=state.get("instance_names") or [],
     )
+
+
+@dataclass
+class LivesimHistory:
+    """One day of your LiveSim data, addressed without a ``deployment_id``.
+
+    ``date`` is an America/New_York calendar day. Every container session of
+    that day is covered, so a container restarted twice returns all three
+    sessions' rows; each row carries its ``run_id``, ``container_id`` and
+    ``strategy_id`` to tell them apart. ``strategy`` narrows to one strategy
+    instance in every container, ``container`` to one container's sessions,
+    and both together to that strategy in that container.
+    """
+
+    date: str
+    strategy: Optional[str] = None
+    container: Optional[str] = None
+
+    def runs(self, **kwargs) -> Any:
+        """The day's container sessions: run_id, container, strategies, first/last event."""
+        return self._data("runs", **kwargs)
+
+    def orders(self, **kwargs) -> Any:
+        """The day's orders, one current row per order per session."""
+        return self._data("orders", **kwargs)
+
+    def trades(self, **kwargs) -> Any:
+        """The day's round-trip trades (placed on the day they closed)."""
+        return self._data("trades", **kwargs)
+
+    def positions(self, **kwargs) -> Any:
+        """The day's positions, the newest snapshot per position per session."""
+        return self._data("positions", **kwargs)
+
+    def metrics(self, **kwargs) -> Any:
+        """The day's portfolio and per-symbol metrics."""
+        return self._data("metrics", **kwargs)
+
+    def events(self, **kwargs) -> Any:
+        """The day's strategy event logs."""
+        return self._data("event-logs", **kwargs)
+
+    def _data(
+        self,
+        resource: str,
+        *,
+        limit: int = 10_000,
+        offset: int = 0,
+        format: str = "json",
+    ) -> Any:
+        params: Dict[str, Any] = {
+            "date": self.date,
+            "format": format,
+            "limit": limit,
+            "offset": offset,
+        }
+        if self.strategy:
+            params["strategy_id"] = self.strategy
+        if self.container:
+            params["container"] = self.container
+        return _pull(f"/history/{resource}", params, format)
+
+    def __repr__(self) -> str:
+        scope = "".join(
+            f" {key}={value}"
+            for key, value in (
+                ("strategy", self.strategy),
+                ("container", self.container),
+            )
+            if value
+        )
+        return f"<LivesimHistory {self.date}{scope}>"
+
+
+def livesim_history(
+    date: Any,
+    *,
+    strategy: Optional[str] = None,
+    container: Optional[str] = None,
+) -> LivesimHistory:
+    """A day of your LiveSim data by date, strategy and container.
+
+    For prior days, or when you do not have the ``deployment_id``: the
+    deployment handle only reaches its current container session and is gone
+    once terminated. ``date`` is a ``datetime.date`` or ``"YYYY-MM-DD"``, an
+    America/New_York calendar day; ``container`` is the bare container name,
+    e.g. ``"livesim-futures-1"``.
+
+        day = hf.livesim_history("2026-09-25", strategy="ESMarketMaker_1")
+        day.runs()     # the sessions -- one per container restart
+        day.orders()   # every order across them
+    """
+    import datetime as _dt
+
+    if isinstance(date, _dt.datetime):
+        raise TypeError(
+            "livesim_history(date=...) takes a calendar day, not a datetime"
+        )
+    if isinstance(date, _dt.date):
+        date = date.isoformat()
+    if not isinstance(date, str):
+        raise TypeError("livesim_history(date=...) takes 'YYYY-MM-DD' or a date")
+    try:
+        _dt.date.fromisoformat(date)
+    except ValueError:
+        raise ValueError(
+            f"livesim_history(date={date!r}): expected YYYY-MM-DD"
+        ) from None
+    if container and ":" in container:
+        raise ValueError(
+            "livesim_history(container=...) takes the bare container name "
+            "(e.g. 'livesim-futures-1'), not the full container identity"
+        )
+    return LivesimHistory(date=date, strategy=strategy, container=container)
