@@ -519,7 +519,10 @@ def deploy_livesim(
 
     task = HiveQFlowBackTestTask(
         trader_id=_flow._trader_id,
-        api_key=_flow._api_key,
+        # A LiveSim artifact carries no credential: the platform issues each
+        # deployment its own key, and the artifact is stored for as long as the
+        # deployment runs. Only a backtest, which runs the task itself, needs one.
+        api_key="",
         config_params=_flow._deploy_config_params(),
         strategy_configs=[s.to_dict() for s in strategy_configs],
         symbols=None,
