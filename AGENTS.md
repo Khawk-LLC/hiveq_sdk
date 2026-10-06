@@ -49,6 +49,12 @@ write a strategy or use this SDK, read these two, **in order**:
   `.positions()` / `.metrics()` / `.events()`; drive with `.start()` / `.stop()` /
   `.pause()` / `.terminate()`. Data calls are **pulls**, never streams — each returns a
   complete snapshot, or CSV with `format="csv"`.
+- **Prior-day LiveSim data: `hf.livesim_history(date, strategy=None, container=None)`.**
+  A `Deployment` reaches only its current container session and is gone once terminated,
+  so earlier days are read by **date** (an ET calendar day), **strategy** and/or bare
+  **container** name instead — `.runs()` lists the day's sessions (one per restart), and
+  `.orders()` / `.trades()` / `.positions()` / `.metrics()` / `.events()` span them all.
+  Users see their own rows; owners, managers and admins the whole organization.
 - **There is no `run_id` in the LiveSim API.** A LiveSim run id names one container
   *engine lifetime*, shared by every deployment on that container and regenerated on
   restart, so it does not identify yours. `deployment_id` is the handle.

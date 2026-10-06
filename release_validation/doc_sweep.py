@@ -307,6 +307,40 @@ def check_signatures(name: str, text: str) -> None:
 
 
 # ------------------------------------------------------------------ 3. imports
+_SPEC_SPLIT = re.compile(r"[=<>!~;\[\s]")
+
+
+def platform_requirements(tree: ast.AST) -> set[str]:
+    """Top-level module names a snippet declares via `requirements=[...]` (§3.4).
+
+    Those packages are installed by the platform executor, not locally, so an
+    import of one inside a strategy callback is correct code that is expected to
+    be unresolvable here. Handles both the inline list and a list bound to a
+    name that is later passed as `requirements=`.
+    """
+    lists: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.List):
+            specs = [e.value for e in node.value.elts
+                     if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and specs:
+                    lists[tgt.id] = specs
+
+    specs: list[str] = []
+    for node in ast.walk(tree):
+        for kw in getattr(node, "keywords", []) or []:
+            if kw.arg != "requirements":
+                continue
+            if isinstance(kw.value, ast.List):
+                specs += [e.value for e in kw.value.elts
+                          if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            elif isinstance(kw.value, ast.Name):
+                specs += lists.get(kw.value.id, [])
+    return {_SPEC_SPLIT.split(spec.strip())[0].replace("-", "_").lower()
+            for spec in specs if spec.strip()}
+
+
 def check_imports(name: str, blocks: list[tuple[int, str]]) -> None:
     seen: set[tuple[str, str]] = set()
     for line_no, src in blocks:
@@ -314,8 +348,11 @@ def check_imports(name: str, blocks: list[tuple[int, str]]) -> None:
             tree = ast.parse(strip_comment_noise(src))
         except SyntaxError:
             continue
+        platform_only = platform_requirements(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.split(".")[0].lower() in platform_only:
+                    continue
                 for alias in node.names:
                     key = (node.module, alias.name)
                     if key in seen:
@@ -339,6 +376,8 @@ def check_imports(name: str, blocks: list[tuple[int, str]]) -> None:
                                 f"found in module and not an importable submodule")
             elif isinstance(node, ast.Import):
                 for alias in node.names:
+                    if alias.name.split(".")[0].lower() in platform_only:
+                        continue
                     key = ("", alias.name)
                     if key in seen:
                         continue
