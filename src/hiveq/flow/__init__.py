@@ -37,7 +37,7 @@ from .config import (
 )
 # Authoring types (stubs / lightweight DTOs — used only inside strategy
 # callbacks, which run on the executor).
-from .trading_types import OrderSide, OrderType, OrderStatus, MarketCenter
+from .trading_types import OrderSide, OrderType, OrderStatus, MarketCenter, FixTag, ExecInst
 from hiveq.flow.oms.sigma.types import (
     SigmaFill as Fill,
     SigmaOrder as Order,
@@ -452,8 +452,10 @@ __all__ = [
     "OrderType",
     "OrderStatus",
     "MarketCenter",
+    "FixTag",
+    "ExecInst",
     # logging
     "logger",
 ]
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"

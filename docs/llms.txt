@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.4`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.5`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -927,14 +927,15 @@ ctx.subscribe_futures_trades(symbols: Optional[List[str]] = None, root: Optional
 ```python
 ctx.buy_order(symbol: str, quantity: float, order_type: OrderType = None,
               limit_price: float = None, stop_price: float = None, time_in_force: str = None,
-              market_center: str = None)
+              market_center: str = None, custom_fix_params: dict = None)
 ctx.sell_order(symbol, quantity, order_type=None, limit_price=None, stop_price=None,
-               time_in_force=None, market_center=None)
+               time_in_force=None, market_center=None, custom_fix_params=None)
 ctx.short_order(symbol, quantity, order_type=None, limit_price=None, stop_price=None,
-                time_in_force=None, market_center=None)
+                time_in_force=None, market_center=None, custom_fix_params=None)
 ctx.place_order(symbol: str, side: OrderSide, quantity: float, order_type: OrderType,
                 limit_price: Optional[float] = None, stop_price: Optional[float] = None,
-                time_in_force: str = None, market_center: str = None)
+                time_in_force: str = None, market_center: str = None,
+                custom_fix_params: dict = None)
 
 # Convenience helpers (size/flatten off the current net position):
 ctx.close_position(symbol: str, order_type: OrderType = None) -> Optional[SigmaOrder]
@@ -943,9 +944,10 @@ ctx.order_to_target(symbol: str, target_quantity: float,
 ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
 ```
 - `order_type` default = `OrderType.MARKET`.
-- **Auto time-in-force** when `time_in_force=None`: `MOO/LOO → "OPG"`; `MOC/LOC → "DAY"`; `MARKET → "DAY"`; else (LIMIT/STOP) → `"GTC"`.
+- **Auto time-in-force** when `time_in_force=None`: `MOO/LOO → "OPG"`; `MOC/LOC → "DAY"`; `MARKET → "DAY"`; `PEGGED → "DAY"`; else (LIMIT/STOP/…) → `"GTC"`.
 - **`LOO` and `LOC` require `limit_price`** (the engine rejects them otherwise). `MOO`/`MOC` ignore price. `STOP` needs `stop_price`; `STOP_LIMIT` needs both.
 - **`market_center`** (opt): venue routing — `"NYSE"`/`"NASDAQ"`/`"ARCA"`/… or a MIC alias (`"XNYS"`/`"XNAS"`/…). Mainly for auction orders (§5.2.1); auction orders default to `"NASDAQ"` when omitted.
+- **`custom_fix_params`** (opt, live/FIX): `{FixTag.X: value}` (or plain int tags) sent as-is on the order; these take priority over values the venue adapter derives. Peg orders, other FIX order types, venue routing like `100=SGMA` → §5.2.2. Ignored by the backtest/paper fill simulator.
 - **`close_position`** flattens the net position in one offsetting order (no-op if flat); **`order_to_target`** trades the delta to reach a signed target; **`flatten_all`** closes every open position in the strategy. These wrap `net_position` + `buy_order`/`sell_order` — see §16.1.
 - **Transactional / idempotent:** all three **skip (return `None`) if a working order already exists for the symbol** (`has_open_order`). `net_position` reflects only *filled* quantity, so re-issuing while an order is in flight would double-trade — the guard prevents that. Safe to call every bar: they converge one fill at a time. To replace a resting order, `cancel_all_orders(symbol)` first.
 - **The base `buy_order` / `sell_order` / `short_order` do NOT have the `has_open_order` skip guard** — only the three sizing helpers above (`close_position`, `order_to_target`, `flatten_all`) skip. If you need to force a trade even while another order is working on the same symbol, call the base methods directly.
@@ -1045,6 +1047,31 @@ _NYSE — Opening Auction (9:30) / Closing Auction (16:00):_
 
 Key takeaways for strategy code: submit MOC/LOC **before 15:50** to be venue-agnostic (NYSE's cutoff is earlier than Nasdaq's); submit MOO **before 09:28**; never rely on canceling an auction order in the final minutes — past the cancel cutoff it is locked. Use a timer + `ctx.now()` (§16.5) to place these ahead of the cutoff.
 
+### 5.2.2 Other FIX order types & custom FIX tags (PEGGED / mid-peg)
+
+`OrderType` covers the full FIX 4.2 OrdType set. Besides the eight above: `PEGGED` (`40=P`), `WITH_OR_WITHOUT`, `LIMIT_OR_BETTER`, `LIMIT_WITH_OR_WITHOUT`, `ON_BASIS`, `ON_CLOSE`, `FOREX_MARKET`, `PREVIOUSLY_QUOTED`, `PREVIOUSLY_INDICATED`, `FOREX_LIMIT`, `FOREX_SWAP`, `FOREX_PREVIOUSLY_QUOTED`, `FUNARI`. For these, `limit_price` is sent as Price(44) and `stop_price` as StopPx(99) when given. Requires hiveq-flow ≥ 0.3.17 / PySigma ≥ 0.3.18.
+
+Venue-specific attributes go in `custom_fix_params`. `FixTag` names the tag numbers and `ExecInst` the ExecInst(18) values, so you don't need to remember the numbers:
+
+```python
+from hiveq.flow.trading_types import OrderType, FixTag, ExecInst
+
+# Mid-point peg: 40=P, 18=M, 44=cap price, 111=0, 110=0, TIF DAY (default) or IOC
+ctx.buy_order("AAPL", 100, order_type=OrderType.PEGGED, limit_price=187.50,
+              custom_fix_params={
+                  FixTag.EXEC_INST: ExecInst.MID_PRICE_PEG,   # PRIMARY_PEG / MARKET_PEG for other pegs
+                  FixTag.MAX_FLOOR: 0,
+                  FixTag.MIN_QTY: 0,
+                  FixTag.EX_DESTINATION: "SGMA",              # optional: route to a specific venue
+              })
+```
+
+- **Custom tags take priority** over what the adapter derives. `FixTag.EX_DESTINATION: "SGMA"` overrides the default route, including venues with no `MarketCenter` value (UBSA, INCR, SGMA, LEVL, BAML, CGXS, …). Session/identity tags (35, 49, 56, 34, 52, ClOrdID 11, OrigClOrdID 41, OrderID 37) are never overridden.
+- **An order type not in `OrderType`:** use the closest base type (e.g. `LIMIT`, so the price goes out) and set `FixTag.ORD_TYPE` in `custom_fix_params`.
+- **Combine ExecInst values** space-separated: `f"{ExecInst.MID_PRICE_PEG} {ExecInst.NOT_HELD}"`.
+- **Venue support varies.** Adapters translate a value only where their venue differs; an unsupported type/tag comes back as a venue reject (`ORDER_REJECTED`, see `reject_reason`).
+- **Backtests and paper livesim don't simulate these types.** The paper broker ignores `custom_fix_params` and only fills MARKET/LIMIT/STOP/STOP_LIMIT/auction orders: a `PEGGED` (or other new type) order *with* a `limit_price` rests and never fills; without one it fills like a market order. Peg behaviour only exists at a real FIX venue — for backtests, model a mid-peg yourself (e.g. a `LIMIT` at the mid).
+
 ### 5.3 Order management
 ```python
 ctx.cancel_order(order_id: str) -> bool
@@ -1053,7 +1080,7 @@ ctx.cancel_all_orders(symbol: str = None) -> bool
 ctx.clear_pending_order(symbol: str) -> None
 ctx.get_order_state(order_id: str) -> Optional[OrderState]
 ```
-The `modify_order` boolean reports whether the request was accepted for processing, not its final exchange/engine outcome. `quantity` is the new absolute order quantity and is passed to Sigma unchanged; it is not a delta or adjustment. Confirm success in `on_order` from `ORDER_UPDATED`; handle `ORDER_MODIFY_REJECTED` and inspect `SigmaOrder.reject_reason` for a rejected request. Do not stack another replace for the same order while the first replace is pending.
+The `modify_order` boolean reports whether the request was accepted for processing, not its final exchange/engine outcome. `quantity` is the new absolute order quantity and is passed to Sigma unchanged; it is not a delta or adjustment. Confirm success in `on_order` from `ORDER_UPDATED`; handle `ORDER_MODIFY_REJECTED` and inspect `SigmaOrder.reject_reason` for a rejected request. Do not stack another replace for the same order while the first replace is pending. The replace is built from the original order: its order type, side, stop price, market center, account and `custom_fix_params` carry over, and only the fields you pass change (a modified mid-peg stays a mid-peg).
 
 ### 5.4 Position / order queries
 ```python
@@ -1864,14 +1891,18 @@ deploy_job(publish_after_the_close, task_name="daily-signal",
 
 ```python
 from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMSType
-from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter
+from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter, FixTag, ExecInst
 ```
 
 **EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED ORDER_PARTIALLY_FILLED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER IMBALANCE EXECUTOR_EVENT SECURITY_EVENT`
 
 **AssetType**: `EQUITY OPTIONS FUTURES CRYPTO INDEX`
 
-**OrderType**: `MARKET LIMIT STOP STOP_LIMIT MOO MOC LOO LOC` — `MOO/MOC/LOO/LOC` are auction orders with exchange-specific entry/cancel cutoffs (§5.2.1); `LOO/LOC` require `limit_price`.
+**OrderType**: `MARKET LIMIT STOP STOP_LIMIT MOO MOC LOO LOC PEGGED WITH_OR_WITHOUT LIMIT_OR_BETTER LIMIT_WITH_OR_WITHOUT ON_BASIS ON_CLOSE FOREX_MARKET PREVIOUSLY_QUOTED PREVIOUSLY_INDICATED FOREX_LIMIT FOREX_SWAP FOREX_PREVIOUSLY_QUOTED FUNARI` — `MOO/MOC/LOO/LOC` are auction orders with exchange-specific entry/cancel cutoffs (§5.2.1); `LOO/LOC` require `limit_price`. `PEGGED` and the rest complete the FIX 4.2 OrdType set (§5.2.2).
+
+**FixTag** (`IntEnum`, keys for `custom_fix_params`): `ACCOUNT=1 EXEC_INST=18 HANDL_INST=21 ORDER_QTY=38 ORD_TYPE=40 PRICE=44 SIDE=54 TARGET_SUB_ID=57 TIME_IN_FORCE=59 STOP_PX=99 EX_DESTINATION=100 MIN_QTY=110 MAX_FLOOR=111 LOCATE_REQD=114 ON_BEHALF_OF_SUB_ID=116 EXPIRE_TIME=126 DELIVER_TO_COMP_ID=128 SECURITY_EXCHANGE=207 MAX_SHOW=210 PEG_DIFFERENCE=211 DISCRETION_INST=388 DISCRETION_OFFSET=389 EXPIRE_DATE=432 LOCATE_BROKER=5700 DQUOTE_ROUTE=1100` (1100 picks a configured D-Quote route; not sent on the wire). Any other tag: plain int.
+
+**ExecInst** (ExecInst(18) values): `NOT_HELD="1" WORK="2" GO_ALONG="3" OVER_THE_DAY="4" HELD="5" PARTICIPATE_DONT_INITIATE="6" STRICT_SCALE="7" TRY_TO_SCALE="8" STAY_ON_BID_SIDE="9" STAY_ON_OFFER_SIDE="0" NO_CROSS="A" OK_TO_CROSS="B" CALL_FIRST="C" PERCENT_OF_VOLUME="D" DO_NOT_INCREASE="E" DO_NOT_REDUCE="F" ALL_OR_NONE="G" INSTITUTIONS_ONLY="I" LAST_PEG="L" MID_PRICE_PEG="M" NON_NEGOTIABLE="N" OPENING_PEG="O" MARKET_PEG="P" PRIMARY_PEG="R" SUSPEND="S" TRAILING_STOP_PEG="a"`.
 
 **OrderSide**: `BUY SELL`
 
