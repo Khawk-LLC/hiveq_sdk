@@ -2,7 +2,7 @@
 
 This module defines the public enums used across HiveQ Flow strategies
 (``OrderSide``, ``OrderType``, ``OrderStatus``, ``MarketCenter``,
-``FixTag``, ``ExecInst``).
+``PegType``, ``FixTag``, ``ExecInst``).
 
 The runtime objects (Order, Fill, Position, Portfolio) returned from the
 context are provided by the active OMS adapter — see
@@ -86,8 +86,8 @@ class OrderType(_ValueStrMixin, Enum):
     LOC : str
         Limit-On-Close order - limit order that executes at market close
     PEGGED : str
-        Pegged order (FIX 40=P); the peg flavor goes in ``custom_fix_params``,
-        e.g. ``{FixTag.EXEC_INST: ExecInst.MID_PRICE_PEG}`` for mid-peg.
+        Pegged order (FIX 40=P); the peg flavor is the order's ``peg_type``
+        (``PegType``), e.g. ``PegType.MID_PRICE_PEG`` for mid-peg.
 
     The remaining members complete the FIX 4.2 OrdType(40) set.
     """
@@ -99,9 +99,9 @@ class OrderType(_ValueStrMixin, Enum):
     MOC = "MOC"  # Market-On-Close
     LOO = "LOO"  # Limit-On-Open
     LOC = "LOC"  # Limit-On-Close
-    # Rest of the FIX 4.2 OrdType(40) set. Venue-specific attributes (e.g. the peg
-    # flavor 18=M for mid-peg) go in custom_fix_params. An OrdType not listed here
-    # can still be sent by overriding tag 40 through custom_fix_params.
+    # Rest of the FIX 4.2 OrdType(40) set. The peg flavor of PEGGED is peg_type
+    # (PegType); venue-specific attributes go in custom_fix_params. An OrdType not
+    # listed here can still be sent by overriding tag 40 through custom_fix_params.
     WITH_OR_WITHOUT = "WITH_OR_WITHOUT"
     LIMIT_OR_BETTER = "LIMIT_OR_BETTER"
     LIMIT_WITH_OR_WITHOUT = "LIMIT_WITH_OR_WITHOUT"
@@ -114,7 +114,22 @@ class OrderType(_ValueStrMixin, Enum):
     FOREX_SWAP = "FOREX_SWAP"
     FOREX_PREVIOUSLY_QUOTED = "FOREX_PREVIOUSLY_QUOTED"
     FUNARI = "FUNARI"
-    PEGGED = "PEGGED"  # 40=P; mid-peg: custom_fix_params={FixTag.EXEC_INST: ExecInst.MID_PRICE_PEG}
+    PEGGED = "PEGGED"  # 40=P; needs peg_type, e.g. PegType.MID_PRICE_PEG
+
+
+class PegType(_ValueStrMixin, Enum):
+    """Peg flavor of an ``OrderType.PEGGED`` order, sent as FIX ExecInst(18).
+
+    Example (mid-peg)::
+
+        ctx.buy_order("AAPL", 100, order_type=OrderType.PEGGED,
+                      peg_type=PegType.MID_PRICE_PEG, limit_price=187.50)
+
+    The peg type is kept on ``modify_order``; a replace changes qty and price only.
+    """
+    MID_PRICE_PEG = "MID_PRICE_PEG"  # 18=M: midpoint of bid and offer
+    MARKET_PEG = "MARKET_PEG"        # 18=P: offer for buys, bid for sells
+    PRIMARY_PEG = "PRIMARY_PEG"      # 18=R: bid for buys, offer for sells
 
 
 class FixTag(IntEnum):
@@ -122,9 +137,9 @@ class FixTag(IntEnum):
 
     Example (mid-peg routed to SGMA)::
 
-        ctx.buy_order("AAPL", 100, order_type=OrderType.PEGGED, limit_price=187.50,
+        ctx.buy_order("AAPL", 100, order_type=OrderType.PEGGED,
+                      peg_type=PegType.MID_PRICE_PEG, limit_price=187.50,
                       custom_fix_params={
-                          FixTag.EXEC_INST: ExecInst.MID_PRICE_PEG,
                           FixTag.MAX_FLOOR: 0,
                           FixTag.MIN_QTY: 0,
                           FixTag.EX_DESTINATION: "SGMA",
@@ -164,7 +179,8 @@ class ExecInst(_ValueStrMixin, Enum):
     """FIX ExecInst(18) values, for ``custom_fix_params[FixTag.EXEC_INST]``.
 
     Several instructions can be combined space-separated, e.g.
-    ``f"{ExecInst.MID_PRICE_PEG} {ExecInst.NOT_HELD}"``.
+    ``f"{ExecInst.NOT_HELD} {ExecInst.ALL_OR_NONE}"``. The peg flavor of a PEGGED
+    order is not set here but through ``peg_type`` (PegType).
     """
     NOT_HELD = "1"
     WORK = "2"
@@ -185,11 +201,8 @@ class ExecInst(_ValueStrMixin, Enum):
     ALL_OR_NONE = "G"
     INSTITUTIONS_ONLY = "I"
     LAST_PEG = "L"
-    MID_PRICE_PEG = "M"
     NON_NEGOTIABLE = "N"
     OPENING_PEG = "O"
-    MARKET_PEG = "P"
-    PRIMARY_PEG = "R"
     SUSPEND = "S"
     TRAILING_STOP_PEG = "a"
 
