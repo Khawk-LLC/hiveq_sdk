@@ -146,7 +146,8 @@ class FixTag(IntEnum):
                       })
 
     Any tag not listed here can still be passed as a plain int. Values given in
-    ``custom_fix_params`` take priority over what the venue adapter derives.
+    ``custom_fix_params`` take priority over what the venue adapter derives. The Instinet
+    adapter uses only its route tags (57, 1100) and sends no other custom tag.
     """
     ACCOUNT = 1
     EXEC_INST = 18
