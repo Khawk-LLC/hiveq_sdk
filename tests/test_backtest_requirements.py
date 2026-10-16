@@ -46,6 +46,31 @@ def test_backtest_deploy_forwards_requirements_to_transport(monkeypatch):
     assert 'requirements' not in submit.call_args.kwargs['task'].kwargs
 
 
+def test_backtest_deploy_does_not_serialize_api_key(monkeypatch):
+    from hiveq.flow.deploy_task import DeploymentHelper
+
+    api_key = "hiveq-secret-must-not-enter-payload"
+    monkeypatch.setattr(hf, '_api_key', api_key)
+    monkeypatch.setattr(hf, '_ensure_initialized', lambda: None)
+    monkeypatch.setattr(
+        DeploymentHelper,
+        'capture_calling_module',
+        lambda *a, **k: (["Test"], {"files": {"strategy.py": "class Test: pass"}}),
+    )
+    submit = Mock(return_value={'status': 'success'})
+    monkeypatch.setattr(DeploymentHelper, 'submit', submit)
+
+    hf._deploy(
+        [hf.StrategyConfig(name='test', type='Test')],
+        start_date='2026-01-01',
+        end_date='2026-01-02',
+    )
+
+    task = submit.call_args.kwargs['task']
+    assert task.api_key == ""
+    assert api_key.encode() not in cloudpickle.dumps(task)
+
+
 def test_string_is_not_silently_split_into_package_names():
     with pytest.raises(ValueError, match='list'):
         _Client(base_url='https://example.invalid').submit(
