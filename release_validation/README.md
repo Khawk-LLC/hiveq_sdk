@@ -27,11 +27,11 @@ validation strategies, or public package code.
 Three profiles are defined in `hiveq_env.py`; nothing else needs editing to
 switch platforms:
 
-| profile   | auth / data host          | orchestrator                                  |
-|-----------|---------------------------|-----------------------------------------------|
-| `local`   | `http://localhost`        | `http://localhost/api/orchestrator`           |
-| `vm`      | `http://vm.hiveq.ai`      | `http://vm.hiveq.ai/api/orchestrator`         |
-| `staging` | `https://staging.hiveq.ai`| `https://staging.hiveq.ai/api/orchestrator`   |
+| profile   | auth host                         | data host                 | orchestrator                                      |
+|-----------|-----------------------------------|---------------------------|---------------------------------------------------|
+| `local`   | `http://localhost`                | `http://localhost`        | `http://localhost/api/orchestrator`               |
+| `vm`      | `http://vm.app.hiveq.ai`          | `http://vm.app.hiveq.ai`        | `http://vm.app.hiveq.ai/api/orchestrator`         |
+| `staging` | `https://staging.app.hiveq.ai`    | `https://staging.app.hiveq.ai`  | `https://staging.app.hiveq.ai/api/orchestrator`   |
 
 Every command takes the same three forms — `check` (preflight only), `run`
 (preflight, then execute), `login` (force credential renewal):
