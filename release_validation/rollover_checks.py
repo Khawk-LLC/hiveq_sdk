@@ -14,7 +14,7 @@ series, everything a roll has to get right:
 ``analyze`` reconciles that record against the roll schedule in
 ``data/futures_roll_definitions.json`` (``fut_continuous_def``): exact
 prev/current pairs, the roll instant against the delivered prints, the roll
-falling outside the configured trading session in both EST and EDT, the
+stamped at the 17:00 New York close in both EST and EDT, the
 position following the roll, and the instrument re-resolving to the new
 contract. Every check is a named boolean so a failure says which rule broke.
 """
@@ -243,27 +243,13 @@ def expected_schedule(series: str, start: str, end: str) -> dict[str, Any]:
 # Reconciliation
 # --------------------------------------------------------------------------
 
-def _seconds_of_day(text: str) -> int:
-    parts = [int(part) for part in text.split(":")]
-    while len(parts) < 3:
-        parts.append(0)
-    return parts[0] * 3600 + parts[1] * 60 + parts[2]
-
-
-def outside_session(ts_ns: int, session_start: str, session_end: str) -> bool:
-    """True when the ET wall-clock of ``ts_ns`` is not strictly inside the session.
-
-    Boundaries count as outside: a roll exactly at the open or the close is a
-    roll between sessions. Overnight sessions (start later than end) wrap.
-    """
-    local = dt.datetime.fromtimestamp(ts_ns / 1e9, tz=ET)
-    now = local.hour * 3600 + local.minute * 60 + local.second
-    start, end = _seconds_of_day(session_start), _seconds_of_day(session_end)
-    if start < end:
-        inside = start < now < end
-    else:
-        inside = now > start or now < end
-    return not inside
+def close_stamp(first_session: str) -> dt.datetime:
+    """When a roll is stamped: 17:00 New York (the CME close) on the last weekday
+    before the new contract's first session (Friday for a Monday first session)."""
+    day = dt.date.fromisoformat(first_session) - dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= dt.timedelta(days=1)
+    return dt.datetime.combine(day, dt.time(17, 0), tzinfo=ET)
 
 
 def et_label(ts_ns: int) -> str:
@@ -271,8 +257,8 @@ def et_label(ts_ns: int) -> str:
     return local.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-def analyze_series(state: dict[str, Any], series: str, start: str, end: str,
-                   session_start: str, session_end: str) -> tuple[dict[str, bool], dict[str, Any]]:
+def analyze_series(state: dict[str, Any], series: str, start: str,
+                   end: str) -> tuple[dict[str, bool], dict[str, Any]]:
     """Checks for one continuous series; returns (checks, detail)."""
     record = state["series"][series]
     expected = expected_schedule(series, start, end)
@@ -296,29 +282,19 @@ def analyze_series(state: dict[str, Any], series: str, start: str, end: str,
     delivered = [segment[0] for segment in segments]
     expected_contracts = [expected["initial"]] + [row["current"] for row in expected["rolls"]]
 
-    timing_ok = True
-    session_ok = True
-    boundary_date_ok = True
+    # The roll is stamped at the market close (17:00 New York, 22:00 UTC in standard
+    # time and 21:00 UTC in daylight time) before the new contract's first session,
+    # whatever session the run is configured with; data and position switch at the
+    # run's own session boundary (checked by callback order above and below).
+    stamp_ok = True
     roll_times = []
     for index, row in enumerate(rolls):
         roll_ts = row["payload_ts"]
         roll_times.append(et_label(roll_ts) if roll_ts else "0")
-        old = [s for s in segments if s[0] == row["prev_contract"]]
-        new = [s for s in segments if s[0] == row["current_contract"]]
-        # The old contract's last print is at or before the roll and the new
-        # contract's first print at or after it: no print is delivered on the
-        # wrong side of the switch.
-        if not old or not new or old[-1][2] > roll_ts or new[0][1] < roll_ts:
-            timing_ok = False
-        if not outside_session(roll_ts, session_start, session_end):
-            session_ok = False
         if index < len(expected["rolls"]):
-            first_session = dt.date.fromisoformat(expected["rolls"][index]["first_session"])
-            roll_date = dt.datetime.fromtimestamp(roll_ts / 1e9, tz=ET).date()
-            # Between the previous session's close (at most a long weekend
-            # earlier) and the first session on the new contract.
-            if not (first_session - dt.timedelta(days=4) <= roll_date <= first_session):
-                boundary_date_ok = False
+            expected_stamp = close_stamp(expected["rolls"][index]["first_session"])
+            if roll_ts != int(expected_stamp.timestamp()) * 1_000_000_000:
+                stamp_ok = False
 
     post_ok = True
     post_detail = []
@@ -370,9 +346,7 @@ def analyze_series(state: dict[str, Any], series: str, start: str, end: str,
         f"{tag}_timestamps_set": all(
             row["payload_ts"] > 0 and row["payload_ts"] == row["event_ts"] for row in rolls),
         f"{tag}_every_print_on_callback_contract": record.get("off_contract_prints", 0) == 0,
-        f"{tag}_roll_timestamp_between_contract_prints": timing_ok,
-        f"{tag}_roll_timestamp_outside_session_et": session_ok,
-        f"{tag}_roll_on_boundary_date": boundary_date_ok,
+        f"{tag}_roll_stamped_at_close_ny": stamp_ok,
         f"{tag}_position_and_instrument_follow_roll": post_ok,
         f"{tag}_instrument_names_delivered_contract": record["instrument_mismatch"] == 0,
         f"{tag}_rollover_due_before_each_roll": due_ok,
@@ -396,13 +370,12 @@ def analyze_series(state: dict[str, Any], series: str, start: str, end: str,
     return checks, detail
 
 
-def analyze(state: dict[str, Any], start: str, end: str, session_start: str,
-            session_end: str) -> tuple[dict[str, bool], dict[str, Any]]:
+def analyze(state: dict[str, Any], start: str,
+            end: str) -> tuple[dict[str, bool], dict[str, Any]]:
     checks: dict[str, bool] = {}
     detail: dict[str, Any] = {}
     for series in state["series"]:
-        series_checks, series_detail = analyze_series(
-            state, series, start, end, session_start, session_end)
+        series_checks, series_detail = analyze_series(state, series, start, end)
         checks.update(series_checks)
         detail[series] = series_detail
     fractional = [fill for fill in state.get("fills", [])

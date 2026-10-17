@@ -10,11 +10,11 @@ probe (``rollover_checks.RolloverProbe``) records every delivered contract,
 requires, per series:
 
 * exactly the defined rolls, in order, and no other contract delivered;
-* ``on_rollover`` with a complete payload and a real timestamp, between the old
-  contract's last print and the new contract's first print;
-* the roll outside the 18:00-17:00 ET session -- checked on the ET wall clock,
-  so a roll pinned to a fixed UTC hour that lands inside the session in
-  standard or daylight time fails;
+* ``on_rollover`` with a complete payload, before any print of the new contract
+  and after the last print of the old one (callback order);
+* the roll stamped at the 17:00 New York close before the new contract's first
+  session -- 22:00 UTC in standard time, 21:00 UTC in daylight time -- so a
+  stamp pinned to a fixed UTC hour fails in one of the seasons;
 * the position moved: one lot on the new contract and nothing on the old one on
   the first print after the roll; the continuous instrument re-resolved;
 * ROLLOVER_DUE before and ROLLOVER_COMPLETE after each roll, no ROLLOVER_FAILED.
@@ -111,7 +111,7 @@ def run_case(name, series, start, end, schema):
         engine_config=EngineConfig(timezone="America/New_York"),
     )
     state = completed_checkpoint(run, SdkT75RolloverBoundary.CHECKPOINT)
-    return analyze(state, start, end, *SESSION)
+    return analyze(state, start, end)
 
 
 def main() -> None:

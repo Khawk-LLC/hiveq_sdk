@@ -13,8 +13,9 @@ session configurations that exposed the original defects:
 * a 09:30-09:45 intraday window (the roll happens far outside the session).
 
 Expected rolls come from ``data/futures_roll_definitions.json``; the checks are
-those of ``rollover_checks.analyze`` (see baseline t75), with the roll required
-to fall outside each case's own session on the ET wall clock.
+those of ``rollover_checks.analyze`` (see baseline t75): whatever the session,
+the roll is stamped at the 17:00 New York close, while data and the position
+switch at the case's own session boundary.
 
 Run one case: ``python baseline_t76_rollover_2013_trades_matrix.py --case gc_feb_mar14_dst``.
 """
@@ -85,7 +86,7 @@ def run_case(name, series, start, end, session):
         engine_config=EngineConfig(timezone="America/New_York"),
     )
     state = completed_checkpoint(run, SdkT76Rollover2013Trades.CHECKPOINT)
-    return analyze(state, start, end, *session)
+    return analyze(state, start, end)
 
 
 def main() -> None:

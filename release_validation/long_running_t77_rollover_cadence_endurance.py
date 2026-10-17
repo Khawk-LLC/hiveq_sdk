@@ -71,7 +71,7 @@ def run_case(series, start, end, schema):
     )
     print(f"run_id={getattr(run, 'run_id', None)}", flush=True)
     state = completed_checkpoint(run, SdkT77RolloverCadence.CHECKPOINT)
-    return analyze(state, start, end, *SESSION)
+    return analyze(state, start, end)
 
 
 def main() -> None:
