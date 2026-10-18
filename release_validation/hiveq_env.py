@@ -25,14 +25,14 @@ PROFILES: dict[str, dict[str, str]] = {
         "HIVEQ_DATA_URL": "http://localhost",
     },
     "vm": {
-        "HIVEQ_AUTH_URL": "http://vm.hiveq.ai",
-        "HIVEQ_BASE_URL": "http://vm.hiveq.ai/api/orchestrator",
-        "HIVEQ_DATA_URL": "http://vm.hiveq.ai",
+        "HIVEQ_AUTH_URL": "http://vm.app.hiveq.ai",
+        "HIVEQ_BASE_URL": "http://vm.app.hiveq.ai/api/orchestrator",
+        "HIVEQ_DATA_URL": "http://vm.app.hiveq.ai",
     },
     "staging": {
-        "HIVEQ_AUTH_URL": "https://staging.hiveq.ai",
-        "HIVEQ_BASE_URL": "https://staging.hiveq.ai/api/orchestrator",
-        "HIVEQ_DATA_URL": "https://staging.hiveq.ai",
+        "HIVEQ_AUTH_URL": "https://staging.app.hiveq.ai",
+        "HIVEQ_BASE_URL": "https://staging.app.hiveq.ai/api/orchestrator",
+        "HIVEQ_DATA_URL": "https://staging.app.hiveq.ai",
     },
 }
 

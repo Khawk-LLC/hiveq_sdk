@@ -27,11 +27,11 @@ validation strategies, or public package code.
 Three profiles are defined in `hiveq_env.py`; nothing else needs editing to
 switch platforms:
 
-| profile   | auth / data host          | orchestrator                                  |
-|-----------|---------------------------|-----------------------------------------------|
-| `local`   | `http://localhost`        | `http://localhost/api/orchestrator`           |
-| `vm`      | `http://vm.hiveq.ai`      | `http://vm.hiveq.ai/api/orchestrator`         |
-| `staging` | `https://staging.hiveq.ai`| `https://staging.hiveq.ai/api/orchestrator`   |
+| profile   | auth host                         | data host                 | orchestrator                                      |
+|-----------|-----------------------------------|---------------------------|---------------------------------------------------|
+| `local`   | `http://localhost`                | `http://localhost`        | `http://localhost/api/orchestrator`               |
+| `vm`      | `http://vm.app.hiveq.ai`          | `http://vm.app.hiveq.ai`        | `http://vm.app.hiveq.ai/api/orchestrator`         |
+| `staging` | `https://staging.app.hiveq.ai`    | `https://staging.app.hiveq.ai`  | `https://staging.app.hiveq.ai/api/orchestrator`   |
 
 Every command takes the same three forms — `check` (preflight only), `run`
 (preflight, then execute), `login` (force credential renewal):
@@ -407,6 +407,15 @@ result surfaces are validated end to end.
 | `baseline_t69_executor_algo_matrix.py` | POV and TWAP creation, `executor_state`, both stop paths, and the `on_executor` event stream |
 | `baseline_t70_option_expiry_lifecycle.py` | long and short 0DTE options carried into expiry resolve and settle into cash |
 | `baseline_t71_resilience_and_isolation.py` | a missing symbol and a throwing callback do not stop dispatch, trading, or readable results |
+| `baseline_t75_rollover_session_boundary_matrix.py` | 17 short 1m-bar roll cases (EST/EDT, DST-start weekend, DST end, weekend and holiday boundaries, window edges, four roots at once): exact `fut_continuous_def` pairs, roll outside the ET session, position/instrument follow the roll, ROLLOVER_DUE/COMPLETE |
+| `baseline_t76_rollover_2013_trades_matrix.py` | the 2013-2014 ES/GC roll matrix on `fut_trades` under overnight, calendar-day and 09:30-09:45 sessions, with the same per-roll reconciliation |
+| `baseline_t78_continuous_portfolio_aggregation.py` | two strategies hold ESM4/ESU4/ESZ4 outrights plus `ES.c.0` through the June 2024 roll: per-contract positions = fill ledger, `net_position("ES.c.0")` = sum of ES contracts, `position("ES.c.0")` = current contract, global = A + B every minute, net unchanged by the roll |
+| `long_running_t77_rollover_cadence_endurance.py` | quarterly ES.c.0 2013-2025 (52 rolls), monthly GC.c.0/CL.c.0 and bi-monthly GC.v.0 2022-2025, monthly GC trades 2013-2014: exact roll chain and one lot always on the current contract |
+
+The rollover cases share `rollover_checks.py` (probe strategy and
+reconciliation). Expected rolls come from
+`data/futures_roll_definitions.json`, a dated extract of `fut_continuous_def`;
+a window extended past its last row needs the extract refreshed.
 
 Files prefixed `long_running_` receive a four-hour per-test timeout; files
 prefixed `baseline_` use the normal timeout. Every run writes its review files beneath

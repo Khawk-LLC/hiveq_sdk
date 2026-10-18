@@ -37,7 +37,7 @@ from .config import (
 )
 # Authoring types (stubs / lightweight DTOs — used only inside strategy
 # callbacks, which run on the executor).
-from .trading_types import OrderSide, OrderType, OrderStatus, MarketCenter
+from .trading_types import OrderSide, OrderType, OrderStatus, MarketCenter, FixTag, ExecInst, PegType
 from hiveq.flow.oms.sigma.types import (
     SigmaFill as Fill,
     SigmaOrder as Order,
@@ -359,7 +359,11 @@ def _deploy(
 
     task = HiveQFlowBackTestTask(
         trader_id=_trader_id,
-        api_key=_api_key,
+        # Authenticate the submission with X-API-Key only. The orchestrator
+        # injects the credential into the executor environment; serializing it
+        # here both persists the caller's secret and triggers the platform's
+        # credential-in-payload guard.
+        api_key="",
         config_params=_deploy_config_params(),
         strategy_configs=[s.to_dict() for s in strategy_configs],
         symbols=backtest_config.symbols,
@@ -452,8 +456,11 @@ __all__ = [
     "OrderType",
     "OrderStatus",
     "MarketCenter",
+    "FixTag",
+    "ExecInst",
+    "PegType",
     # logging
     "logger",
 ]
 
-__version__ = "1.0.4"
+__version__ = "1.0.6"
