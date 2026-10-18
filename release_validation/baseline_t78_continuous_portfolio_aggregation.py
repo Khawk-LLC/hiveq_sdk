@@ -67,7 +67,7 @@ def es_positions(portfolio) -> dict[str, float]:
     return held
 
 
-class _AggregationProbe:
+class SdkT78AggregationProbe:
     NAME = ""
 
     def on_start(self, ctx, event):
@@ -164,15 +164,15 @@ class _AggregationProbe:
         emit_checkpoint(ctx, f"t78_{self.NAME}", self.s)
 
 
-class SdkT78A(_AggregationProbe):
+class SdkT78A(SdkT78AggregationProbe):
     NAME = "SdkT78A"
 
 
-class SdkT78B(_AggregationProbe):
+class SdkT78B(SdkT78AggregationProbe):
     NAME = "SdkT78B"
 
 
-class SdkT78C(_AggregationProbe):
+class SdkT78C(SdkT78AggregationProbe):
     NAME = "SdkT78C"
 
 
