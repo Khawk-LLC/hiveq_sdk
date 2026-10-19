@@ -17,7 +17,7 @@ Properties:
 Configuration (env / ``~/.hiveq/.env``):
 - ``HIVEQ_API_KEY``           — required; identifies the user/org.
 - ``HIVEQ_AUTH_URL``          — the single platform host the whole SDK points at
-                                (default ``https://staging.hiveq.ai``).
+                                (default ``https://staging.app.hiveq.ai``).
 """
 import hashlib
 import json
@@ -46,7 +46,7 @@ def _container_base_url() -> str:
     """Platform base URL — the single sign-in host (``HIVEQ_AUTH_URL``).
 
     One configured URL points the whole SDK at the same platform; uploads go to
-    that host. Defaults to ``https://staging.hiveq.ai`` when unset.
+    that host. Defaults to ``https://staging.app.hiveq.ai`` when unset.
     """
     from hiveq.flow.config import platform_origin
 

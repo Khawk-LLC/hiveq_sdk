@@ -43,7 +43,7 @@ def _load_well_known_env() -> None:
 _load_well_known_env()
 
 
-_DEFAULT_AUTH_URL = "https://staging.hiveq.ai"
+_DEFAULT_AUTH_URL = "https://staging.app.hiveq.ai"
 
 
 def platform_origin() -> str:
@@ -52,7 +52,7 @@ def platform_origin() -> str:
     ``HIVEQ_AUTH_URL`` is the single host users configure (the sign-in host).
     When the orchestrator / data URLs aren't set explicitly, they follow this
     host so one setting points the whole SDK at the right platform (local, LAN,
-    or hosted). Defaults to ``https://staging.hiveq.ai`` when unset.
+    or hosted). Defaults to ``https://staging.app.hiveq.ai`` when unset.
     """
     url = os.environ.get("HIVEQ_AUTH_URL")
     if not url:
@@ -89,7 +89,7 @@ def _fetch_user_info_from_api_key():
             os.environ.get('HIVEQ_AUTH_URL'),  # Custom override
             'http://localhost:3001',            # Local dev
             'http://localhost:8080',            # Local via nginx
-            'https://staging.hiveq.ai',         # Staging
+            'https://staging.app.hiveq.ai',         # Staging
         ]
         # Remove None values
         auth_urls = [u for u in auth_urls if u]
@@ -316,7 +316,7 @@ class EngineConfig:
             'oms_console_log': False,  # Default: disable OMS console logging
             'base_data_path': '',
             'hiveq_api_key': os.environ.get('HIVEQ_API_KEY', 'test_api_key_abcdef123456'),
-            'hiveq_data_url': os.environ.get('HIVEQ_DATA_URL', 'https://staging.hiveq.ai/'),
+            'hiveq_data_url': os.environ.get('HIVEQ_DATA_URL', 'https://staging.app.hiveq.ai/'),
             'hiveq_data_publish': True,
             # User/org identifiers for SDK client headers (Historical, Instrument provider, etc.)
             # Note: For published data records, user_id/org_id/user_name are injected by the publisher

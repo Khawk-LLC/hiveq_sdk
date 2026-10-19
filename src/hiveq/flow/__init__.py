@@ -163,7 +163,7 @@ def _sanitize_kwargs_for_deploy(kwargs: dict) -> dict:
     `run_backtest(engine_config=EngineConfig(...))`). Constructing an EngineConfig
     on the client freezes the local defaults — hiveq_data_url, api_key, user/org —
     into its `params`. If serialized, the executor's in-run publisher would use the
-    client's `https://staging.hiveq.ai/` instead of the platform's data URL. We
+    client's `https://staging.app.hiveq.ai/` instead of the platform's data URL. We
     deep-copy and strip so the executor rebuilds these from its own environment
     (App -> EngineConfig.__post_init__ fills hiveq_data_url from HIVEQ_DATA_URL)."""
     import copy

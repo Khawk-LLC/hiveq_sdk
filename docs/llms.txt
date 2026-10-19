@@ -234,7 +234,7 @@ A tiny local server on `127.0.0.1:<port>` (same machine as you) receives the red
 - Ask the user to run `hiveq-login`, `hf.login()`, manual Python snippets, env exports, or file edits. Use the public `hiveq login` command when an explicit login step is needed.
 - Retry the run in a loop or downgrade to a "manual API-key setup" workaround. Signup IS the browser flow — there is no manual key.
 
-> `HIVEQ_AUTH_URL` defaults to `https://staging.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
+> `HIVEQ_AUTH_URL` defaults to `https://staging.app.hiveq.ai` when not explicitly set. Override it in `~/.hiveq/.env` or the environment to point the SDK at a different platform host (e.g. a local dev instance).
 
 ### 2.2 When generating deliverable code or instructions, DO NOT:
 - tell the user to `export HIVEQ_API_KEY=...` (or set it in a shell/`.env`/`os.environ` by hand) — the sign-in does this;
@@ -2091,7 +2091,7 @@ The low-level REST/WebSocket SDK for programmatic data access — datasets, sche
 ```python
 import hiveq_data as hd
 
-hd.configure(api_key="...", base_url="https://staging.hiveq.ai")
+hd.configure(api_key="...", base_url="https://staging.app.hiveq.ai")
 
 # Historical
 client = hd.Historical(timezone='America/New_York')
@@ -2432,7 +2432,7 @@ date range.
 
 Use `--base-url` only when you need to point at a non-default HiveQ data API
 host. The default resolves from `HIVEQ_DATA_URL`, `HIVEQ_BASE_URL`,
-`HIVEQ_AUTH_URL`, then `https://staging.hiveq.ai`.
+`HIVEQ_AUTH_URL`, then `https://staging.app.hiveq.ai`.
 
 See §9 for
 the `data_configs` shape used by strategy backtests.

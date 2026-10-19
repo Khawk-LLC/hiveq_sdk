@@ -44,7 +44,7 @@ cloudpickle.register_pickle_by_value(_payload_module)
 cloudpickle.register_pickle_by_value(sys.modules[__name__])
 
 
-_DEFAULT_BASE_URL = "https://staging.hiveq.ai/api/orchestrator"
+_DEFAULT_BASE_URL = "https://staging.app.hiveq.ai/api/orchestrator"
 _TERMINAL_STATES = ("completed", "failed", "terminated")
 _DUPLICATE_ACTIONS = ("override", "terminate", "duplicate")
 
