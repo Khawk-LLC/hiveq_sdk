@@ -59,7 +59,7 @@ def test_it_reads_the_org_readable_route_and_drops_production(routes):
     assert [c["id"] for c in rows] == [
         "livesim-futures-1", "livesim-options-1", "native-futures-1",
     ]  # sorted by id, prod-futures-1 is not a livesim target
-    assert routes == ["https://staging.hiveq.ai/api/strategy/v0/run/fleet/containers"]
+    assert routes == ["https://staging.app.hiveq.ai/api/strategy/v0/run/fleet/containers"]
 
 
 def test_asset_and_runtime_narrow_it_to_deployable_targets(routes):

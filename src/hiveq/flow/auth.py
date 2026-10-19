@@ -15,7 +15,7 @@ This is the same pattern as ``gcloud auth login`` / ``gh auth login``: the
 browser only does auth; the local SDK process is what writes the file (a web page
 can't touch your disk). The SDK waits a few seconds for the redirect, no copying.
 
-The sign-in host defaults to ``https://staging.hiveq.ai``. Override it with
+The sign-in host defaults to ``https://staging.app.hiveq.ai``. Override it with
 ``HIVEQ_AUTH_URL`` in ``~/.hiveq/.env`` or the environment when targeting a
 different platform. ``HIVEQ_LOGIN_PATH`` overrides the page route (default
 ``/cli-login``).

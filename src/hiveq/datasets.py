@@ -18,7 +18,7 @@ def _api_base_url(base_url: str | None = None) -> str:
         os.environ.get("HIVEQ_DATA_URL")
         or os.environ.get("HIVEQ_BASE_URL")
         or os.environ.get("HIVEQ_AUTH_URL")
-        or "https://staging.hiveq.ai"
+        or "https://staging.app.hiveq.ai"
     ).rstrip("/")
 
 
