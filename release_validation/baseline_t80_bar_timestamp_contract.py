@@ -75,7 +75,7 @@ def equity_session(day):
             nanos(pd.Timestamp(f"{day} {close_local}", tz="America/New_York")))
 
 
-class BarContract:
+class SdkT80BarContract:
 
     def setup(self):
         if hasattr(self, "state"):
@@ -256,7 +256,7 @@ class BarContract:
         return state
 
 
-CONTRACT = BarContract()
+CONTRACT = SdkT80BarContract()
 
 
 class SdkT80:
