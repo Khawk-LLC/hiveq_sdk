@@ -6,10 +6,11 @@ The contract (hiveq-flow bar.py docstrings):
   interval, start_time a whole multiple of the interval; it is delivered at
   end_time: ts_event == bar.time == ctx.now() == end_time, every trade inside
   it has already been delivered, and no trade at or after its end has;
-* a daily bar spans its asset's trading session (asset defaults shared with
-  the paper broker: equities 08:00 -> 23:00 UTC; futures the Globex day) and
-  is delivered at the session open: ts_event == ctx.now() == start_time ==
-  session open, end_time == session close, before any trade of the session;
+* a daily bar spans its asset's trading session (equities regular hours,
+  09:30 -> 16:00 New York, early closes from the holiday calendar; futures the
+  Globex day) and, by default (daily_bar_delivery='close'), is delivered at the
+  session close: ts_event == ctx.now() == end_time == session close, after
+  every trade of the session (the 'open' opt-in is covered separately);
 * bars arrive in event-time order, shortest interval first on a tie;
 * the clock never runs backwards across on_trade / on_bar / on_timer.
 
@@ -46,8 +47,8 @@ INTRADAY = {"1s": 1, "1m": 60}
 DAILY = "1d"
 SYMBOLS = {"ES.c.0": AssetType.FUTURES, "AAPL": AssetType.EQUITY}
 DAILY_SYMBOLS = ("AAPL",)
-# Asset session defaults (Sigma MarketCenterHours::dailySession), UTC.
-EQUITY_SESSION_UTC = ("08:00:00", "23:00:00")
+# Equity daily session (Sigma MarketCenterHours::dailySession), New York time.
+EQUITY_SESSION_LOCAL = ("09:30", "16:00")
 # Share of intraday bars whose OHLC must equal the trades rebuilt for their
 # own window; below 1.0 only because a vendor bar may exclude a print the
 # trade feed keeps. Bars matching a neighbouring window instead (a shifted
@@ -69,9 +70,9 @@ def rth(ts):
 
 
 def equity_session(day):
-    open_utc, close_utc = EQUITY_SESSION_UTC
-    return (nanos(pd.Timestamp(f"{day} {open_utc}", tz="UTC")),
-            nanos(pd.Timestamp(f"{day} {close_utc}", tz="UTC")))
+    open_local, close_local = EQUITY_SESSION_LOCAL
+    return (nanos(pd.Timestamp(f"{day} {open_local}", tz="America/New_York")),
+            nanos(pd.Timestamp(f"{day} {close_local}", tz="America/New_York")))
 
 
 class BarContract:
@@ -83,6 +84,7 @@ class BarContract:
         self.delivered_end = {s: {i: 0 for i in INTRADAY} for s in SYMBOLS}
         self.max_trade_ts = defaultdict(int)
         self.session_trades = {s: {} for s in DAILY_SYMBOLS}
+        self.daily_delivered = {s: set() for s in DAILY_SYMBOLS}
         self.bars = []
         self.daily_bars = []
         self.last_now = 0
@@ -139,6 +141,9 @@ class BarContract:
             day = pd.Timestamp(ts, tz="UTC").strftime("%Y-%m-%d")
             open_ns, close_ns = equity_session(day)
             if open_ns <= ts < close_ns:
+                if day in self.daily_delivered[symbol]:
+                    # A session trade after that day's daily bar: look-ahead.
+                    self.violation("trade_after_daily_bar", [symbol, day, ts])
                 self.add(self.session_trades[symbol], day, price, size)
         for interval, secs in INTRADAY.items():
             start = ts // (secs * NS) * secs * NS
@@ -204,14 +209,14 @@ class BarContract:
         open_ns, close_ns = equity_session(day)
         if start != open_ns or end != close_ns:
             self.violation("daily_not_on_session", [symbol, str(bar.start_time), str(bar.end_time)])
-        if int(event.ts_event) != start or nanos(bar.time) != start:
-            self.violation("daily_ts_event_not_open", [symbol, day, int(event.ts_event), start])
-        if now != start:
-            self.violation("daily_now_not_open", [symbol, day, now, start])
-        if self.max_trade_ts[symbol] >= start:
-            # A trade of the session was delivered before the session's bar.
-            self.violation("daily_after_session_trades", [symbol, day, self.max_trade_ts[symbol]])
-        self.order(86400, start)
+        if int(event.ts_event) != end or nanos(bar.time) != end:
+            self.violation("daily_ts_event_not_close", [symbol, day, int(event.ts_event), end])
+        if now != end:
+            self.violation("daily_now_not_close", [symbol, day, now, end])
+        if day not in self.session_trades[symbol]:
+            self.violation("daily_before_session_trades", [symbol, day, now])
+        self.daily_delivered[symbol].add(day)
+        self.order(86400, end)
         self.daily_bars.append((symbol, day, [float(bar.open), float(bar.high),
                                               float(bar.low), float(bar.close)]))
 
@@ -286,8 +291,8 @@ def contract_checks(state):
             checks[f"{symbol}_{DAILY}_delivered"] = counts.get(DAILY, 0) == 1
     for key in ("end_not_start_plus_interval", "start_not_aligned", "ts_event_not_end",
                 "now_not_end_in_on_bar", "bar_after_later_trades", "trade_after_its_bar",
-                "daily_not_on_session", "daily_ts_event_not_open", "daily_now_not_open",
-                "daily_after_session_trades", "bar_order", "clock_backwards", "unexpected_bar"):
+                "daily_not_on_session", "daily_ts_event_not_close", "daily_now_not_close",
+                "daily_before_session_trades", "trade_after_daily_bar", "bar_order", "clock_backwards", "unexpected_bar"):
         checks[key] = not state.get(key + "_n")
     return checks
 
