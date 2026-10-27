@@ -389,12 +389,8 @@ market-data delay or an exchange timestamp adjustment. Trades use their
 recorded dataset timestamp; depth is merged by provider receive time, so
 identical fill timing with livesim is not guaranteed.
 
-The platform fetches data. Its worker's `HIVEQ_L3_DATA_HOST_PATH` (default
-`/data/l3`) is mounted at `/data/l3` in backtest executors; the adapter gets
-`HIVEQ_L3_DATA_DIR=/data/l3`. Operators provision write access and the provider
-credential on the worker. Missing MBO files download automatically and remain
-in the shared cache, e.g. `GLBX.MDP3/mbo/20261021.MESZ6.dbn.zst`. Do not embed
-provider keys in strategy code or copy cache files manually during normal runs.
+The platform automatically downloads and caches the L3 data required for
+your backtest. No additional data setup is needed in your run script.
 
 See `docs/depth-replay.md` and the complete `examples/run_l3_backtest.py`:
 `python examples/run_l3_backtest.py --date 2026-10-21`. The selected platform

@@ -50,30 +50,19 @@ With a trade schema present, bars are analytical inputs rather than a second,
 synthetic fill source. Do not remove `fut_trades` and expect L3 to supply trades.
 No L3 trade-dissemination option is part of this configuration.
 
-## Runtime and shared cache
+## Runtime and data availability
 
 The executor needs the depth-enabled Flow 0.3.21 implementation and the Sigma
 adapter with exact fixed-point price conversion and optional BBO publication.
 A version label alone does not prove an older image contains these patches;
 rebuild/deploy the matching runtime. The client SDK version is independent.
 
-For platform operators:
+The platform automatically downloads and caches the L3 data required for
+your backtest. No additional data setup is needed in your run script.
+Continuous symbols such as `MES.c.0` resolve to the dated contract for each day.
 
-- Set `HIVEQ_L3_DATA_HOST_PATH` on the orchestrator worker to the Docker-host
-  cache directory (default `/data/l3`). Backtest executors mount it at `/data/l3`
-  and receive `HIVEQ_L3_DATA_DIR=/data/l3`.
-- Provision write access for the executor user and the provider credential
-  (`DATABENTO_API_KEY`) on the worker. Do not embed provider secrets in strategy
-  code, YAML, or packages.
-- The adapter reuses existing files and automatically downloads missing MBO
-  symbol-days, subject to provider access. A typical resolved-contract path is
-  `/data/l3/GLBX.MDP3/mbo/20261021.MESZ6.dbn.zst`.
-- Continuous symbols such as `MES.c.0` resolve to the dated contract for each
-  day. No manual file copying is required during ordinary runs.
-
-The shared mount is for depth files. Recorded trades and optional analytics
-continue through the HiveQ data API. Discover available schemas and coverage
-with `hiveq datasets` and `hiveq datasets fields HIVEQ_US_FUT fut_trades`.
+Discover available trade schemas and coverage with `hiveq datasets` and
+`hiveq datasets fields HIVEQ_US_FUT fut_trades`.
 
 ## Comparing with livesim
 
