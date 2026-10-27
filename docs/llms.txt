@@ -358,6 +358,49 @@ Credentials/identity (API key, user/org) are **not** set here — they resolve f
 > to see milestone lines. To investigate behavior, re-run with
 > `config={'hiveq_log_level': 'DEBUG'}` (§11.5).
 
+### 3.1.1 Futures depth / L3 backtests
+
+Use recorded `HIVEQ_US_FUT / fut_trades` for trade callbacks and Databento MBO
+for the depth book. The executor must contain the depth-enabled Flow 0.3.21
+configuration and Sigma price-conversion/BBO patches; the client SDK version
+is independent. An older image with the same version label may lack patches.
+
+```python
+engine_config = EngineConfig(timezone="America/New_York", params={
+    "enable_mbo": True,
+    "exchange_sim_adapter": "DepthPaperBroker",
+    "databento.dataset": "GLBX.MDP3",
+    "databento.publish_bbo": True,
+    "latency_millis": 20,
+})
+data_configs = [{"type": "hiveq_historical", "dataset": "HIVEQ_US_FUT",
+                 "schema": ["fut_trades"]}]
+```
+
+Pass these to `hf.run_backtest`, with the same explicit date for `start_date`
+and `end_date`. Subscribe to trades and quotes in `on_start`. The BBO option
+(default false) emits valid reconstructed quotes to `on_quote`; `fut_trades`
+continues to drive `on_trade`. L3 does not generate trades in this setup.
+Optional `bars_1m` may accompany trades for analytics; keep the trade schema
+so bars do not become a synthetic fill source.
+
+`latency_millis=20` is paper-broker order/cancel execution latency, not a
+market-data delay or an exchange timestamp adjustment. Trades use their
+recorded dataset timestamp; depth is merged by provider receive time, so
+identical fill timing with livesim is not guaranteed.
+
+The platform fetches data. Its worker's `HIVEQ_L3_DATA_HOST_PATH` (default
+`/data/l3`) is mounted at `/data/l3` in backtest executors; the adapter gets
+`HIVEQ_L3_DATA_DIR=/data/l3`. Operators provision write access and the provider
+credential on the worker. Missing MBO files download automatically and remain
+in the shared cache, e.g. `GLBX.MDP3/mbo/20261021.MESZ6.dbn.zst`. Do not embed
+provider keys in strategy code or copy cache files manually during normal runs.
+
+See `docs/depth-replay.md` and the complete `examples/run_l3_backtest.py`:
+`python examples/run_l3_backtest.py --date 2026-10-21`. The selected platform
+profile determines where the backtest executes; the launcher remains a thin
+client. Finish one day before submitting the next for daily comparisons.
+
 ### 3.2 Function registry & remote functions  (module: `hiveq.flow`)
 
 **What it is.** The *function registry* is a versioned store of reusable Python callables that live on the HiveQ platform rather than in any one script. You write a function once, `push_function(...)` it (cloudpickled, with its `requirements` and a semver `version`), and from then on it can be fetched and run from anywhere — other scripts, other machines, or inside platform jobs — by name and version. It's the building block for sharing indicators, signal functions, and utilities across strategies and teammates without copy-pasting code. What you push is readable by your whole organization by default; mark it `private=True` to keep it to yourself, and open it up or share it with named people later (see **Who can see a function** below).

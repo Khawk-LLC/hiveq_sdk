@@ -8,6 +8,7 @@ read — by a human, Claude, Codex, Kimi, or any other agent. No special tooling
 
 | Path | What it is |
 |---|---|
+| [`depth-replay.md`](depth-replay.md) | Futures L3 backtests: recorded trades, depth-aware fills, quotes, latency and the shared cache, with a runnable example. |
 | [`llms.txt`](llms.txt) | **The HiveQ Flow API spec** — every callback, order type, execution algorithm, and result accessor (§0–§16), with the dataset/schema catalog as an appendix (§A.1–§A.4). Always matches the SDK release; the version is stated in its header. |
 | [`data_driver/llms.txt`](data_driver/llms.txt) | The data-driver config DSL (`hiveq.driver`) reference (§1–§21) — the data-access tool for HiveQ: transports, caching, subscriptions, and publishing. |
 | [`data_api/llms.txt`](data_api/llms.txt) | The **low-level** HiveQ Data API (REST/WebSocket) reference (§0–§8) — the raw endpoints under the driver. Read `data_driver/llms.txt` first: the driver is the recommended path, and this file's §1 itemises what you give up by skipping it. Access is limited to the trusted network and to code running inside the platform. |
