@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.7`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.8`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -1256,24 +1256,24 @@ event.time_utc    -> Optional[datetime] # UTC
 `symbol:str` · `side:OrderSide` · `quantity:float` · `order_type:OrderType` · `time_in_force:str` · `limit_price:float?` · `stop_price:float?` · `order_id:str` · `client_order_id:str` · `status:OrderStatus` · `filled_qty:float` · `leaves_qty:float` · `avg_px:float?` · `last_px:float?` · `last_qty:float?` · `reject_reason:str?` · `last_fill:SigmaFill?` · `commission:float` · `is_buy:bool` · `is_sell:bool` · `is_sell_short:bool` · `is_executor_order:bool` · `strategy_id:str` · `router_id:str` · `is_filled:bool` · `is_open:bool` · `account:str` · `executor_id:str`(empty if placed directly) · `market_center:str` · `ts_event:int` · `ts_init:int` · `time:datetime?` · `time_utc:datetime?`
 
 ### 7.4 SigmaFill  (via `order.last_fill`)
-`order_id:str` · `leaves_qty:float` · `order_qty:float` · `exec_type:str` · `market_center:MarketCenter?` · `trade_id:str` · `execution_id:str` · `last_qty:float`(alias `filled_qty`) · `last_px:float`(alias `avg_px`) · `commission:float` · `liquidity_side:str`("MAKER"|"TAKER") · `symbol:str` · `side:str`("BUY"|"SELL") · `ts_event:int`
+`order_id:str` · `leaves_qty:float` · `order_qty:float` · `exec_type:str` · `market_center:MarketCenter?` · `trade_id:str` · `execution_id:str` · `last_qty:float`(alias `filled_qty`) · `last_px:float`(alias `avg_px`) · `commission:float` · `liquidity_side:str`("MAKER"|"TAKER") · `symbol:str` · `side:str`("BUY"|"SELL") · `ts_event:int` · `ts_init:int`
 
 `market_center` is the normalized execution venue, not the raw FIX `LastMkt` text. The wrapper prefers PySigma's native `marketCenter` enum and returns a `MarketCenter` value when available. Empty values are skipped; a numeric compatibility value may be converted to the enum. Raw MIC/FIX strings such as `"XNAS"` are **not** returned from this enum-valued property, so an unavailable or unconvertible venue produces `None`. If raw `LastMkt` text is added to the public API in the future, it will use a separately named `*_raw` property rather than changing the type of `market_center`.
 
 ### 7.5 SigmaTradeTick
-`symbol:str` · `price:float` · `size:float` · `aggressor_side:str`("BUY"|"SELL"|"NO_AGGRESSOR") · `trade_id:str` · `exchange`(normalized venue enum when available) · `market_center`(alias of normalized venue) · `exchange_raw:str`(feed venue text) · `last_price:float` · `condition`(normalized `TradeCondition`) · `condition_raw:str`(feed condition text; the pre-normalization value regardless of whether the feed sent an int or a string) · `ts_event:int(ns)` · `time/time_utc:datetime?`
+`symbol:str` · `price:float` · `size:float` · `aggressor_side:str`("BUY"|"SELL"|"NO_AGGRESSOR") · `trade_id:str` · `exchange`(normalized venue enum when available) · `market_center`(alias of normalized venue) · `exchange_raw:str`(feed venue text) · `last_price:float` · `condition`(normalized `TradeCondition`) · `condition_raw:str`(feed condition text; the pre-normalization value regardless of whether the feed sent an int or a string) · `ts_event:int(ns)` · `ts_init:int(ns)` · `time/time_utc:datetime?`
 
 ### 7.6 SigmaQuoteTick
-`symbol:str` · `bid_price:float` · `ask_price:float` · `bid_size:float` · `ask_size:float` · `mid_price:float` · `spread:float` · `exchange`(normalized venue) · `bid_exchange` · `ask_exchange` · `condition:str?` · `is_valid:bool?` · `ts_event:int(ns)` · `time/time_utc:datetime?`
+`symbol:str` · `bid_price:float` · `ask_price:float` · `bid_size:float` · `ask_size:float` · `mid_price:float` · `spread:float` · `exchange`(normalized venue) · `bid_exchange` · `ask_exchange` · `condition:str?` · `is_valid:bool?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time/time_utc:datetime?`
 
 ### 7.7 SigmaSnapData (options snapshot)
-`symbol:str`(root) · `chain:str`(OCC) · `underlying:str` · `option_type:str`("C"|"P") · `expiration_date:str` · `strike:float` · `bid_px:float` · `ask_px:float` · `price:float` · `bid_sz:int` · `ask_sz:int` · `size:int` · `mid_price:float` · `spread:float` · `date:str`('YYYY-MM-DD') · `is_valid:bool?` · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
+`symbol:str`(root) · `chain:str`(OCC) · `underlying:str` · `option_type:str`("C"|"P") · `expiration_date:str` · `strike:float` · `bid_px:float` · `ask_px:float` · `price:float` · `bid_sz:int` · `ask_sz:int` · `size:int` · `mid_price:float` · `spread:float` · `date:str`('YYYY-MM-DD') · `is_valid:bool?` · `ts_event:int` · `ts_init:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
 
 ### 7.8 TimerEventData
 `timer_id:str` · `ts_event:int` · `ts_init:int` · `time/time_utc:datetime?`
 
 ### 7.9 SigmaCustomData
-`symbol:str` · `event_id:str`(data source id) · `data:Dict[str,str]`(column→value) · `header:str`(CSV header row) · `row:str`(raw CSV row) · `ts_event:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
+`symbol:str` · `event_id:str`(data source id) · `data:Dict[str,str]`(column→value) · `header:str`(CSV header row) · `row:str`(raw CSV row) · `ts_event:int` · `ts_init:int` · `time/time_utc:datetime?` · method `column_data(name, default=None)`
 
 `column_data(name, default=None)` returns the string value of the named CSV column for this row, or `default` if the column is absent. All values are strings — cast to `float`/`int`/`bool` in strategy code.
 
