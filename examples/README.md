@@ -34,6 +34,7 @@ stubs; the canonical reference is the single-file spec at
 
 | File | Shape | Teaches |
 |---|---|---|
+| [`run_l3_backtest.py`](run_l3_backtest.py) | one passive MES order | single-day recorded-trade + L3 backtest with DepthPaperBroker, automatic cache download and 20 ms execution latency |
 | `futures_continuous_rollover.py` | futures breakout | continuous-contract subscription, `enable_auto_rollover`, `on_rollover` (§7.12) |
 | `futures_session.py` | futures session window | CME Globex session 18:00→17:00 ET via `BacktestConfig(session_start/session_end)` (R6) |
 | `activ_dynamic_bars_es.py` | ACTIV livesim bar smoke test | ES 1-second + 1-minute dynamic bar subscriptions, with every bar written to event logs |
