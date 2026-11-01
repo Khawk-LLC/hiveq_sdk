@@ -1,4 +1,5 @@
 """A triggered STOP_LIMIT remains active as a limit order after price recrosses its stop."""
+from datetime import timedelta
 from pathlib import Path
 import sys
 
@@ -32,7 +33,9 @@ class SdkT41:
 
     def on_bar(self, ctx, event):
         bar = event.data()
-        minute = bar.time.strftime("%H:%M")
+        # bar.time is the bar's END (delivery) time; the minutes below name
+        # the bar by its START, so 09:30 is the 09:30-09:31 bar.
+        minute = (bar.time - timedelta(milliseconds=int(bar.interval_millis))).strftime("%H:%M")
         logger.debug(
             f"[T41] bar={minute} open={bar.open} high={bar.high} "
             f"low={bar.low} close={bar.close} entry_filled={self.entry_filled}"

@@ -86,13 +86,15 @@ class SdkT55FuturesSessionDailyBars:
             self.state["non_monotonic"] += 1
         self.previous_ts = int(bar.ts_event)
 
+        # bar.time is the bar's END; the 18:00-17:00 window is checked on its START.
+        start = bar.time - timedelta(milliseconds=int(bar.interval_millis))
         start_date = day - timedelta(days=1)
-        if bar.time.date() not in {start_date, day}:
+        if start.date() not in {start_date, day}:
             self.state["outside_session"] += 1
-        elif bar.time.date() == start_date and bar.time.hour < 18:
+        elif start.date() == start_date and start.hour < 18:
             self.state["outside_session"] += 1
-        elif (bar.time.date() == day and
-              (bar.time.hour > 17 or (bar.time.hour == 17 and bar.time.minute > 0))):
+        elif (start.date() == day and
+              (start.hour > 17 or (start.hour == 17 and start.minute > 0))):
             self.state["outside_session"] += 1
 
         row = self.daily

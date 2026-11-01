@@ -280,6 +280,27 @@ def _read_with_retry(read: Any, what: str, attempts: int = 6, delay: float = 3.0
 
 
 FAILURE_GRACE_SECONDS = 900.0
+# A provisional ERROR is only believed once the engine has also gone quiet. The
+# t51 probe (2026-10-31, run 82c925c6) was published ERROR with progress frozen
+# at day 5/5 while the engine was still on day 4 writing heartbeats; it reached
+# DONE ~1.5h later. Heartbeats on that run were up to 17 min apart, so the
+# silence window has to be wider than that gap.
+LOG_SILENCE_GRACE_SECONDS = 1800.0
+LOG_POLL_SECONDS = 60.0
+
+
+def _task_log_lines(run: Any) -> int | None:
+    """Total task-log lines for a run, or None when they cannot be read."""
+    task_id = getattr(run, "task_id", None)
+    if not task_id:
+        return None
+    try:
+        from hiveq.flow.jobs import get_logs
+        logs = get_logs(task_id=task_id, limit=1)
+    except Exception:
+        return None
+    total = logs.get("total_lines") if isinstance(logs, dict) else None
+    return int(total) if total is not None else None
 
 
 def wait_for_final(run: Any, timeout: float = 14400.0, poll_interval: float = 2.0,
@@ -294,24 +315,44 @@ def wait_for_final(run: Any, timeout: float = 14400.0, poll_interval: float = 2.
     before its record materializes. Taking the first ERROR as fatal therefore
     scored two complete runs as platform failures. Only a failure that persists
     for ``failure_grace`` while the status and progress fields stay unchanged is
-    reported as a real failure.
+    reported as a real failure -- and only once the task log has also stopped
+    growing for ``LOG_SILENCE_GRACE_SECONDS``, because the status record can
+    freeze on a false ERROR while the engine keeps running.
     """
     deadline = time.monotonic() + timeout
     last = {}
     failing_since = None
     failing_shape = None
+    log_lines = None
+    log_changed_at = None
+    log_checked_at = None
     while time.monotonic() < deadline:
         last = _read_with_retry(run.status, "run.status()") or {}
         status = str(last.get("status", "")).lower()
         if status in {"failed", "terminated", "error"}:
             shape = (status, last.get("current_day"), last.get("current_date"),
                      last.get("total_days"))
+            now = time.monotonic()
             if shape != failing_shape:
                 failing_shape = shape
-                failing_since = time.monotonic()
+                failing_since = now
+                log_lines = _task_log_lines(run)
+                log_changed_at = log_checked_at = now
                 print(f"[WAIT ] provisional failure status {status!r}: {last}; "
                       f"re-polling for up to {failure_grace:.0f}s", flush=True)
-            elif time.monotonic() - failing_since >= failure_grace:
+            elif now - log_checked_at >= LOG_POLL_SECONDS:
+                log_checked_at = now
+                lines = _task_log_lines(run)
+                if lines is not None and log_lines is not None and lines > log_lines:
+                    print(f"[WAIT ] status still {status!r} but the engine is "
+                          f"logging ({log_lines} -> {lines} lines); still waiting",
+                          flush=True)
+                    log_changed_at = now
+                log_lines = lines if lines is not None else log_lines
+            if (shape == failing_shape
+                    and now - failing_since >= failure_grace
+                    and (log_lines is None
+                         or now - log_changed_at >= LOG_SILENCE_GRACE_SECONDS)):
                 log_tail = None
                 task_id = getattr(run, "task_id", None)
                 if task_id:

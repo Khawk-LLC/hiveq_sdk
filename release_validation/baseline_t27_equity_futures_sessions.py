@@ -1,4 +1,5 @@
 """Equity same-day and futures overnight sessions, including weekend and DST."""
+from datetime import timedelta
 from pathlib import Path
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
@@ -22,7 +23,9 @@ class SdkT27A:
         bar = event.data(); session = self.s["sessions"][-1]; self.s["bars"] += 1; session["count"] += 1
         if session["first"] is None: session["first"] = bar.time.isoformat()
         if bar.time.weekday() >= 5: self.s["weekend_bars"] += 1
-        minute = bar.time.hour * 60 + bar.time.minute
+        # bar.time is the bar's END; the session window is checked on its START.
+        start = bar.time - timedelta(milliseconds=int(bar.interval_millis))
+        minute = start.hour * 60 + start.minute
         if not 570 <= minute <= 960: self.s["outside"] += 1
     def on_stop(self, ctx, event): emit_checkpoint(ctx, "t27_equity_session", self.s)
 

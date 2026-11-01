@@ -151,8 +151,11 @@ if __name__ == "__main__":
         # defect, so the contract is that every rejection says so and that they
         # stay as rare as the early-close calendar -- a rejection with any other
         # reason, or a rate above 2% of sessions, is a regression.
-        "rejections_only_when_market_closed": (
-            set(state["reject_reasons"]) <= {"Market center not open"}
+        # The engine words this "Market center not open" or, since 2026-10,
+        # "Market not open . Market open time : <next open>".
+        "rejections_only_when_market_closed": all(
+            reason.startswith(("Market center not open", "Market not open"))
+            for reason in state["reject_reasons"]
         ),
         "rejections_no_more_common_than_early_closes": (
             state["rejected_orders"] <= max(1, int(placed * 0.02))
