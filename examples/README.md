@@ -14,6 +14,7 @@ stubs; the canonical reference is the single-file spec at
 | `deploy_buy_and_hold.py` | buy once, hold | the minimal deploy + results round-trip |
 | `deploy_livesim.py` | ping order on a timer | deploying straight to **LiveSim** (no backtest), then `status()` / `logs()` / `orders()` / lifecycle off the `Deployment` handle |
 | `deploy_noop_futures.py` | no-op ES tick/bar counter | the **LiveSim-only** smoke test: continuous `ES.c.0`, explicit `assetType`, untouched payload clocks, no orders (§3.3) |
+| `deploy_gtx_limit_equity.py` | one LIMIT/GTX buy at the ask, hold (or `--roundtrip`) | the order shape that works **pre-market, regular and after-hours**: LIMIT + explicit price + `time_in_force="GTX"` off the live quote, one order working at a time, no MARKET fallback (§5.2) |
 | `livesim_history.py` | reads only, no strategy | pulling a **prior day's** LiveSim data by date / strategy / container with `hf.livesim_history` — every container session of the day, restarts included (§3.3) |
 | `livesim_param_restart.py` | ping order on a timer | changing a **parameter** on a running deployment (`params()` / `set_params()`) and proving it survives a container restart |
 | `intraday_momentum_equity.py` | long-only SMA crossover | per-symbol state (`deque`), numpy indicator, **EST time window + EOD flat** (R5/R6), `close_position` |
