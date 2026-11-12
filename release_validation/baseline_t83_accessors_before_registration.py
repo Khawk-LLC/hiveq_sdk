@@ -98,8 +98,7 @@ class SdkT83:
 
         # Only now register NVDA, as EQUITY.
         ctx.subscribe_bars([SYMBOL], asset_type=AssetType.EQUITY, interval="1m")
-        # Already registered by the subscribe: a cache hit, the same call on every SDK version.
-        self.s["asset_type_after_subscribe"] = asset_type_name(ctx.instrument(SYMBOL))
+        self.s["asset_type_after_subscribe"] = asset_type_name(ctx.instrument(SYMBOL, AssetType.EQUITY))
 
     def on_bar(self, ctx, event):
         if event.data().symbol != SYMBOL:

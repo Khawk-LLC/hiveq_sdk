@@ -92,7 +92,7 @@ class RolloverProbe:
 
     def _current_contract(self, ctx, series):
         try:
-            return str(getattr(ctx.instrument(series), "current_contract", "") or "")
+            return str(getattr(ctx.instrument(series, AssetType.FUTURES), "current_contract", "") or "")
         except Exception as exc:                            # noqa: BLE001
             return f"raised: {str(exc)[:60]}"
 

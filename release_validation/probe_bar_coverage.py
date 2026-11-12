@@ -34,7 +34,7 @@ class SdkProbeBarCoverage:
         for symbol in SYMBOLS:
             try:
                 self.current[symbol] = str(
-                    getattr(ctx.instrument(symbol), "current_contract", "") or "")
+                    getattr(ctx.instrument(symbol, AssetType.FUTURES), "current_contract", "") or "")
             except Exception as exc:
                 self.current[symbol] = f"raised: {str(exc)[:40]}"
 

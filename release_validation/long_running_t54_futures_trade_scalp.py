@@ -15,6 +15,7 @@ from qa_common import event_logs_until, finish_validation, open_positions as ope
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
+from hiveq.flow.config import AssetType
 from hiveq.flow.trading_types import OrderType
 
 SYMBOL = "ES.v.0"
@@ -68,7 +69,7 @@ class SdkT54FuturesTradeScalp:
             return
         self.in_window += 1
         if self.state == "IDLE" and self.entry_id is None and ctx.is_flat(quote.symbol):
-            tick = float(ctx.instrument(SYMBOL).min_tick or 0.25)
+            tick = float(ctx.instrument(SYMBOL, AssetType.FUTURES).min_tick or 0.25)
             mid = (float(quote.bid_price) + float(quote.ask_price)) / 2.0
             price = round((mid - 1.0) / tick) * tick
             order = ctx.buy_order(
@@ -91,7 +92,7 @@ class SdkT54FuturesTradeScalp:
             self.entry_price = float(order.avg_px)
             self.entry_id = None
             self.entries += 1
-            tick = float(ctx.instrument(SYMBOL).min_tick or 0.25)
+            tick = float(ctx.instrument(SYMBOL, AssetType.FUTURES).min_tick or 0.25)
             tp = ctx.sell_order(
                 order.symbol, 1.0, order_type=OrderType.LIMIT,
                 limit_price=round((self.entry_price + 1.0) / tick) * tick,

@@ -19,6 +19,7 @@ from datetime import time
 
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
+from hiveq.flow.config import AssetType
 from hiveq.flow.trading_types import OrderType
 
 UNDERLYING = "SPXW"            # 0DTE SPX Weeklys chain root (NOT 'SPX', which is monthly AM-settled)
@@ -62,7 +63,7 @@ class ZeroDTEIronCondor:
         d = self.snaps.get((option_type, strike))
         if not d or d["bid"] is None or d["ask"] is None or d["bid"] <= 0 or d["ask"] <= 0:
             return None                                      # worthless far-OTM wings quote 0 -> skip
-        tick = getattr(ctx.instrument(d["chain"]), "min_tick", DEFAULT_TICK) or DEFAULT_TICK
+        tick = getattr(ctx.instrument(d["chain"], AssetType.OPTIONS), "min_tick", DEFAULT_TICK) or DEFAULT_TICK
         mid = round(round((d["bid"] + d["ask"]) / 2.0 / tick) * tick, 6)
         return mid if mid > 0 else None
 
