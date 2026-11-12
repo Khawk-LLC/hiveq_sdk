@@ -941,8 +941,10 @@ ctx.subscribe_index(symbols: List[str])                                   # spot
 ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
 ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C'|'P'|'CALL'|'PUT'
                            strike: Optional[float] = None,
-                           expiration_type: Optional[Union[str, datetime]] = None,  # '0dte' | 'YYYY-MM-DD' | datetime
+                           expiration_type: Optional[Union[str, datetime]] = None,  # pass '0dte'
                            underlying: Optional[str] = None, interval: str = "1s")
+#   Only 0DTE options are supported: always pass expiration_type='0dte'. Other
+#   expiries (a date) and the whole chain (no expiration_type) are not supported.
 # Futures bars use the same unambiguous symbols + interval API. A symbol may
 # be continuous ("ES.c.0", "ES.v.0") or dated ("ES.H25"). The roll rule is the
 # user's choice — see the ROOT.roll.rank notes below. Do not pass a separate
@@ -1202,8 +1204,9 @@ ctx.global_portfolio() -> SigmaGlobalPortfolio  # account-wide aggregate (§8)
 
 ### 5.6 Instrument
 ```python
-ctx.instrument(symbol: str) -> SigmaInstrument  # §7.10
+ctx.instrument(symbol: str, asset_type: AssetType | None = None) -> SigmaInstrument | None  # §7.10
 ```
+Pass `asset_type` (`AssetType.EQUITY`, `.FUTURES`, `.OPTIONS`, `.INDEX`): a symbol not yet registered is registered as that type. An instrument already registered (subscribed by you or another strategy on the container, restored after a restart, a continuous contract's current outright) is returned whether or not you pass it. Omitting `asset_type` for an unregistered symbol is deprecated: the platform looks the symbol up in equity reference data, then tries it as a futures contract, and logs a deprecation warning. **Returns `None`** when the symbol cannot be registered, so check before reading fields.
 
 ### 5.7 Time
 ```python
@@ -1391,7 +1394,7 @@ normalized = raw.replace(r'\"', '"').replace('|', ',')
 signal = json.loads(normalized)
 ```
 
-### 7.10 SigmaInstrument  (`ctx.instrument(symbol)`)
+### 7.10 SigmaInstrument  (`ctx.instrument(symbol, asset_type)`)
 `symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `orderBookDepth` · `hasOrderBookDepth:bool` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume,prev_close`)
 
 ### 7.11 IndexPrice
