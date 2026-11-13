@@ -27,7 +27,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 | 8 | Portfolio API — `SigmaPortfolio` / `SigmaGlobalPortfolio` shared surface. |
 | 9 | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers. |
 | 10 | Results — `Run` handle, `report()`, `positions()`/`trades()`/`tearsheet()`/`event_logs()`/`logs()`, quantstats, phantom-PnL canary checks. |
-| 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`. |
+| 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`; training jobs (§11.7): the 5 MiB request limit, training-data uploads and reusing data by input id. |
 | 12 | Enums — exact members and `.value` strings. |
 | 13 | Config dataclasses (`BacktestConfig`, `StrategyConfig`, `EngineConfig`, ...). |
 | 14 | Imports cheat-sheet, incl. §14.1 ancillary data packages shipped as stubs with the SDK. |
@@ -2003,6 +2003,54 @@ deploy_job(publish_after_the_close, task_name="daily-signal",
 > **`requirements` caveat.** The client wires `requirements` into the sandbox in the shape the executor expects, and the executor runs `pip install` with them — so whether the install **succeeds** depends on the org package index carrying the specs you ask for, and a failure surfaces on the executor (a dead job), never client-side. The same two rules as for backtests apply here: the package must be published in the index, and the script must import it **inside** the deployed callable rather than at module level. See §3.4.
 
 > **`status()` fallback.** `GET /status/{task_id}` is backed by a task-history pipeline that may not have a row yet for every deployment target — `Job.status()` falls back to `get_result()` automatically in that case, so this is transparent in normal use; it's only worth knowing if you drop to the low-level `get_status()` directly (§11.3).
+
+### 11.7 Training jobs (`HIVEQ_ALPHA_AI`) — training data is uploaded, never sent inline
+
+Alpha-factor and RL-trader training jobs are submitted with `alphagen` (`pip install alphagen`, import root `hiveq_alphagen`), which drives this client: `GPUTask`/`CPUTask` + `submit_gpu`/`submit_cpu` from `hiveq_alphagen.remote`. Observe them with §11.3 like any job.
+
+**Hard rule: a training job request carries code and config only — the platform rejects requests above 5 MiB** (HTTP 400, `"Training payload is … MiB; the limit is 5 MiB for code and config …"`). Training data goes to platform storage instead, and `alphagen >= 0.4.0` does this for you at submit:
+
+| You pass | What happens at submit |
+|---|---|
+| `csv_data=...` | uploaded as `training_data.csv` (or `csv_filename=`); lands in `/home/ubuntu/data/` on the training machine |
+| a trainer with an in-memory `df` (`AlphaTrainer(df=...)`) | the DataFrame is uploaded as the training CSV and **not** pickled into the request |
+| files in `code_folder` | `.py`/config text up to 1 MiB ride inline; every other file (CSV, parquet, `.npz`, checkpoints, anything binary or large) is uploaded and restored at the **same path** in the code folder before training starts |
+
+The training machine downloads each file straight from storage and checks its sha256 before training; a mismatch fails the job. Nothing to change in your training code: files appear where they were.
+
+**How it works.** On the first run, each data file is uploaded and given an **input id** (32 hex chars, e.g. `01583c3d6f8b43d1ae6bf7c97faba7e9`). Storage keeps the file name, sha256 and uploader with it, and the job request references only the id. On later runs, pass the id instead of the file: nothing is uploaded, and the training machine downloads that same stored file.
+
+**Getting an input id.**
+
+| Where | How |
+|---|---|
+| From a finished job (easiest) | `get_data_inputs("<task_id>")`: the inputs that job used, ready to pass on |
+| Right after submit | `task.data_inputs`, filled in once the uploads finish |
+| Task logs (§11.3) | `Training input <input_id> -> code:market.npz (61108931 bytes, ...)` |
+| The job result | `data_inputs` in `get_result(task_id)`: id, path, size, sha256, storage location, uploader, upload time |
+
+**Passing it on the next run.** Any file covered by an id is skipped, even if it is still in `code_folder`. Data files without an id upload as usual, so you can reuse a large file and let a changed one upload fresh:
+```python
+from hiveq_alphagen.remote import CPUTask, submit_cpu, get_data_inputs
+
+# 1. reuse everything an earlier job used -- only its task id is needed
+task = CPUTask(trainer, code_folder="./src", data_inputs=get_data_inputs("<earlier task_id>"))
+
+# 2. name the id per file: {path: input_id}
+task = CPUTask(trainer, code_folder="./src", data_inputs={"market.npz": "01583c3d6f8b43d1ae6bf7c97faba7e9"})
+
+submit_cpu(task, task_name="retrain")      # uploads 0 bytes for reused files
+```
+- In the `{path: input_id}` form, the key equal to `csv_filename` (default `training_data.csv`) is the training CSV, which `csv_data` or a trainer `df` would otherwise upload. Any other key is a path inside `code_folder` (a `code_folder` is then required).
+- Traders: `trainer.remote_task(code_folder, data_inputs=...)` takes the same argument.
+
+**Rules.**
+- Ids are org-scoped. An id from another organization, or one that does not exist, fails the job before any machine starts.
+- A reused file is verified against the sha256 recorded at upload, and a mismatch fails the job.
+- Uploads are kept, so ids keep working (no expiry).
+- If you change a file, do not pass its old id. Let it upload, or the job trains on the old file that id names.
+
+**Which data did a job train on?** Every job records it. You can read it from `get_data_inputs(task_id)`, from `data_inputs` in `get_result(task_id)`, from the same record in `inputs.json` next to the job's model archive, and from the log lines `Training input <id> -> <target>:<path> (...)` and `Training input <id> downloaded to <path>`.
 
 ---
 
