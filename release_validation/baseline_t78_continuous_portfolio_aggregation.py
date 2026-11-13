@@ -95,7 +95,7 @@ class SdkT78AggregationProbe:
                 self.s["orders"].append([symbol, quantity, order is not None])
         own = ctx.portfolio()
         held = es_positions(own)
-        current = str(getattr(ctx.instrument(SERIES), "current_contract", "") or "")
+        current = str(getattr(ctx.instrument(SERIES, AssetType.FUTURES), "current_contract", "") or "")
 
         net_series = float(own.net_position(SERIES))
         if abs(net_series - sum(held.values())) > 1e-9:
@@ -151,7 +151,7 @@ class SdkT78AggregationProbe:
         if order.is_filled and order.filled_qty:
             symbol = str(order.symbol)
             if not OUTRIGHT.match(symbol):
-                symbol = str(getattr(ctx.instrument(symbol), "current_contract", "") or symbol)
+                symbol = str(getattr(ctx.instrument(symbol, AssetType.FUTURES), "current_contract", "") or symbol)
             signed = float(order.filled_qty) * (1 if str(order.side).upper().endswith("BUY") else -1)
             self.ledger[symbol] = self.ledger.get(symbol, 0.0) + signed
             self.s["fills"].append([str(order.symbol), symbol, signed, int(event.ts_event)])

@@ -82,7 +82,7 @@ class SdkT60:
 
         # The instrument's latest bar during this callback must be this bar, not
         # a future one: that is look-ahead in its most direct form.
-        latest = getattr(ctx.instrument(SYMBOL), "last_bar", None)
+        latest = getattr(ctx.instrument(SYMBOL, AssetType.EQUITY), "last_bar", None)
         latest_close = float(getattr(latest, "close", 0) or 0)
         if latest_close and abs(latest_close - float(bar.close)) > 1e-9:
             if len(self.state["stale_last_bar"]) < 5:

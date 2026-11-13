@@ -108,7 +108,7 @@ class SdkT74ReplaySetACapSliceV3:
     def _latest_price(self, ctx, symbol: str) -> float | None:
         if self.last_bar_close is not None:
             return float(self.last_bar_close)
-        instrument = ctx.instrument(symbol)
+        instrument = ctx.instrument(symbol, AssetType.FUTURES)
         last_bar = getattr(instrument, "last_bar", None)
         close = getattr(last_bar, "close", None)
         return None if close is None else float(close)
@@ -118,7 +118,7 @@ class SdkT74ReplaySetACapSliceV3:
             return 0
 
         price = self._latest_price(ctx, symbol)
-        instrument = ctx.instrument(symbol)
+        instrument = ctx.instrument(symbol, AssetType.FUTURES)
         multiplier = float(getattr(instrument, "multiplier", 0.0) or 0.0)
         if price is None or price <= 0.0 or multiplier <= 0.0:
             logger.warning(

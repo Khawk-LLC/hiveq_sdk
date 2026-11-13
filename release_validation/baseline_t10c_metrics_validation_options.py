@@ -13,6 +13,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from qa_common import completed_checkpoint, emit_checkpoint, finish
 import hiveq.flow as hf
 from hiveq.flow import BacktestConfig, StrategyConfig
+from hiveq.flow.config import AssetType
 from hiveq.flow.trading.price_utils import adjust_tick_size
 from hiveq.flow.trading_types import OrderType
 
@@ -60,7 +61,7 @@ class SdkT10c:
         # Multiplier comes from the resolved OCC contract, not the SPXW root,
         # because option roots do not carry a multiplier of their own.
         try:
-            self.state["multiplier"] = float(ctx.instrument(self.contract).multiplier)
+            self.state["multiplier"] = float(ctx.instrument(self.contract, AssetType.OPTIONS).multiplier)
         except Exception:
             self.state["multiplier"] = None
         self.state["contract"] = self.contract

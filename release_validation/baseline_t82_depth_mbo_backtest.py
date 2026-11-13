@@ -71,7 +71,7 @@ class SdkT82:
 
     def depth(self, ctx):
         for sym in (self.symbol, SYMBOL):
-            inst = ctx.instrument(sym) if sym else None
+            inst = ctx.instrument(sym, AssetType.FUTURES) if sym else None
             book = getattr(inst, "orderBookDepth", None) if inst else None
             if book is not None and book.isValid:
                 self.s["depth_symbol"] = sym

@@ -9,7 +9,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 
 # HiveQ Flow — Canonical API Specification
 
-- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.8`
+- **package**: `hiveq-sdk` · **import root**: `hiveq.flow` · **version**: `1.0.10`
 - **python**: `>=3.11`
 - **scope of this doc**: backtest authoring · reading results · remote deploy + observability. (Live trading is out of scope here.)
 - **how to read this**: this is a reference spec, not a tutorial — one file, sections §0–§16 plus a Data Reference appendix. Signatures are exact. Defaults are exact. Enum `.value` strings are exact. Use the field tables in §7 to know what `event.data()` returns — it is otherwise untyped. Read §0 first, always — it's short and every other section assumes it. Prose refers to sections as `§N`; jump to one by searching for a line starting `## N.`.
@@ -27,7 +27,7 @@ Reference appendix rather than guessing — the platform fetches the data at run
 | 8 | Portfolio API — `SigmaPortfolio` / `SigmaGlobalPortfolio` shared surface. |
 | 9 | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers. |
 | 10 | Results — `Run` handle, `report()`, `positions()`/`trades()`/`tearsheet()`/`event_logs()`/`logs()`, quantstats, phantom-PnL canary checks. |
-| 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`. |
+| 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`; training jobs (§11.7): the 5 MiB request limit, training-data uploads and reusing data by input id. |
 | 12 | Enums — exact members and `.value` strings. |
 | 13 | Config dataclasses (`BacktestConfig`, `StrategyConfig`, `EngineConfig`, ...). |
 | 14 | Imports cheat-sheet, incl. §14.1 ancillary data packages shipped as stubs with the SDK. |
@@ -738,6 +738,22 @@ day.events(...)   # strategy event logs
   of that container; passing the full identity raises `ValueError`.
 - You see your own rows; organization owners and managers see the whole org.
 
+#### Positions after a container restart (LiveSim only)
+
+If a LiveSim container restarts (a crash, a host issue, a platform rollout),
+the strategy's **last known positions are loaded back** when it starts again.
+Nothing else from the earlier session is kept: no order history and no working
+orders. Strategy code needs no special handling for this.
+
+- The positions are already in place in `on_start`, so `ctx.net_position(sym)`
+  and `ctx.portfolio()` show them. Don't assume a restarted strategy is flat.
+- Orders from before the restart don't exist anymore: `has_open_order(sym)` is
+  `False`, and order handles you held are gone. Earlier orders and trades can
+  still be read with `hf.livesim_history(date, ...)` (above).
+- Backtests always start flat. This applies to LiveSim only.
+- **To change a position by hand** (correct it, zero it), contact HiveQ ops.
+  There is no SDK call to edit a restored position.
+
 #### Errors
 
 Failures raise `hiveq.flow.livesim.LivesimError`, carrying `.code` (e.g.
@@ -925,8 +941,10 @@ ctx.subscribe_index(symbols: List[str])                                   # spot
 ctx.subscribe_index_bars(symbols: List[str], interval: str = '1d')        # index OHLCV (daily only)
 ctx.subscribe_option_snaps(symbol: str, option_type: Optional[str] = None,  # 'C'|'P'|'CALL'|'PUT'
                            strike: Optional[float] = None,
-                           expiration_type: Optional[Union[str, datetime]] = None,  # '0dte' | 'YYYY-MM-DD' | datetime
+                           expiration_type: Optional[Union[str, datetime]] = None,  # pass '0dte'
                            underlying: Optional[str] = None, interval: str = "1s")
+#   Only 0DTE options are supported: always pass expiration_type='0dte'. Other
+#   expiries (a date) and the whole chain (no expiration_type) are not supported.
 # Futures bars use the same unambiguous symbols + interval API. A symbol may
 # be continuous ("ES.c.0", "ES.v.0") or dated ("ES.H25"). The roll rule is the
 # user's choice — see the ROOT.roll.rank notes below. Do not pass a separate
@@ -991,6 +1009,38 @@ ctx.flatten_all(order_type: OrderType = None) -> List[SigmaOrder]
 - **`custom_fix_params`** (opt, live/FIX): `{FixTag.X: value}` (or plain int tags) sent as-is on the order; these take priority over values the venue adapter derives. Exception: the Instinet adapter uses only its route tags from them (TargetSubID `57` and the D-Quote shorthand `1100`) and sends no other custom tag. Whether they go out again on a modify depends on the venue (§5.3). Other FIX order types, venue routing like `100=SGMA` → §5.2.2. Ignored by the backtest/paper fill simulator.
 - **`close_position`** flattens the net position in one offsetting order (no-op if flat); **`order_to_target`** trades the delta to reach a signed target; **`flatten_all`** closes every open position in the strategy. These wrap `net_position` + `buy_order`/`sell_order` — see §16.1.
 - **Transactional / idempotent:** all three **skip (return `None`) if a working order already exists for the symbol** (`has_open_order`). `net_position` reflects only *filled* quantity, so re-issuing while an order is in flight would double-trade — the guard prevents that. Safe to call every bar: they converge one fill at a time. To replace a resting order, `cancel_all_orders(symbol)` first.
+- **Pre-market and after-hours (LiveSim equities): no MARKET orders.** Outside
+  the 09:30–16:00 ET regular session, send `order_type=OrderType.LIMIT` with an
+  explicit `limit_price` and `time_in_force="GTX"`. MARKET orders outside
+  regular hours are **rejected** (`on_order` sees `REJECTED`): after the close
+  at once; pre-market a MARKET/DAY order is held and rejected at the 09:30
+  open, never filled; MARKET with GTX is rejected at any hour. Don't fall back
+  to MARKET when a limit isn't filling. The time in force is separate from the
+  order type. The defaults above give MARKET/DAY or LIMIT/GTC, never GTX, so
+  set both explicitly.
+  - **GTX orders are not cancelled at the open or the close.** A working GTX
+    order stays working through 09:30 and 16:00 and expires when the
+    container shuts down (working orders never survive a restart, §3.3).
+    DAY orders are cancelled at the 16:00 close.
+  - **Sub-dollar stocks take sub-penny prices.** A stock under $1 accepts a
+    sub-penny `limit_price` (e.g. `0.8734`), including one that has fallen
+    below $1 from above. A live bid/ask is already on a valid increment, so
+    send it as is.
+  - **The sizing helpers can't do this.** `close_position`, `order_to_target`
+    and `flatten_all` take no `time_in_force` (and `close_position` /
+    `flatten_all` default to MARKET). Outside regular hours, size the delta
+    yourself and call `buy_order` / `sell_order` / `short_order`.
+  - Price off the live quote (`on_quote`, §7.6): a marketable buy at the ask,
+    a sell at the bid, rounded to the tick (`adjust_tick_size`, below). A bar
+    close is not an executable price.
+  ```python
+  # extended hours: buy 10 at the current ask, LIMIT + GTX
+  ctx.buy_order(sym, 10, order_type=OrderType.LIMIT,
+                limit_price=self.ask, time_in_force="GTX")
+  ```
+  Full runnable version — quote → one LIMIT/GTX buy → fill → hold (or sell
+  back at the bid with `--roundtrip`), one order working at a time:
+  `examples/deploy_gtx_limit_equity.py`.
 - **The base `buy_order` / `sell_order` / `short_order` do NOT have the `has_open_order` skip guard** — only the three sizing helpers above (`close_position`, `order_to_target`, `flatten_all`) skip. If you need to force a trade even while another order is working on the same symbol, call the base methods directly.
 
 > ⚠️ **Cancel + close race (silent no-op — READ THIS).** The natural intuition
@@ -1154,15 +1204,31 @@ ctx.global_portfolio() -> SigmaGlobalPortfolio  # account-wide aggregate (§8)
 
 ### 5.6 Instrument
 ```python
-ctx.instrument(symbol: str) -> SigmaInstrument  # §7.10
+ctx.instrument(symbol: str, asset_type: AssetType | None = None) -> SigmaInstrument | None  # §7.10
 ```
+Pass `asset_type` (`AssetType.EQUITY`, `.FUTURES`, `.OPTIONS`, `.INDEX`): a symbol not yet registered is registered as that type. An instrument already registered (subscribed by you or another strategy on the container, restored after a restart, a continuous contract's current outright) is returned whether or not you pass it. Omitting `asset_type` for an unregistered symbol is deprecated: the platform looks the symbol up in equity reference data, then tries it as a futures contract, and logs a deprecation warning. **Returns `None`** when the symbol cannot be registered, so check before reading fields.
 
 ### 5.7 Time
 ```python
-ctx.now() -> Optional[datetime]                 # configured tz
-ctx.now_utc() -> Optional[datetime]             # UTC
+ctx.now() -> Optional[datetime]                 # event time, configured tz
+ctx.now_utc() -> Optional[datetime]             # event time, UTC
+ctx.wallclock() -> datetime                     # wall clock, configured tz
+ctx.wallclock_utc() -> datetime                 # wall clock, UTC
 ctx.trading_day -> Optional[str]                # 'YYYY-MM-DD' (property; tz-safe, prefer over deriving from ts_event)
 ```
+- **`now()` is event time.** It is the timestamp of the event being handled
+  (equal to the payload's `.time`) and does not move between events. Use it as
+  the strategy's clock in backtest and LiveSim alike.
+- **`wallclock()` is the machine's actual clock**, read on every call. In
+  LiveSim it runs a little ahead of `now()` (feed latency, ~10–50 ms on ES).
+  In a backtest it is the real time of the run, not the simulated time, so
+  keep it out of trading logic there.
+- The configured tz is the engine timezone, `America/New_York` by default (R5).
+- Both return a `datetime` (microseconds). For nanoseconds use the payload's
+  `ts_event` (int) for event time, or `time.time_ns()` for the wall clock.
+- Don't compare timestamps generated on different machines (e.g. a time a
+  publisher embedded in a signal payload against `wallclock()`): clock skew
+  between machines makes that unreliable.
 
 ### 5.8 Timers
 ```python
@@ -1328,7 +1394,7 @@ normalized = raw.replace(r'\"', '"').replace('|', ',')
 signal = json.loads(normalized)
 ```
 
-### 7.10 SigmaInstrument  (`ctx.instrument(symbol)`)
+### 7.10 SigmaInstrument  (`ctx.instrument(symbol, asset_type)`)
 `symbol:str` · `last_bar:Bar?` · `multiplier:float` · `exchange` · `min_tick:float` · `asset_type:AssetType` · `current_contract:str`(resolved contract for continuous) · `security_details` · `native_instrument_id` · `orderBookDepth` · `hasOrderBookDepth:bool` · `tradeStats:SigmaTradeStats?`(`symbol,open,high,low,close,volume,prev_close`)
 
 ### 7.11 IndexPrice
@@ -1938,6 +2004,54 @@ deploy_job(publish_after_the_close, task_name="daily-signal",
 
 > **`status()` fallback.** `GET /status/{task_id}` is backed by a task-history pipeline that may not have a row yet for every deployment target — `Job.status()` falls back to `get_result()` automatically in that case, so this is transparent in normal use; it's only worth knowing if you drop to the low-level `get_status()` directly (§11.3).
 
+### 11.7 Training jobs (`HIVEQ_ALPHA_AI`) — training data is uploaded, never sent inline
+
+Alpha-factor and RL-trader training jobs are submitted with `alphagen` (`pip install alphagen`, import root `hiveq_alphagen`), which drives this client: `GPUTask`/`CPUTask` + `submit_gpu`/`submit_cpu` from `hiveq_alphagen.remote`. Observe them with §11.3 like any job.
+
+**Hard rule: a training job request carries code and config only — the platform rejects requests above 5 MiB** (HTTP 400, `"Training payload is … MiB; the limit is 5 MiB for code and config …"`). Training data goes to platform storage instead, and `alphagen >= 0.4.0` does this for you at submit:
+
+| You pass | What happens at submit |
+|---|---|
+| `csv_data=...` | uploaded as `training_data.csv` (or `csv_filename=`); lands in `/home/ubuntu/data/` on the training machine |
+| a trainer with an in-memory `df` (`AlphaTrainer(df=...)`) | the DataFrame is uploaded as the training CSV and **not** pickled into the request |
+| files in `code_folder` | `.py`/config text up to 1 MiB ride inline; every other file (CSV, parquet, `.npz`, checkpoints, anything binary or large) is uploaded and restored at the **same path** in the code folder before training starts |
+
+The training machine downloads each file straight from storage and checks its sha256 before training; a mismatch fails the job. Nothing to change in your training code: files appear where they were.
+
+**How it works.** On the first run, each data file is uploaded and given an **input id** (32 hex chars, e.g. `01583c3d6f8b43d1ae6bf7c97faba7e9`). Storage keeps the file name, sha256 and uploader with it, and the job request references only the id. On later runs, pass the id instead of the file: nothing is uploaded, and the training machine downloads that same stored file.
+
+**Getting an input id.**
+
+| Where | How |
+|---|---|
+| From a finished job (easiest) | `get_data_inputs("<task_id>")`: the inputs that job used, ready to pass on |
+| Right after submit | `task.data_inputs`, filled in once the uploads finish |
+| Task logs (§11.3) | `Training input <input_id> -> code:market.npz (61108931 bytes, ...)` |
+| The job result | `data_inputs` in `get_result(task_id)`: id, path, size, sha256, storage location, uploader, upload time |
+
+**Passing it on the next run.** Any file covered by an id is skipped, even if it is still in `code_folder`. Data files without an id upload as usual, so you can reuse a large file and let a changed one upload fresh:
+```python
+from hiveq_alphagen.remote import CPUTask, submit_cpu, get_data_inputs
+
+# 1. reuse everything an earlier job used -- only its task id is needed
+task = CPUTask(trainer, code_folder="./src", data_inputs=get_data_inputs("<earlier task_id>"))
+
+# 2. name the id per file: {path: input_id}
+task = CPUTask(trainer, code_folder="./src", data_inputs={"market.npz": "01583c3d6f8b43d1ae6bf7c97faba7e9"})
+
+submit_cpu(task, task_name="retrain")      # uploads 0 bytes for reused files
+```
+- In the `{path: input_id}` form, the key equal to `csv_filename` (default `training_data.csv`) is the training CSV, which `csv_data` or a trainer `df` would otherwise upload. Any other key is a path inside `code_folder` (a `code_folder` is then required).
+- Traders: `trainer.remote_task(code_folder, data_inputs=...)` takes the same argument.
+
+**Rules.**
+- Ids are org-scoped. An id from another organization, or one that does not exist, fails the job before any machine starts.
+- A reused file is verified against the sha256 recorded at upload, and a mismatch fails the job.
+- Uploads are kept, so ids keep working (no expiry).
+- If you change a file, do not pass its old id. Let it upload, or the job trains on the old file that id names.
+
+**Which data did a job train on?** Every job records it. You can read it from `get_data_inputs(task_id)`, from `data_inputs` in `get_result(task_id)`, from the same record in `inputs.json` next to the job's model archive, and from the log lines `Training input <id> -> <target>:<path> (...)` and `Training input <id> downloaded to <path>`.
+
 ---
 
 ## 12. Enums (exact members and `.value`)
@@ -2189,6 +2303,8 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - `event.data()` is untyped — use §7.0 to know the concrete type for the branch you are in.
 - `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
 - Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
+- **No MARKET orders in pre-market or after-hours — they are rejected.** Use LIMIT with an explicit `limit_price` and `time_in_force="GTX"`, and call the base order methods: the sizing helpers can't set GTX (§5.2).
+- **A LiveSim restart brings back positions, not orders.** After a container restart the last known positions are loaded back (already there in `on_start`); order history and working orders are not kept. To change a position by hand, contact HiveQ ops (§3.3, *Positions after a container restart*).
 - `report.*` DataFrames can be `None`/empty — guard before use.
 - For futures bars, use the complete symbol string with the canonical API, e.g. `subscribe_bars(['ES.c.0'], asset_type=AssetType.FUTURES, interval='1m')`. The continuous form is `ROOT.roll.rank`: `.c` rolls on the expiry calendar (deterministic roll dates), `.v` rolls when volume migrates to the next contract (tracks liquidity). Both are valid for any root — the choice belongs to the user; keep whichever symbol they wrote. Make one call per interval; each call may include multiple symbols, and identical requests are deduplicated. For continuous rollover set `BacktestConfig(enable_auto_rollover=True)` + handle `on_rollover` — there is no `data_configs` flag for it. Executor choice, notional sizing, and POV/TWAP sizing for the roll are tunable via `StrategyConfig(params={...})` — see §13.
 - **`bar.symbol` on a continuous-futures subscription is the resolved outright contract (e.g. `"ESZ5"`), never the continuous string you subscribed with (`"ES.v.0"`).** `if bar.symbol != SYMBOL: return` (with `SYMBOL = 'ES.v.0'`) silently drops every bar — the comparison always fails. Instead: (1) don't filter at all if you only subscribed to one instrument — every bar you receive is yours; (2) if you subscribed to multiple continuous roots and need to tell them apart, compare against `ctx.instrument('ES.v.0').current_contract` (§7.10), which tracks the resolved contract and updates across rolls, not the continuous string; or (3) track it yourself — cache `bar.symbol` from the first bar and update it in `on_rollover` (`event.data().current_contract`, §7.12) rather than hardcoding the continuous string.

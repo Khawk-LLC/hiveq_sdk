@@ -73,7 +73,7 @@ class SdkT52MultiSymbolLongRollover:
         self.entered.add(continuous)
         ctx.buy_order(bar.symbol, quantity=1.0)
         try:
-            reported = str(getattr(ctx.instrument(continuous),
+            reported = str(getattr(ctx.instrument(continuous, AssetType.FUTURES),
                                    "current_contract", "") or "")
         except Exception as exc:                           # noqa: BLE001
             reported = f"raised: {str(exc)[:60]}"

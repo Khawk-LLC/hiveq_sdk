@@ -39,7 +39,7 @@ class SdkT10b:
         # itself should be using to size notional and PnL -- if it disagrees
         # with the report's implicit multiplier, that's the bug we're catching.
         try:
-            self.multiplier = float(ctx.instrument(SYMBOL).multiplier)
+            self.multiplier = float(ctx.instrument(SYMBOL, AssetType.FUTURES).multiplier)
         except Exception:
             self.multiplier = None
         emit_checkpoint(ctx, "t10b_metrics_validation_futures",

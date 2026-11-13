@@ -17,8 +17,8 @@ class SdkT31:
         self.s={"streams":{},"meta":{}}
         ctx.subscribe_bars(["AAPL"],asset_type=AssetType.EQUITY,interval="1m")
         ctx.subscribe_futures_trades(continuous="ES.c.0")
-        for key in ("AAPL","ES.c.0"):
-            inst=ctx.instrument(key)
+        for key,asset_type in (("AAPL",AssetType.EQUITY),("ES.c.0",AssetType.FUTURES)):
+            inst=ctx.instrument(key,asset_type)
             self.s["meta"][key]={"exists":inst is not None,
                 "multiplier":inst.multiplier if inst else None,
                 "min_tick":inst.min_tick if inst else None,

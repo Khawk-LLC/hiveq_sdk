@@ -118,7 +118,7 @@ class MultiFuturesPositionProbe:
 
         for continuous in SYMBOLS:
             actual[continuous] = float(portfolio.net_position(continuous))
-            instrument = ctx.instrument(continuous)
+            instrument = ctx.instrument(continuous, AssetType.FUTURES)
             contract = str(getattr(instrument, "current_contract", "") or "")
             resolved_contract[continuous] = contract
             resolved_actual[continuous] = (

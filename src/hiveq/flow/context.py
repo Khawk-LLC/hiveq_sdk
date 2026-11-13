@@ -286,7 +286,7 @@ class PrefetchContext:
         """
         return self._trading_day
 
-    def add_event_log(self, **kwargs):
+    def add_event_log(self, *args, **kwargs):
         """No-op during prefetch."""
         pass
 
@@ -298,7 +298,7 @@ class PrefetchContext:
         """No-op during prefetch."""
         pass
 
-    def instrument(self, symbol: str):
+    def instrument(self, symbol: str, asset_type=None):
         """Return a stub instrument for prefetch - just needs to be non-None."""
         # Return a simple object that can be stored but won't be used during prefetch
         class PrefetchInstrument:
