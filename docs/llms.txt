@@ -1352,7 +1352,7 @@ event.time_utc    -> Optional[datetime] # UTC
 
 ### 7.2 SigmaPosition
 `symbol:str` · `quantity:float`(signed) · `side:str`("LONG"|"SHORT"|"FLAT") · `avg_price:float` (aliases `entry_price`,`average_price`) · `market_value:float` · `realized_pnl:float` · `unrealized_pnl:float` · `total_pnl:float` · `day_pnl:float` · `last_price:float` · `long_notional:float` · `short_notional:float` · `max_exposure:float` · `total_fill_qty:float` · `notional:float` · `fees:float` · `is_open:bool` · `is_flat:bool` · `is_long:bool` · `is_short:bool` · `ts_event:int`
-- `avg_price` is the quantity-weighted average entry price of the position **currently held**, fees excluded — so it is `0.0` once the position closes, not the price of the trade you just exited. For that, read `avg_px` off the closing `SigmaOrder`.
+- `avg_price` is the quantity-weighted average entry price of the position **currently held** (average cost, §8.1: adds move it, reductions do not), fees excluded — so it is `0.0` once the position closes, not the price of the trade you just exited. For that, read `avg_px` off the closing `SigmaOrder`.
 - `notional` is the signed entry cost basis (`quantity × avg_price × multiplier`); `market_value` is the signed value at `last_price`.
 
 ### 7.3 SigmaOrder
@@ -1438,6 +1438,25 @@ Venue-specific optional numeric fields are `None` when the venue does not publis
 - `SigmaPortfolio` = current strategy only. `SigmaGlobalPortfolio` = summed across all strategies — except `max_drawdown`, which reports the **worst single strategy**, because drawdowns do not add (two strategies each down 5% from their own peak, at different times, did not cost the account 10%).
 - **`max_drawdown`** is a negative fraction of the equity peak, the same sign and units as the `Max Drawdown` row of `report.return_stats`. The engine folds the high-water mark in at every equity observation — each daily snapshot, and each read of `max_drawdown` / `equity` — so a drawdown that opens and closes between two observations is not captured; it is a lower bound on the true intraday figure. For the account-level number after a run, read `Max Drawdown` from `report.return_stats`.
 - **Account view** (`initial_capital` / `equity` / `cash`): tracked by the engine's cash ledger, not derived in Python. `equity` is asset-agnostic (correct for equities and futures). `cash` reflects that **futures encumber margin, not cash** — buying a future moves only fees out of `cash` (not notional), so `cash ≈ equity` for futures positions while equities reduce `cash` by the full notional. Identity: `equity == initial_capital + realized_pnl + unrealized_pnl` (minus fees). Use `equity` for percent-of-account sizing; there is no built-in `order_target_percent` — size yourself (e.g. `qty = int(pct * ctx.portfolio().equity / (price * ctx.instrument(sym).multiplier))`).
+
+### 8.1 PnL accounting (average cost)
+
+Every asset class (equities, futures, options, crypto) uses the same average-cost rules, applied per fill:
+
+| Fill | Effect on `avg_price` | Effect on `realized_pnl` |
+|---|---|---|
+| **Open** from flat / **add** in the same direction | quantity-weighted average of the held units and the fill | unchanged |
+| **Reduce** or **close** (long sold down, short bought back) | unchanged | `+= (fill_px − avg_price) × qty × multiplier` (sign flipped for a short) |
+| **Reverse** — one fill that crosses zero (long 3 → short 2 via a sell of 5) | the new side starts at the fill price | only the closed quantity (3) is realized; the newly opened quantity (2) is not |
+
+- **`realized_pnl` changes only on a fill that reduces the position.** Adding to a position never moves it — including adding after a partial exit (buy 3 @ 100, sell 1 @ 110 → realized `+10 × mult`; buy 1 @ 120 → realized still `+10 × mult`, `avg_price` becomes `(2×100 + 120)/3`).
+- **`unrealized_pnl` = `(last_price − avg_price) × quantity × multiplier`** for the units currently held (signed quantity, so a short gains when price falls). It is `0` when flat.
+- **A direct reversal and a split reversal (close to flat, then open the other side) at the same prices give identical `realized_pnl`, `unrealized_pnl` and `equity` at every step.** There is no need to split a reversal into two orders to get correct accounting.
+- `realized_pnl` and `unrealized_pnl` are **gross of fees**; `fees` are tracked separately and `equity` is net of them. A reward or return computed from changes in `equity` therefore already includes fees — do not subtract them again.
+- **Portfolio totals** (`SigmaPortfolio` / `SigmaGlobalPortfolio`) are the sum over symbols. They do not depend on net quantity, so a market-neutral book (long 3 ES / short 3 NQ, long 100 AAPL / short 100 MSFT) reports the full unrealized PnL of both legs.
+- Positions restored after a restart resume from their recovered average cost: later partial exits realize against it.
+- Per position, the trade list (`run.trades()`) still records each round trip (flat → flat, with a reversal closing one trade and opening the next) at its own entry/exit prices; it is a trade log, not the cost basis above.
+- Fixed in 0.3.24: before 0.3.24, `realized_pnl` / `equity` read **while a reversed position was still open** could be wrong (a direct reversal re-counted the closed leg; a 1-lot side of a reversal was marked at the old entry; quantities netting to zero across symbols zeroed portfolio unrealized; adding after a partial exit re-averaged units already sold). Totals once flat were always correct.
 
 ---
 
