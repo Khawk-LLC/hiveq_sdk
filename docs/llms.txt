@@ -648,7 +648,7 @@ deployment.set_params({"threshold": 0.25}, strategy=None)
 | --- | --- |
 | `params` | the deployment's **stored** values — the seed for a strategy's first run, and the record afterwards |
 | `live` | what the engine is running **right now** (Sigma stringifies every value) |
-| `drift` | the keys where the two disagree |
+| `drift` | the keys where the two disagree, compared by value — `"0.75"` / `"0.750000"` vs `0.75`, or `"true"` vs `True`, is not drift |
 | `live_available` / `live_note` | false + a reason when the engine could not be reached |
 
 Pass `live=False` to read only the stored values; that also works while the
@@ -660,8 +660,11 @@ what a container comes up on.
 
 `set_params()` pushes the change into the running engine **and** writes the
 deployment's stored configuration, so it applies immediately *and* is still in
-force after a container restart. Your `on_param_change(name, old, new)` fires for
-each one.
+force after a container restart. Your `on_param_change` fires once for each
+parameter whose value changed, after the new value is in place. Declare it like any
+other callback, `on_param_change(self, ctx, event)`, where `event.data()` is a
+`ParamChange` with `name`, `old_value` and `new_value`; the form
+`on_param_change(self, name, old, new)` is also accepted.
 
 The push is the part that lasts, so this needs the engine running. On a stopped
 deployment the stored configuration is updated but the engine never hears about
@@ -899,6 +902,7 @@ class MyStrategy:
 | `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
 | `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
 | `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
+| `on_param_change`   | `PARAM_CHANGE`   | `ParamChange` — `.name`, `.old_value`, `.new_value`. A parameter changed: `deployment.set_params()`, the viewer, or the strategy itself (`ctx.strategy_config.params[k] = v`); not when the value written is the one already held. Also accepted as `on_param_change(self, name, old, new)` |
 
 - **There is NO `on_order_filled`.** Fills are delivered to **`on_order`**; check `order.is_filled` / `order.status` / `order.last_fill`.
 - **Order lifecycle contract (FIX-style: status ≠ events).** `order.status` is the order's state; events are the history. Terminal statuses (`FILLED`/`CANCELED`/`REJECTED`) are **sticky** — later request-level events never change them. The canonical race: you cancel a resting order, but a fill lands while the cancel is in flight. You then receive **`ORDER_FILLED` first (with the fill — never lost), followed by `ORDER_CANCEL_REJECTED`** ("too late to cancel"). The order's `status` reads `FILLED` on both events. Handle it as:
