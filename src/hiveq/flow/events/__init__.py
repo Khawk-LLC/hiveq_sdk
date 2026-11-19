@@ -135,6 +135,8 @@ from .event_types import (
     OrderEvent,
     PositionEvent,
     TimerEvent,
+    ParamChange,
+    ParamChangeEvent,
 )
 
 __all__ = [
@@ -153,4 +155,6 @@ __all__ = [
     "OrderEvent",
     "PositionEvent",
     "TimerEvent",
+    "ParamChange",
+    "ParamChangeEvent",
 ]

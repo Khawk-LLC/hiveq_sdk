@@ -200,6 +200,8 @@ class EventType(Enum):
     EXECUTOR_EVENT = "EXECUTOR_EVENT"
     # Security events (Sigma-specific: rollover, open, close, etc.)
     SECURITY_EVENT = "SECURITY_EVENT"
+    # A strategy parameter changed (set_params, the viewer, or the strategy itself)
+    PARAM_CHANGE = "PARAM_CHANGE"
 
 
 class EventLogType(Enum):

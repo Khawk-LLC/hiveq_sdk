@@ -108,3 +108,21 @@ class ImbalanceEvent(Event):
     imbalance: ImbalanceData
     type: EventType = ...
     def data(self) -> ImbalanceData: ...
+
+class ParamChange:
+    """One strategy parameter change."""
+    name: str
+    old_value: Any
+    new_value: Any
+
+class ParamChangeEvent(Event):
+    """Delivered to ``on_param_change(ctx, event)`` when a parameter changes.
+
+    Fires for ``deployment.set_params()``, the viewer, and the strategy's own
+    ``ctx.strategy_config.params[name] = value``; not when the value written is
+    the one already held. The parameter is already updated when the hook runs.
+    A value that comes back from the engine can be a string -- cast it.
+    """
+    param_change: ParamChange
+    type: EventType = ...
+    def data(self) -> ParamChange: ...

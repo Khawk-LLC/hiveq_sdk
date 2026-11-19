@@ -64,4 +64,10 @@ class SecurityEvent(Event):
 class ImbalanceEvent(Event):
     ...
 
-__all__ = ['BarEvent', 'CustomDataEvent', 'Event', 'ExecutorEvent', 'ExecutorEventData', 'ImbalanceEvent', 'IndexPriceEvent', 'OrderEvent', 'PositionEvent', 'QuoteEvent', 'Rollover', 'RolloverEvent', 'SecurityEvent', 'SecurityEventData', 'SnapEvent', 'StartEvent', 'StopEvent', 'TimerEvent', 'TradeEvent']
+class ParamChange:
+    ...
+
+class ParamChangeEvent(Event):
+    ...
+
+__all__ = ['BarEvent', 'CustomDataEvent', 'Event', 'ExecutorEvent', 'ExecutorEventData', 'ImbalanceEvent', 'IndexPriceEvent', 'OrderEvent', 'ParamChange', 'ParamChangeEvent', 'PositionEvent', 'QuoteEvent', 'Rollover', 'RolloverEvent', 'SecurityEvent', 'SecurityEventData', 'SnapEvent', 'StartEvent', 'StopEvent', 'TimerEvent', 'TradeEvent']
