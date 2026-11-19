@@ -298,7 +298,15 @@ def fetch_sample(
         start = start or default_start
         end = end or default_end
     _set_date_filters(sample_filters, start, end)
-    return _read_sample_rows(dataset, schema, sample_filters, limit=limit, base_url=base_url)
+    try:
+        return _read_sample_rows(dataset, schema, sample_filters, limit=limit, base_url=base_url)
+    except DatasetCatalogError as exc:
+        if "symbol" not in str(exc):
+            raise
+        raise DatasetCatalogError(
+            f"Could not derive a sample symbol for {dataset}/{schema} from metadata; "
+            "pass one explicitly, e.g. --filters '{\"symbol\":\"AAPL\"}'."
+        ) from exc
 
 
 def _set_date_filters(filters: dict[str, Any], start: str | None, end: str | None) -> None:
@@ -370,6 +378,44 @@ def _default_sample_window(
 
 
 def _default_sample_symbols(
+    dataset: str,
+    schema: str,
+    *,
+    base_url: str | None = None,
+    limit: int = 10,
+) -> list[str]:
+    symbols = _universe_symbols(dataset, schema, base_url=base_url, limit=limit)
+    if symbols:
+        return symbols
+    # The universe index can be empty for a schema that does hold data (seen on
+    # HIVEQ_US_EQ/bars_1m). Symbols are shared across a dataset's schemas, so
+    # borrow candidates from a sibling schema instead of reading with no symbol.
+    for sibling in _dataset_schema_names(dataset, base_url=base_url):
+        if sibling == schema:
+            continue
+        symbols = _universe_symbols(dataset, sibling, base_url=base_url, limit=limit)
+        if symbols:
+            return symbols
+    return []
+
+
+def _dataset_schema_names(dataset: str, *, base_url: str | None = None) -> list[str]:
+    try:
+        payload = _request(
+            "POST",
+            "/api/metadata/v0/schemas",
+            base_url=base_url,
+            body={"dataset": [dataset]},
+        )
+    except DatasetCatalogError:
+        return []
+    entries = payload.get("data", {}).get("schemas", [])
+    if not isinstance(entries, list):
+        return []
+    return [str(e["schema_name"]) for e in entries if isinstance(e, dict) and e.get("schema_name")]
+
+
+def _universe_symbols(
     dataset: str,
     schema: str,
     *,
