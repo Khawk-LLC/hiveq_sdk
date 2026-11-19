@@ -20,7 +20,8 @@ Checks, from what the strategy saw and the platform persisted:
   * every fill is stamped at or after the clock its order was sent at;
   * every MARKET fill is priced inside the range of the first bar that ends
     after the send -- never off a bar that closed before the order existed;
-  * the clock never runs backwards across on_bar / on_timer / on_order;
+  * the clock never runs backwards across on_bar / on_timer / on_order
+    (SUBMITTED/ACCEPTED used to be stamped a bar after their own fill);
   * every order filled and the strategy ends flat.
 """
 from pathlib import Path
