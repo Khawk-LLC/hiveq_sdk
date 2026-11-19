@@ -28,7 +28,7 @@ from hiveq.flow.config import AssetType
 EXPECTED = [("size", 100, 125), ("threshold", 0.5, 0.75)]
 
 
-class _Base:
+class SdkT86Base:
     CHECKPOINT = ""
 
     def on_start(self, ctx, event):
@@ -60,7 +60,7 @@ class _Base:
         emit_checkpoint(ctx, self.CHECKPOINT, self.s)
 
 
-class SdkT86Event(_Base):
+class SdkT86Event(SdkT86Base):
     CHECKPOINT = "t86_on_param_change_ctx_event"
 
     def on_param_change(self, ctx, event):
@@ -68,7 +68,7 @@ class SdkT86Event(_Base):
         self._record(change.name, change.old_value, change.new_value)
 
 
-class SdkT86Args(_Base):
+class SdkT86Args(SdkT86Base):
     CHECKPOINT = "t86_on_param_change_name_old_new"
 
     def on_param_change(self, param_name, old_value, new_value):
