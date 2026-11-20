@@ -38,6 +38,7 @@ from .config import (
 # Authoring types (stubs / lightweight DTOs — used only inside strategy
 # callbacks, which run on the executor).
 from .trading_types import OrderSide, OrderType, OrderStatus, MarketCenter, FixTag, ExecInst, PegType
+from hiveq.flow.oms.sigma.types.multileg import MultilegLeg
 from hiveq.flow.oms.sigma.types import (
     SigmaFill as Fill,
     SigmaOrder as Order,
@@ -459,6 +460,7 @@ __all__ = [
     "FixTag",
     "ExecInst",
     "PegType",
+    "MultilegLeg",
     # logging
     "logger",
 ]

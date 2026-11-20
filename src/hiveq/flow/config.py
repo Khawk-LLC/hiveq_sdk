@@ -202,6 +202,8 @@ class EventType(Enum):
     SECURITY_EVENT = "SECURITY_EVENT"
     # A strategy parameter changed (set_params, the viewer, or the strategy itself)
     PARAM_CHANGE = "PARAM_CHANGE"
+    # Multileg (spread) package transitions -> on_multileg
+    MULTILEG = "MULTILEG"
 
 
 class EventLogType(Enum):
@@ -412,6 +414,8 @@ class BacktestConfig:
         Fee per contract for futures trades. Default: 0.5.
     crypto_fee : float, optional
         Fee per unit for crypto trades. Default: 0.00005.
+    option_fee : float, optional
+        Fee per option contract. Default: 0.65.
 
     Attributes
     ----------
@@ -449,6 +453,8 @@ class BacktestConfig:
         Futures fee per contract
     crypto_fee : float
         Crypto fee per unit
+    option_fee : float
+        Option fee per contract
 
     Examples
     --------
@@ -499,6 +505,7 @@ class BacktestConfig:
     equity_fee: float = 0.0011  # 0.11 bps per share
     futures_fee: float = 0.5    # per contract
     crypto_fee: float = 0.00005  # per unit
+    option_fee: float = 0.65     # per option contract
 
     # Publisher configuration (new)
     batch_publish_interval_minutes: float = 1.0  # Periodic publish for backtest (wall-clock)
@@ -559,6 +566,7 @@ class BacktestConfig:
             'equity_fee': self.equity_fee,
             'futures_fee': self.futures_fee,
             'crypto_fee': self.crypto_fee,
+            'option_fee': self.option_fee,
             'batch_publish_interval_minutes': self.batch_publish_interval_minutes,
             'metrics_publish_interval_minutes': self.metrics_publish_interval_minutes,
             'metrics_publish_interval_seconds': self.metrics_publish_interval_seconds,
@@ -622,6 +630,8 @@ class LiveConfig:
         Futures commission per contract. Default: 0.5
     crypto_fee : float, optional
         Crypto commission per unit. Default: 0.00005
+    option_fee : float, optional
+        Option commission per contract. Default: 0.65
     extra_config : dict, optional
         Additional configuration parameters
     instance_id : str, optional
@@ -663,6 +673,7 @@ class LiveConfig:
     equity_fee: float = 0.0011  # 0.11 bps per share
     futures_fee: float = 0.5    # per contract
     crypto_fee: float = 0.00005  # per unit
+    option_fee: float = 0.65     # per option contract
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -695,6 +706,7 @@ class LiveConfig:
             'equity_fee': self.equity_fee,
             'futures_fee': self.futures_fee,
             'crypto_fee': self.crypto_fee,
+            'option_fee': self.option_fee,
             'extra_config': self.extra_config.copy() if self.extra_config else {}
         }
 

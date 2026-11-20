@@ -4,6 +4,7 @@ from datetime import datetime as datetime
 from hiveq.flow.config import EventType as EventType
 from hiveq.flow.data.data_types import Bar as Bar, CustomData as CustomData, ImbalanceData as ImbalanceData, IndexPrice as IndexPrice, QuoteTick as QuoteTick, SnapData as SnapData, TimerEventData as TimerEventData, TradeTick as TradeTick
 from hiveq.flow.oms.sigma.types import SigmaOrder as Order, SigmaPosition as Position
+from hiveq.flow.oms.sigma.types.multileg import SigmaMultilegEvent as SigmaMultilegEvent
 from hiveq.flow.utils.timezone_utils import get_configured_timezone as get_configured_timezone, nanos_to_local_datetime as nanos_to_local_datetime
 from typing import Any
 
@@ -126,3 +127,15 @@ class ParamChangeEvent(Event):
     param_change: ParamChange
     type: EventType = ...
     def data(self) -> ParamChange: ...
+
+class MultilegEvent(Event):
+    """Delivered to ``on_multileg(ctx, event)`` for every transition of a
+    package placed with ``ctx.place_multileg_order``. ``event.data()`` is a
+    ``SigmaMultilegEvent``: ``event_type`` (NEW_REQUEST, ACCEPTED, LEG_FILL,
+    PARTIALLY_FILLED, FILLED, REPLACE_REQUEST, REPLACED, REPLACE_REJECTED,
+    CANCEL_REQUEST, CANCELLED, CANCEL_REJECTED, REJECTED), the package snapshot
+    ``order``, and for LEG_FILL the leg fill (already in the leg's position).
+    """
+    multileg_event: SigmaMultilegEvent
+    type: EventType = ...
+    def data(self) -> SigmaMultilegEvent: ...

@@ -137,6 +137,7 @@ from .event_types import (
     TimerEvent,
     ParamChange,
     ParamChangeEvent,
+    MultilegEvent,
 )
 
 __all__ = [
@@ -157,4 +158,5 @@ __all__ = [
     "TimerEvent",
     "ParamChange",
     "ParamChangeEvent",
+    "MultilegEvent",
 ]

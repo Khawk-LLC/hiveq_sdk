@@ -11,6 +11,9 @@ from hiveq.flow.oms.sigma.types.snap import SigmaSnapData
 from hiveq.flow.oms.sigma.types.custom_data import SigmaCustomData
 from hiveq.flow.oms.sigma.types.trade_stats import SigmaTradeStats
 from hiveq.flow.oms.sigma.types.executor import SigmaExecutor
+from hiveq.flow.oms.sigma.types.multileg import (
+    MultilegLeg, SigmaMultilegLegState, SigmaMultilegOrder, SigmaMultilegEvent,
+)
 
 __all__ = [
     "SigmaOrder",
@@ -25,4 +28,8 @@ __all__ = [
     "SigmaCustomData",
     "SigmaTradeStats",
     "SigmaExecutor",
+    "MultilegLeg",
+    "SigmaMultilegLegState",
+    "SigmaMultilegOrder",
+    "SigmaMultilegEvent",
 ]

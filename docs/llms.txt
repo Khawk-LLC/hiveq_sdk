@@ -21,11 +21,11 @@ Reference appendix rather than guessing — the platform fetches the data at run
 | 2 | Credentials — first-run browser sign-in (`hiveq login`), what NOT to do when generating deliverable code. **Nothing below works before this**: every entry point, the function registry and LiveSim all authenticate with the key it mints. |
 | 3 | Entry points (module `hiveq.flow`) — `run_backtest` / `deploy_livesim`, engine config via `**kwargs` (§3.1), the function registry / remote functions (§3.2), LiveSim deployment and prior-day LiveSim data via `livesim_history` (§3.3), extra Python packages via `requirements=` (§3.4). |
 | 4 | Strategy contract — the class shape (`__init__`/`on_start`/`on_bar`/`on_order`/...), lifecycle facts (init-once, on_start-per-calendar-day). |
-| 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION). Largest section — by far the most common single lookup. |
+| 5 | Context API — `ctx` (`SigmaContext`): subscriptions, order placement + sizing helpers, order management, position/order queries, portfolio accessors, instrument, time, timers, event logging, executors (POV/TWAP/VWAP/AUCTION), multileg (spread) orders (§5.3.1). Largest section — by far the most common single lookup. |
 | 6 | The `Event` object — the small wrapper every callback receives. |
-| 7 | Event payloads — what `event.data()` returns, per `event.type`. The field tables (SigmaBar, SigmaPosition, SigmaOrder, SigmaFill, SigmaTradeTick, SigmaQuoteTick, SigmaSnapData, TimerEventData, SigmaCustomData, SigmaInstrument, IndexPrice, Rollover, EXECUTOR_EVENT/SECURITY_EVENT). |
+| 7 | Event payloads — what `event.data()` returns, per `event.type`. The field tables (SigmaBar, SigmaPosition, SigmaOrder, SigmaFill, SigmaTradeTick, SigmaQuoteTick, SigmaSnapData, TimerEventData, SigmaCustomData, SigmaInstrument, IndexPrice, Rollover, EXECUTOR_EVENT/SECURITY_EVENT, SigmaMultilegEvent/SigmaMultilegOrder). |
 | 8 | Portfolio API — `SigmaPortfolio` / `SigmaGlobalPortfolio` shared surface. |
-| 9 | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers. |
+| 9 | `data_configs` schema — `type='hiveq_historical'` and `type='csv'`, dataset/schema catalog pointers; §9.4 the backtest fill model (which bar fills an order, when acks arrive, bar vs tick mode). |
 | 10 | Results — `Run` handle, `report()`, `positions()`/`trades()`/`tearsheet()`/`event_logs()`/`logs()`, quantstats, phantom-PnL canary checks. |
 | 11 | Remote deploy + observability (`hiveq.flow.jobs`) — generic `submit`/observe, plus `deploy_job` (§11.6) for deploying an arbitrary fetch/compute/publish script with `requirements` and a recurring `Schedule`; training jobs (§11.7): the 5 MiB request limit, training-data uploads and reusing data by input id. |
 | 12 | Enums — exact members and `.value` strings. |
@@ -902,6 +902,7 @@ class MyStrategy:
 | `on_rollover` | `ROLLOVER` | `Rollover` (§7.12) |
 | `on_executor` | `EXECUTOR_EVENT` | executor payload (opaque; §7.13) |
 | `on_security_event` | `SECURITY_EVENT` | security payload (opaque; §7.13) |
+| `on_multileg` | `MULTILEG` | `SigmaMultilegEvent` (§7.15) — every transition of a package placed with `ctx.place_multileg_order` (§5.3.1); leg fills are **not** sent to `on_order` |
 | `on_param_change`   | `PARAM_CHANGE`   | `ParamChange` — `.name`, `.old_value`, `.new_value`. A parameter changed: `deployment.set_params()`, the viewer, or the strategy itself (`ctx.strategy_config.params[k] = v`); not when the value written is the one already held. Also accepted as `on_param_change(self, name, old, new)` |
 
 - **There is NO `on_order_filled`.** Fills are delivered to **`on_order`**; check `order.is_filled` / `order.status` / `order.last_fill`.
@@ -1189,6 +1190,104 @@ ctx.get_order_state(order_id: str) -> Optional[OrderState]
 ```
 The `modify_order` boolean reports whether the request was accepted for processing, not its final exchange/engine outcome. `quantity` is the new absolute order quantity and is passed to Sigma unchanged; it is not a delta or adjustment. Confirm success in `on_order` from `ORDER_UPDATED`; handle `ORDER_MODIFY_REJECTED` and inspect `SigmaOrder.reject_reason` for a rejected request. Do not stack another replace for the same order while the first replace is pending. The replace is built from the original order: its order type, peg type, side, stop price, market center and account carry over, and only the fields you pass change (a modified mid-peg stays a mid-peg). Whether `custom_fix_params` go out again on the replace depends on the venue adapter: Instinet uses only its route tags (`57` / `1100`) on any message; DASH and CQG resend them all (a DASH DMA replace needs `9000=FASTDMA` and the same `10100` again).
 
+### 5.3.1 Multileg (spread) orders — `place_multileg_order`
+
+A multileg order is one **package**: 2..12 legs that fill together at one net
+price (verticals, butterflies, condors, calendars, ratio spreads). It has one
+package id; legs cannot be cancelled or modified on their own.
+
+```python
+ctx.place_multileg_order(legs: list[hf.MultilegLeg], net_price: float, quantity: float,
+                         order_type: OrderType = OrderType.LIMIT,
+                         time_in_force: str = "DAY") -> Optional[str]     # package id, None if refused
+ctx.modify_multileg_order(package_id: str, net_price: float = None, quantity: float = None) -> bool
+ctx.cancel_multileg_order(package_id: str) -> bool
+ctx.cancel_all_multileg_orders() -> None
+ctx.has_open_multileg_order() -> bool
+
+hf.MultilegLeg(symbol: str, side: OrderSide, ratio: int = 1, open_close: str = 'O')
+```
+
+- **Legs.** `symbol` is the leg contract — for options the OCC ticker from the
+  snapshot, `snap.chain` (§7.7). `side` is the leg's side for **one** package;
+  `ratio` is that leg's contracts per package. `open_close` is `'O'` (opening)
+  or `'C'` (closing); option venues require it, the backtest simulator ignores it.
+- **`net_price`** is per package: Σ over legs of `ratio × price`, BUY legs `+`,
+  SELL legs `−`. **Positive = debit** (you pay at most this), **negative =
+  credit** (you receive at least `abs(net_price)`). It must be non-zero for
+  LIMIT and on the legs' tick (SPXW: 0.05). The package fills when the legs'
+  touch prices (ask for BUY legs, bid for SELL legs) sum to `net_price` or better.
+- **`quantity`** counts whole packages (fractional is refused). Leg contracts =
+  `quantity × ratio`. Ratios are reduced before sending: legs 2:2 × 1 go out as
+  1:1 × 2 with the net price halved.
+- **`time_in_force`**: `"DAY"` (default) / `"GTC"` rest until filled or
+  cancelled; `"IOC"` fills what is available now and cancels the rest; `"FOK"`
+  fills the whole quantity now or nothing. `order_type=OrderType.MARKET` is
+  accepted by the simulator but refused by option venues (Silexx) — use LIMIT.
+- **Return values** say the request was *sent*. The outcome arrives on
+  `on_multileg` (§7.15): `ACCEPTED`, one `LEG_FILL` per leg per execution, then
+  `PARTIALLY_FILLED` / `FILLED`, or `CANCELLED` / `REJECTED`. A modify answers
+  with `REPLACED` / `REPLACE_REJECTED`; send the next modify only after that.
+  `modify_multileg_order` changes net price and/or quantity only (not the legs),
+  never below what has filled.
+- **Events can arrive before the call returns.** In a backtest a marketable
+  package is accepted and filled *inside* `place_multileg_order`, so
+  `on_multileg` sees `NEW_REQUEST` … `FILLED` before you have the returned id.
+  Set your own state (e.g. "entering") **before** calling, and take the id from
+  the `NEW_REQUEST` event if you need it in the callback. Track the package
+  from its events: keep the latest `ev.order` (status, `is_open`,
+  `pending_replace`, filled quantities) and re-price only while it is open
+  and no replace is pending — a filled package cannot be modified
+  (`modify_multileg_order` returns `False`).
+- **Positions and P&L are per leg.** Each `LEG_FILL` is booked to that leg's
+  position before `on_multileg` runs, and fires the leg's `on_position` event
+  like any fill: `ctx.net_position(leg_symbol)`, `ctx.portfolio()` and the run
+  report see the legs. A spread's P&L is the sum of its legs.
+- **Stop.** Open packages are cancelled when the strategy stops.
+- **Report.** With `BacktestConfig(export_orders_csv=True)` each leg appears in
+  `report.orders` / `report.fills` as its own order, id `<package_id>:<leg>`,
+  `order_type` `MULTILEG`.
+- **Not supported yet:** executors (`add_executor`) cannot work packages;
+  options with only snapshot quotes have no trade-based mark, so P&L is
+  realised when the legs close (or settle at expiry, 0DTE).
+- **Availability:** needs an engine runtime with multileg support (the PySigma
+  release that ships it). On an older runtime these calls fail with
+  `AttributeError` on `sendMultilegOrder`.
+
+**Backtest fill model** (paper broker, any NBBO source — options `snaps_1s`
+included): a package is checked on every quote of any of its legs. It fills at
+each leg's touch, atomically across legs, in whole packages; the size is the
+smallest `displayed size / ratio` over the legs, and a displayed quote is
+consumed once (not refilled until it changes). No queue position, and no
+interaction with resting single-leg orders.
+
+```python
+class CallVertical:
+    def on_start(self, ctx, event):
+        ctx.subscribe_option_snaps('SPXW', expiration_type='0dte', interval='1s')
+        self.quotes, self.pkg = {}, None
+
+    def on_snap(self, ctx, event):
+        s = event.data()
+        self.quotes[(s.option_type, s.strike)] = s
+        lo, hi = self.quotes.get(('C', 7150.0)), self.quotes.get(('C', 7160.0))
+        if self.pkg is None and lo and hi:
+            debit = round(lo.ask_px - hi.bid_px, 2)          # natural: buy at ask, sell at bid
+            self.pkg = ctx.place_multileg_order(
+                [hf.MultilegLeg(lo.chain, hf.OrderSide.BUY), hf.MultilegLeg(hi.chain, hf.OrderSide.SELL)],
+                net_price=debit, quantity=2)
+
+    def on_multileg(self, ctx, event):
+        ev = event.data()                                     # SigmaMultilegEvent (§7.15)
+        if ev.is_leg_fill:
+            logger.info(f"{ev.symbol} {ev.side.value} {ev.fill_qty:g} @ {ev.fill_price}")
+        elif ev.event_type == 'FILLED':
+            logger.info(f"package {ev.package_id} filled {ev.order.filled_qty:g}")
+```
+A full strategy (SPXW 0DTE iron condor: entry at mid walked toward the
+natural, profit target / stop / time exit as the reverse package) is in
+hiveq-flow `examples/bt/multileg_spxw_iron_condor.py`.
+
 ### 5.4 Position / order queries
 ```python
 ctx.net_position(symbol: str) -> float          # signed; + long, - short, 0 flat
@@ -1350,6 +1449,7 @@ event.time_utc    -> Optional[datetime] # UTC
 | `IMBALANCE` | `ImbalanceData` | 7.14 |
 | `EXECUTOR_EVENT` | executor lifecycle payload (opaque) | 7.13 |
 | `SECURITY_EVENT` | security/reference payload (opaque) | 7.13 |
+| `MULTILEG` | `SigmaMultilegEvent` | 7.15 |
 
 ### 7.1 SigmaBar
 `symbol:str` · `open:float` · `high:float` · `low:float` · `close:float` · `volume:float` · `interval:str`(human-readable: `'1d'` / `'1m'` / `'1s'` — matches the available bar schemas; no `'1h'`) · `interval_millis:int`(`86400000` / `60000` / `1000`) · `ts_event:int(ns, close)` · `ts_init:int(ns, open)` · `time:datetime?` · `time_utc:datetime?`
@@ -1417,6 +1517,17 @@ Venue-specific optional numeric fields are `None` when the venue does not publis
 `symbol:str` · `side:str`(venue imbalance state) · `imbalance:float`(shares; signed for NYSE) · `paired_shares:float` · `ref_price:float?` · `near_price:float?` · `far_price:float?` · `clearing_price:float?`(NYSE) · `cont_book_clearing_price:float?` · `closing_only_clearing_price:float?` · `market_imbalance:float?`(Arca) · `cross_type:str?`('O'/'C'/'A', Nasdaq; venue code) · `transaction_type:str?` · `exchange:str?` · `ts_event:int(ns)` · `ts_init:int(ns)` · `time:datetime?` · `time_utc:datetime?`
 
 ---
+
+### 7.15 SigmaMultilegEvent / SigmaMultilegOrder  (`on_multileg`, §5.3.1)
+Plain snapshots — safe to keep after the callback.
+
+**SigmaMultilegEvent**: `event_type:str` (`NEW_REQUEST` `ACCEPTED` `LEG_FILL` `PARTIALLY_FILLED` `FILLED` `REPLACE_REQUEST` `REPLACED` `REPLACE_REJECTED` `CANCEL_REQUEST` `CANCELLED` `CANCEL_REJECTED` `REJECTED`) · `order:SigmaMultilegOrder` (package state after this event) · `package_id:str` · `text:str` (reason on cancel/reject) · `ts_event:int(ns)` · `is_leg_fill:bool` · `is_terminal:bool` (FILLED/CANCELLED/REJECTED). LEG_FILL only (else `None`): `leg_ref_id:str` (`L1`…) · `symbol:str` · `side:OrderSide` · `fill_qty:float` (contracts) · `fill_price:float` · `exec_id:str`.
+
+**SigmaMultilegOrder**: `package_id:str` · `clordid:str` · `account:str` · `net_price:float` (+debit/−credit, per package) · `quantity:float` · `filled_qty:float` · `leaves_qty:float` (packages) · `status:str` (`PENDING_NEW` `NEW` `PARTIALLY_FILLED` `FILLED` `CANCELLED` `REJECTED`) · `is_open:bool` · `is_filled:bool` · `pending_replace:bool` · `pending_cancel:bool` · `text:str` · `legs:tuple[SigmaMultilegLegState]`.
+
+**SigmaMultilegLegState**: `leg_ref_id:str` · `symbol:str` · `side:OrderSide` · `ratio:int` · `open_close:str` · `filled_qty:float` (contracts) · `avg_price:float`.
+
+Order of events for one execution: one `LEG_FILL` per leg (the last one already shows `status` FILLED / PARTIALLY_FILLED), then `FILLED` or `PARTIALLY_FILLED`. Each package ends with exactly one of `FILLED`, `CANCELLED`, `REJECTED`. `cancel_multileg_order` / `modify_multileg_order` return `False` when the package is no longer open (already filled or cancelled), before `ACCEPTED`, or while a cancel is pending. Live, a cancel that races a venue fill gets the fills first (booked), then `CANCEL_REJECTED`.
 
 ## 8. Portfolio API  (`SigmaPortfolio` and `SigmaGlobalPortfolio` share this surface)
 
@@ -1694,6 +1805,29 @@ hiveq-data -l signals
 
 ### 9.3 Behavior derived from schema/dataset
 See §A.4 in the Data Reference appendix (fill mode, futures session defaults, options snapshot handling).
+
+### 9.4 Backtest fill model — bar mode vs tick mode
+
+The subscribed data selects how the paper broker fills orders (§A.3): **bar mode** when the strategy has bars only (`bars_1s` / `bars_1m` / `bars_1d`), **tick mode** when it has trades (`eq_trades` / `fut_trades`).
+
+**Bar timestamps.** A bar is stamped at its **end**: the bar covering 09:30:00–09:31:00 has `ts_event` = 09:31:00 and reaches `on_bar` at 09:31:00. That instant is also the start of the next bar.
+
+**Bar mode — which bar fills an order.** An order fills at the **open of the first bar that starts at or after the moment it was sent**. The fill's `ts_event` is that bar's **start**.
+
+| Order sent at (ET) | Bar in progress | Fill price | Fill `ts_event` |
+|---|---|---|---|
+| 09:30:00.000 — inside `on_bar` for the 09:29–09:30 bar, or a timer exactly on the minute | none (09:30–09:31 starts now) | open of 09:30–09:31 | 09:30:00 |
+| 09:30:00.001 – 09:30:59.999 | 09:30–09:31 (already started) | open of 09:31–09:32 | 09:31:00 |
+| 09:31:00.000 | none (09:31–09:32 starts now) | open of 09:31–09:32 | 09:31:00 |
+
+- The rule is the same whichever callback sent the order (`on_bar`, `on_timer`, `on_custom_data`/signals). An order never fills off a bar that started before it existed.
+- **Orders sent from `on_bar` fill in the same step.** An order sent while handling the bar that ends at 09:30:00 fills at the 09:30–09:31 open, and `on_order` delivers the fill at 09:30:00, right after `on_bar` returns. The strategy sees the fill before it sees anything else about the 09:30–09:31 bar: that bar's high, low and close arrive in `on_bar` at 09:31:00. This is the standard "next bar's open" fill. It assumes the order arrives in time for the bar's opening trade, with no delay.
+- **Acks are delivered with the fill.** A MARKET order is acknowledged when it is processed against market data, not when it is sent: `ORDER_SUBMITTED`, `ORDER_ACCEPTED` and `ORDER_FILLED` reach `on_order` together, all stamped with the fill time. In bar mode that is the next bar boundary, so an order sent at 09:30:01 hears nothing until 09:31:00, about a minute later. Logic that waits for `ORDER_ACCEPTED` before acting (cancel/replace, the next leg) sees that whole delay in bar mode; in tick mode it is milliseconds.
+- **No queue, size impact or slippage.** Every MARKET order eligible for a bar fills at that bar's open, whatever its size and however many there are. The price is the bar's open as recorded and is not rounded to the tick size, so equities can show sub-penny prices (e.g. `241.6612`).
+- **Same-instant ordering.** On a minute boundary, `on_timer` runs before `on_bar` for the bar that just ended. Orders processed in the same step are not guaranteed to reach `on_order` in the order they were sent; match fills by `order.order_id`, never by arrival order.
+- Daily bars (`bars_1d`) follow a different path: an order sent in `on_bar` of day T fills at day T's close.
+
+**Tick mode.** Orders are processed against the recorded trade stream, including the bid/ask carried on it, after the paper broker's simulated execution latency (20 ms by default). A MARKET buy fills at the ask and a sell at the bid as of the fill time, not at a trade print; fills typically land a few tens of milliseconds after the send (AAPL at the open: 33 ms and 77 ms). `ORDER_SUBMITTED` / `ORDER_ACCEPTED` / `ORDER_FILLED` arrive together, stamped with the fill time. Use tick mode when callback timing or intra-minute prices matter. Adding a bars schema next to a trades schema keeps tick fills: bars then only drive `on_bar`.
 
 ---
 
@@ -2084,7 +2218,7 @@ from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMST
 from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter, PegType, FixTag, ExecInst
 ```
 
-**EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED ORDER_PARTIALLY_FILLED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER IMBALANCE EXECUTOR_EVENT SECURITY_EVENT`
+**EventType** (`.value` == name): `START STOP BAR BAR_1_MIN BAR_5_MIN BAR_15_MIN BAR_30_MIN BAR_1_HOUR BAR_1_DAY TICK TRADE QUOTE SNAP ORDER ORDER_SUBMITTED ORDER_ACCEPTED ORDER_REJECTED ORDER_FILLED ORDER_CANCELED ORDER_DENIED ORDER_EMULATED ORDER_EXPIRED ORDER_INITIALIZED ORDER_PENDING_CANCEL ORDER_PENDING_UPDATE ORDER_UPDATED ORDER_TRIGGERED ORDER_RELEASED ORDER_CANCEL_REJECTED ORDER_MODIFY_REJECTED ORDER_PARTIALLY_FILLED POSITION POSITION_OPENED POSITION_CHANGED POSITION_CLOSED CUSTOM_DATA TIMER INDEX_PRICE ROLLOVER IMBALANCE EXECUTOR_EVENT SECURITY_EVENT PARAM_CHANGE MULTILEG`
 
 **AssetType**: `EQUITY OPTIONS FUTURES CRYPTO INDEX`
 
@@ -2167,6 +2301,7 @@ e.g. `StrategyConfig(name=..., type=..., params={'rolloverExecutorType': 'TWAP',
 | `equity_fee` | float | 0.0011 (per share) |
 | `futures_fee` | float | 0.5 (per contract) |
 | `crypto_fee` | float | 0.00005 |
+| `option_fee` | float | 0.65 (per option contract; multileg legs are charged per leg contract) |
 | `session_start` / `session_end` | Optional[str] | None → applies asset defaults: equity **04:00–18:30 ET**, futures **18:00–17:00 ET**. Override with these (ET "HH:MM", R6). Keep `session_end` past 16:00 for equities so MOC/closing-cross orders fill. |
 | `enable_auto_rollover` | bool | False |
 | `auto_flatten_at_close` | bool | False (§15 — force-closes non-option positions at session close; options always settle automatically regardless) |
@@ -2193,6 +2328,7 @@ from hiveq.flow import StrategyConfig, BacktestConfig, EngineConfig, Context, ge
 from hiveq.flow.runs import Run
 from hiveq.flow.config import EventType, AssetType, DataType, EventLogType, OMSType
 from hiveq.flow.trading_types import OrderType, OrderSide, OrderStatus, MarketCenter
+from hiveq.flow import MultilegLeg                 # spread legs for ctx.place_multileg_order (§5.3.1)
 from hiveq.flow.trading.price_utils import adjust_tick_size, get_min_tick   # round your own limit/stop prices (§5.2)
 from hiveq.flow.utils.date_calendar import TradingCalendar   # trading-day / session helpers (US-only today)
 from hiveq.flow.jobs import submit, poll_result, get_status, get_logs, get_logs_gz, get_result, get_client, TaskType
@@ -2325,6 +2461,7 @@ schemas = meta.get_schemas(dataset='HIVEQ_US_EQ')
 - **Match the order mechanism to the need:** a single immediate market order or a signal backtest → direct `buy_order`/`sell_order` (§5.2). Sizeable/sliced orders, live order-chasing/replaces, or auction routing → an **executor** (§5.10/§16.6), which owns slicing/replaces/cancels/fill-aggregation. Don't wrap a one-shot order in an executor; don't hand-roll replace/retry logic when one fits. With executors, hold one handle per target and `replace_executor_params_by_id` to re-target — never `add_executor` a duplicate.
 - `event.data()` is untyped — use §7.0 to know the concrete type for the branch you are in.
 - `ts_event`/`ts_init` are **nanoseconds (int)**, not seconds. Use `.time`/`.time_utc` for datetime, or `ctx.trading_day` for the date.
+- **Bar-mode fills are at the next bar's open, and acks come with the fill.** An order sent mid-bar fills at the open of the next bar (up to a minute later), and its `ORDER_SUBMITTED`/`ORDER_ACCEPTED` arrive only then, together with `ORDER_FILLED`. An order sent exactly on a minute boundary — including from `on_bar` — fills at the open of the bar starting then. See §9.4; use trades (tick mode) when that matters.
 - Do not place orders in `EventType.STOP` / `on_stop` — they are rejected (engine already STOPPED).
 - **No MARKET orders in pre-market or after-hours — they are rejected.** Use LIMIT with an explicit `limit_price` and `time_in_force="GTX"`, and call the base order methods: the sizing helpers can't set GTX (§5.2).
 - **A LiveSim restart brings back positions, not orders.** After a container restart the last known positions are loaded back (already there in `on_start`); order history and working orders are not kept. To change a position by hand, contact HiveQ ops (§3.3, *Positions after a container restart*).
@@ -2678,7 +2815,7 @@ populated physical table for that date.
 
 ## A.3 Behavior derived from dataset/schema
 
-- schema containing `bar` → bar-based fills; schema with `trade` → tick-based fills.
+- schema containing `bar` → bar-based fills; schema with `trade` → tick-based fills (a trades schema wins when both are present). Timing and pricing of each: §9.4.
 - `dataset='HIVEQ_US_EQ'` → equity session defaults (**04:00–18:30 ET**) applied automatically. The window opens at pre-market and runs past the 16:00 close **on purpose**: a resting MOC / closing-cross order fills against the official close print (`MCOfficialClose`, ~16:00:00.1x ET) instead of being cancelled at session end. Narrow or widen it via `BacktestConfig(session_start=..., session_end=...)`.
 - `dataset='HIVEQ_US_FUT'` → futures session defaults (18:00–17:00 ET) applied automatically.
 - `dataset='HIVEQ_US_OPT'` + `snaps_*` schema → options snapshot handling.
