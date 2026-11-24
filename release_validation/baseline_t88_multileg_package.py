@@ -194,7 +194,7 @@ if __name__ == "__main__":
         end_date="2026-04-24",
         data_configs=[{"type": "hiveq_historical", "dataset": "HIVEQ_US_OPT", "schema": ["snaps_1s"]}],
         backtest_config=BacktestConfig(session_start="10:00", session_end="10:10",
-                                       option_fee=OPTION_FEE, export_orders_csv=True),
+                                       option_fee=OPTION_FEE),
     )
     s = completed_checkpoint(run, NAME)
     ev, fills, limits = s["events"], s["leg_fills"], s["limits"]

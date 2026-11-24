@@ -36,7 +36,7 @@ NAME = "t85_pnl_accounting_matrix"
 DATE = "2026-06-01"
 ES, NQ, AAPL, SPXW = "ES.c.0", "NQ.c.0", "AAPL", "SPXW"
 INITIAL = 1_000_000.0
-FEES = {"FUTURES": 1.25, "EQUITY": 0.005, "OPTIONS": 0.0}   # per contract / share
+FEES = {"FUTURES": 1.25, "EQUITY": 0.005, "OPTIONS": 0.65}  # per contract / share
 TOL = 0.01                                                   # dollars
 BAR_STEP, SNAP_STEP = 6, 60      # ticks between steps: 6 x 1m bars, 60 x 1s snaps
 
@@ -239,9 +239,9 @@ if __name__ == "__main__":
         data_configs=[{"type": "hiveq_historical", "dataset": d, "schema": [s]} for d, s in schemas],
         backtest_config=BacktestConfig(initial_capital=INITIAL, commission=0.0, slippage=0.0,
                                        futures_fee=FEES["FUTURES"], equity_fee=FEES["EQUITY"],
+                                       option_fee=FEES["OPTIONS"],
                                        session_start="09:30", session_end="11:00",
-                                       auto_flatten_at_close=False, enable_auto_rollover=False,
-                                       export_orders_csv=True))
+                                       auto_flatten_at_close=False, enable_auto_rollover=False))
     checks, detail = {}, {}
     for n, (scenario, (_, plan)) in enumerate(SCENARIOS.items()):
         name = f"{NAME}:{scenario}"
