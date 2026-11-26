@@ -206,8 +206,13 @@ if __name__ == "__main__":
     leg_rows = []
     if orders is not None and len(orders):
         ids = {str(v) for v in s.get("ids", {}).values()}
-        col = "OrderID" if "OrderID" in orders.columns else "order_id"
-        leg_rows = [str(i) for i in orders[col] if ":" in str(i) and str(i).split(":")[0] in ids]
+        # The persisted orders table carries the leg id ("<package_id>:L1") in
+        # client_order_id; OrderID/order_id only exist on local/event frames.
+        col = next((c for c in ("client_order_id", "OrderID", "order_id")
+                    if c in orders.columns), None)
+        if col is not None:
+            leg_rows = [str(i) for i in orders[col]
+                        if ":" in str(i) and str(i).split(":")[0] in ids]
 
     finish(NAME, {
         "snap_data_present": s["snaps"] > 0,
