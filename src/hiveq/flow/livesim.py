@@ -287,6 +287,68 @@ class Deployment:
             for entry in (data.get("strategies") or [])
         }
 
+    # --- clone -------------------------------------------------------------
+
+    def clone(
+        self,
+        instance_name: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        strategy: Optional[str] = None,
+        container_id: Optional[str] = None,
+        on_behalf_of_user_id: Optional[str] = None,
+        wait: bool = False,
+    ) -> "Deployment":
+        """Deploy this running instance again under a new name.
+
+        A shortcut for redeploying by hand: the clone runs the same strategy
+        code and data sources, starting from the instance's *current* params
+        (including changes made with :meth:`set_params`), with ``params``
+        merged on top. Returns the new :class:`Deployment`.
+
+        ``instance_name`` is required and must differ from the source (and be
+        unused on the container it lands on). ``strategy`` picks which
+        instance to clone when the deployment runs more than one.
+        ``container_id`` pins placement (needs ``livesim:select_target``);
+        omit it and the platform routes the clone like any deploy.
+
+        The clone belongs to the source instance's owner. Cloning someone
+        else's instance -- or passing ``on_behalf_of_user_id`` -- deploys on
+        that user's behalf, which needs a system admin or an organization
+        owner, admin or manager.
+
+            es2 = deployment.clone("ES_MM_2", params={"spread": 2.5})
+            es2.wait()
+        """
+        if not self.deployment_id:
+            raise LivesimError(
+                400, {"error": {"message": "deployment has no deployment_id"}}
+            )
+        if not instance_name or not instance_name.strip():
+            raise ValueError("clone needs a new instance_name")
+        body: Dict[str, Any] = {"instance_name": instance_name.strip()}
+        if params:
+            body["params"] = params
+        if strategy:
+            body["instance_to_clone"] = strategy
+        if container_id:
+            body["target"] = {"container_id": container_id}
+        if on_behalf_of_user_id:
+            body["on_behalf_of_user_id"] = on_behalf_of_user_id
+        accepted = _call(
+            "POST", f"/deployments/{self.deployment_id}/clone", json=body
+        )
+        clone = Deployment(
+            asset=accepted.get("asset"),
+            container_id=accepted.get("container_id"),
+            deployment_id=accepted.get("deployment_id"),
+            operation_id=accepted.get("operation_id"),
+            strategies=accepted.get("instance_names") or [],
+        )
+        if wait:
+            clone.wait()
+        return clone
+
     # --- data --------------------------------------------------------------
 
     def orders(self, **kwargs) -> Any:
@@ -469,6 +531,7 @@ def deploy_livesim(
     instance_name: Optional[str] = None,
     container_id: Optional[str] = None,
     parameter_overrides: Optional[List[dict]] = None,
+    on_behalf_of_user_id: Optional[str] = None,
     wait: bool = False,
     **kwargs,
 ) -> Deployment:
@@ -492,6 +555,11 @@ def deploy_livesim(
     container_id : str, optional
         Pin placement. Needs the ``livesim:select_target`` permission; omit and
         the platform routes to an eligible container.
+    on_behalf_of_user_id : str, optional
+        Deploy for another member of your organization. The deployment, its
+        published rows and its stored strategy belong to that user; you are
+        recorded as ``deployed_by``. Needs a system admin or an organization
+        owner, admin or manager.
     wait : bool
         Block until the deployment settles before returning.
     """
@@ -545,6 +613,8 @@ def deploy_livesim(
         body["target"] = {"container_id": container_id}
     if parameter_overrides:
         body["parameter_overrides"] = parameter_overrides
+    if on_behalf_of_user_id:
+        body["on_behalf_of_user_id"] = on_behalf_of_user_id
 
     accepted = _call("POST", "/deployments", json=body)
     deployment = Deployment(

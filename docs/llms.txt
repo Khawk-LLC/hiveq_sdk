@@ -288,6 +288,7 @@ deploy_livesim(                                 # deploy straight to LiveSim —
     instance_name: Optional[str] = None,        # defaults to the strategy's name
     container_id: Optional[str] = None,         # needs livesim:select_target; omit to auto-route
     parameter_overrides: Optional[list[dict]] = None,
+    on_behalf_of_user_id: Optional[str] = None, # deploy FOR an org member (ops); §3.3
     wait: bool = False,                         # block until it settles
     **kwargs,
 ) -> Deployment                                 # handle addressed by deployment_id (§3.3)
@@ -684,6 +685,40 @@ strategy changing its own params, or a change made anywhere other than
 `set_params()` or the viewer. The engine's values are the ones in force, and they
 survive a restart; `drift` is how you see that the stored record no longer
 describes what is running.
+
+#### Clone  (run an instance again under a new name)
+
+```python
+clone = deployment.clone(
+    "ES_MM_2",                        # REQUIRED new instance name; must differ from the source
+    params={"spread": 2.5},           # optional: changes merged over the current params
+    strategy=None,                    # which instance, when the deployment runs several
+    container_id=None,                # needs livesim:select_target; omit to auto-route
+    on_behalf_of_user_id=None,        # see "Deploying for another user" below
+    wait=False,
+)                                     # -> a new Deployment
+```
+
+A shortcut for redeploying by hand. The platform reuses the instance's stored
+strategy code and data sources, and starts the clone from its **stored** params
+(what `set_params()` and the viewer write) with `params` merged on top — only
+the keys you pass change. The source keeps running; the clone is a separate
+deployment with its own `deployment_id`. The name must be unused on the
+container the clone lands on (409 otherwise). The same action is the **Clone**
+item in the strategy monitor's `...` menu.
+
+The clone belongs to the **source instance's owner**. Cloning your own instance
+needs nothing extra; cloning someone else's is a deploy on their behalf (below).
+
+#### Deploying for another user  (ops)
+
+`deploy_livesim(..., on_behalf_of_user_id=USER_ID)` and
+`deployment.clone(..., on_behalf_of_user_id=USER_ID)` deploy a strategy **for**
+another member of your organization. The deployment, its published rows and its
+stored strategy belong to that user — they control it as if they had deployed
+it — and you are recorded only as `deployed_by`. Allowed for a system admin or an
+organization **owner, admin or manager**, for members of their own organization;
+anyone else gets 403. Not available on a remote LiveSim host yet.
 
 #### Data  (always a pull, never a stream)
 
